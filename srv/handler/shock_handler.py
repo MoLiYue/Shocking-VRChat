@@ -86,6 +86,65 @@ class ShockHandler(BaseHandler):
         ret += ["{:02X}".format(min(max(from_ + delta*i, 0),100)) for i in range(1,5,1)]
         ret = ''.join(ret)
         return json.dumps([ret],separators=(',', ':'))
+
+    @staticmethod
+    def generate_wave_100ms_improved(freq, from_, to_, *, steps=4, curve="smoothstep"):
+        """
+        Generate a 100ms DG wave (4x25ms sub-steps by default).
+        Returns wavestr: JSON string like ["0A0A0A0A14191E23"]
+
+        freq: int (0-255, but DG commonly 10..240)
+        from_, to_: float in [0,1]
+        steps: number of sub-steps in 100ms (DG commonly 4)
+        curve: "linear" | "smoothstep" | "ease_in_out_sine"
+        """
+        if not (0 <= from_ <= 1) or not (0 <= to_ <= 1):
+            raise ValueError("from_ and to_ must be in [0,1]")
+        if steps <= 0:
+            raise ValueError("steps must be > 0")
+
+        # clamp freq to byte
+        freq = int(freq)
+        freq = max(0, min(255, freq))
+
+        from_i = int(round(from_ * 100))
+        to_i   = int(round(to_   * 100))
+
+        def apply_curve(t: float) -> float:
+            t = max(0.0, min(1.0, t))
+            if curve == "linear":
+                return t
+            if curve == "smoothstep":
+                # 3t^2 - 2t^3
+                return t * t * (3.0 - 2.0 * t)
+            if curve == "ease_in_out_sine":
+                # 0.5 - 0.5*cos(pi*t)
+                return 0.5 - 0.5 * math.cos(math.pi * t)
+            raise ValueError(f"unknown curve: {curve}")
+
+        # Build strengths for each 25ms slice: i=1..steps
+        strengths = []
+        for i in range(1, steps + 1):
+            t = apply_curve(i / steps)
+            v = from_ + (to_ - from_) * t
+            si = int(round(v * 100))
+            si = max(0, min(100, si))
+            strengths.append(si)
+
+        # Guarantee last sample hits to_i exactly (avoid accumulated rounding error)
+        strengths[-1] = max(0, min(100, to_i))
+
+        # Pack: 4 freq bytes + 4 strength bytes (if steps!=4, we still pack exactly `steps` strength bytes)
+        # DG 的 100ms 帧通常要求 4 个 strength 字节；如果你要保持协议一致，建议 steps=4。
+        freq_hex = f"{freq:02X}" * 4
+        strength_hex = "".join(f"{s:02X}" for s in strengths)
+
+        # If steps != 4, the hex length won't be 16 (8 bytes). Keep steps=4 for DG 100ms op.
+        if steps != 4:
+            raise ValueError("DG 100ms op expects 4 strength bytes; please keep steps=4.")
+
+        ret = freq_hex + strength_hex
+        return json.dumps([ret], separators=(",", ":"))
     
     def normalize_distance(self, distance):
         out_distance = 0
@@ -117,7 +176,7 @@ class ShockHandler(BaseHandler):
             current_strength = self.bg_wave_current_strength
             if current_strength == last_strength == 0:
                 continue
-            wave = self.generate_wave_100ms(
+            wave = self.generate_wave_100ms_improved(
                 self.mode_config['distance']['freq_ms'], 
                 last_strength, 
                 current_strength
@@ -186,7 +245,7 @@ class ShockHandler(BaseHandler):
             self.bg_wave_current_strength = current_strength
             if current_strength == last_strength == 0:
                 continue
-            wave = self.generate_wave_100ms(
+            wave = self.generate_wave_100ms_improved(
                 self.mode_config['touch']['freq_ms'], 
                 last_strength, 
                 current_strength
