@@ -49,6 +49,7 @@ class ShockHandler(BaseHandler):
         self.active_mode_presets = {}
         self.shock_started_at = 0
         self.shock_last_strength = 0
+        self.current_channel_strength = 0.0
 
         self.to_clear_time    = 0
         self.is_cleared       = True
@@ -152,7 +153,10 @@ class ShockHandler(BaseHandler):
                 self.active_mode_presets = {}
                 self.shock_started_at = 0
                 self.shock_last_strength = 0
+                self.current_channel_strength = 0.0
                 await self.DG_CONN.broadcast_clear_wave(self.channel)
+                if self.shock_mode in ['distance', 'touch']:
+                    await self.DG_CONN.broadcast_strength_0_to_1(self.channel, 0.0)
                 logger.debug(f"[clear] channel={self.channel} mode={self.shock_mode} reason=timeout")
     
     async def feed_wave(self):
@@ -285,6 +289,24 @@ class ShockHandler(BaseHandler):
         mode_conf = self.get_mode_conf(mode_name)
         return mode_conf.get('wave_envelope_curve', 'smoothstep')
 
+    def get_base_strength(self, mode_name):
+        return max(0.0, min(1.0, float(self.get_mode_conf(mode_name).get('base_strength', 0.18))))
+
+    def get_dynamic_range(self, mode_name):
+        return max(0.0, min(1.0, float(self.get_mode_conf(mode_name).get('dynamic_range', 0.30))))
+
+    def get_texture_floor(self, mode_name):
+        return max(0.0, min(1.0, float(self.get_mode_conf(mode_name).get('texture_floor', 0.35))))
+
+    def map_envelope_strength(self, mode_name, normalized_strength):
+        normalized_strength = max(0.0, min(1.0, float(normalized_strength)))
+        curve = self.get_dynamic_envelope_curve(mode_name)
+        curved = self._wave_library._apply_curve(normalized_strength, curve)
+        return max(
+            0.0,
+            min(1.0, self.get_base_strength(mode_name) + curved * self.get_dynamic_range(mode_name)),
+        )
+
     def build_dynamic_wave(self, mode_name, from_strength, to_strength, *, preset_name=None, wave_scale=None):
         mode_conf = self.get_mode_conf(mode_name)
         preset_name = preset_name if preset_name is not None else mode_conf.get('wave_preset')
@@ -300,11 +322,9 @@ class ShockHandler(BaseHandler):
                 preset_name,
                 start_position,
                 window_size,
-                from_strength,
-                to_strength,
                 wave_scale=wave_scale,
+                texture_floor=self.get_texture_floor(mode_name),
                 sample_step=self.get_dynamic_sample_step(mode_name),
-                envelope_curve=self.get_dynamic_envelope_curve(mode_name),
             )
             if preset_wave:
                 self.dynamic_wave_heads[mode_name] = start_position + self.get_dynamic_window_advance(mode_name)
@@ -380,12 +400,21 @@ class ShockHandler(BaseHandler):
             current_strength = self.bg_wave_current_strength
             if current_strength == last_strength == 0:
                 continue
+            envelope_strength = self.map_envelope_strength('distance', current_strength)
+            if abs(envelope_strength - self.current_channel_strength) >= 0.01:
+                await self.DG_CONN.broadcast_strength_0_to_1(self.channel, envelope_strength)
+                self.current_channel_strength = envelope_strength
             wave = self.build_dynamic_wave('distance', last_strength, current_strength)
             self.log_output(
                 source='distance',
                 strength=current_strength,
                 wave=wave,
-                extra=f"from={last_strength:.3f} to={current_strength:.3f} preset={self.active_dynamic_preset or '-'}",
+                extra=(
+                    f"from={last_strength:.3f} to={current_strength:.3f} "
+                    f"envelope={envelope_strength:.3f} preset={self.active_dynamic_preset or '-'} "
+                    f"base={self.get_base_strength('distance'):.2f} range={self.get_dynamic_range('distance'):.2f} "
+                    f"texture_floor={self.get_texture_floor('distance'):.2f}"
+                ),
             )
             last_strength = current_strength
             await self.DG_CONN.broadcast_wave(self.channel, wavestr=wave)
@@ -511,6 +540,10 @@ class ShockHandler(BaseHandler):
             self.bg_wave_current_strength = current_strength
             if current_strength == last_strength == 0:
                 continue
+            envelope_strength = self.map_envelope_strength('touch', current_strength)
+            if abs(envelope_strength - self.current_channel_strength) >= 0.01:
+                await self.DG_CONN.broadcast_strength_0_to_1(self.channel, envelope_strength)
+                self.current_channel_strength = envelope_strength
             touch_preset, touch_scale = self.resolve_touch_profile(current_strength)
             wave = self.build_dynamic_wave(
                 'touch',
@@ -526,7 +559,10 @@ class ShockHandler(BaseHandler):
                 wave=wave,
                 extra=(
                     f"from={last_strength:.3f} to={current_strength:.3f} "
-                    f"derivative={derivative_name} preset={touch_preset or '-'} scale={touch_scale:.2f}"
+                    f"derivative={derivative_name} envelope={envelope_strength:.3f} "
+                    f"preset={touch_preset or '-'} scale={touch_scale:.2f} "
+                    f"base={self.get_base_strength('touch'):.2f} range={self.get_dynamic_range('touch'):.2f} "
+                    f"texture_floor={self.get_texture_floor('touch'):.2f}"
                 ),
             )
             last_strength = current_strength

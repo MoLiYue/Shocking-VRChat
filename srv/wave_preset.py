@@ -158,12 +158,10 @@ class WavePresetLibrary:
         name: Optional[str],
         start_position: float,
         window_ops: int,
-        envelope_from: float,
-        envelope_to: float,
         *,
         wave_scale: float = 1.0,
+        texture_floor: float = 0.35,
         sample_step: float = 1.0,
-        envelope_curve: str = "smoothstep",
     ) -> Optional[str]:
         preset = self.get(name)
         if not preset:
@@ -174,9 +172,8 @@ class WavePresetLibrary:
             return None
 
         total_samples = window_ops * 4
-        envelope_from = max(0.0, min(1.0, float(envelope_from)))
-        envelope_to = max(0.0, min(1.0, float(envelope_to)))
         wave_scale = max(0.0, min(1.0, float(wave_scale)))
+        texture_floor = max(0.0, min(1.0, float(texture_floor)))
 
         sampled_freqs: List[int] = []
         sampled_strengths: List[int] = []
@@ -184,12 +181,8 @@ class WavePresetLibrary:
             position = start_position + sample_idx * sample_step
             texture_strength = self._sample_looped(texture_samples, position)
             sampled_freq = self._sample_looped(freq_samples, position)
-            if total_samples == 1:
-                envelope_t = 1.0
-            else:
-                envelope_t = self._apply_curve(sample_idx / (total_samples - 1), envelope_curve)
-            envelope_strength = envelope_from + (envelope_to - envelope_from) * envelope_t
-            final_strength = texture_strength * envelope_strength * wave_scale
+            lifted_texture = texture_floor + texture_strength * (1.0 - texture_floor)
+            final_strength = lifted_texture * wave_scale
             sampled_freqs.append(max(0, min(255, int(round(sampled_freq)))))
             sampled_strengths.append(max(0, min(100, int(round(final_strength * 100)))))
 
