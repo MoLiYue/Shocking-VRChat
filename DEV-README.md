@@ -34,3 +34,41 @@ dglab3:
 
 `threshold` uses the normalized touch derivative strength in the `0~1` range.
 The highest matching band wins. If no band matches, the base `wave_preset` is used.
+
+## config hot reload
+
+The program polls `settings-v0.2.yaml` and `settings-advanced-v0.2.yaml` and applies runtime-safe changes automatically.
+
+Hot-reloadable fields:
+
+- `log_level`
+- `dglab3.channel_a.strength_limit`
+- `dglab3.channel_b.strength_limit`
+- `dglab3.channel_a.mode_config.*`
+- `dglab3.channel_b.mode_config.*`
+- `machine.tuya.mode_config.*`
+
+In practice this includes:
+
+- `trigger_range`
+- `shock.duration`
+- `wave_preset`
+- `wave_scale`
+- `wave_window_ops`
+- `wave_sample_step`
+- `wave_advance_samples`
+- `wave_envelope_curve`
+- `touch.n_derivative`
+- `touch.derivative_params`
+- `touch.preset_bands`
+
+Changes that still require restart:
+
+- `avatar_params`
+- parameter `mode` mapping in `settings-v0.2.yaml`
+- `osc.*`
+- `ws.*`
+- `web_server.*`
+- `SERVER_IP`
+
+When a non-hot-reloadable field changes, the program keeps the current runtime configuration and logs a restart warning.
