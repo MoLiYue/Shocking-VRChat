@@ -35,6 +35,8 @@ class ShockHandler(BaseHandler):
         self.touch_dist_arr = collections.deque(maxlen=20)
         self.dynamic_wave_index = 0
         self.active_dynamic_preset = None
+        self.shock_started_at = 0
+        self.shock_last_strength = 0
 
         self.to_clear_time    = 0
         self.is_cleared       = True
@@ -42,10 +44,10 @@ class ShockHandler(BaseHandler):
     def start_background_jobs(self):
         # logger.info(f"Channel: {self.channel}, background job started.")
         asyncio.ensure_future(self.clear_check())
-        # if self.shock_mode == 'shock':
-        #     asyncio.ensure_future(self.feed_wave())
         if self.shock_mode == 'distance':
             asyncio.ensure_future(self.distance_background_wave_feeder())
+        elif self.shock_mode == 'shock':
+            asyncio.ensure_future(self.shock_background_wave_feeder())
         elif self.shock_mode == 'touch':
             asyncio.ensure_future(self.touch_background_wave_feeder())
 
@@ -70,6 +72,15 @@ class ShockHandler(BaseHandler):
             return f"ops={len(ops)} first={ops[0]} last={ops[-1]}"
         except Exception:
             return f"wavestr={str(wavestr)[:48]}"
+
+    @staticmethod
+    def scale_wavestr(wavestr, strength_scale):
+        try:
+            ops = json.loads(wavestr)
+            scaled_ops = [WavePresetLibrary.scale_op(op, strength_scale) for op in ops]
+            return json.dumps(scaled_ops, separators=(",", ":"))
+        except Exception:
+            return wavestr
 
     def log_trigger(self, context, *, value, normalized=None, extra=''):
         param = context.get('address') if context else '-'
@@ -107,6 +118,8 @@ class ShockHandler(BaseHandler):
                 self.touch_dist_arr.clear()
                 self.dynamic_wave_index = 0
                 self.active_dynamic_preset = None
+                self.shock_started_at = 0
+                self.shock_last_strength = 0
                 await self.DG_CONN.broadcast_clear_wave(self.channel)
                 logger.info(f"[clear] channel={self.channel} mode={self.shock_mode} reason=timeout")
     
@@ -217,6 +230,9 @@ class ShockHandler(BaseHandler):
     def get_mode_conf(self, mode_name):
         return self.mode_config.get(mode_name, {})
 
+    def get_shock_duration(self):
+        return max(0.1, float(self.get_mode_conf('shock').get('duration', 2)))
+
     def build_dynamic_wave(self, mode_name, from_strength, to_strength, *, preset_name=None, wave_scale=None):
         mode_conf = self.get_mode_conf(mode_name)
         preset_name = preset_name if preset_name is not None else mode_conf.get('wave_preset')
@@ -236,6 +252,11 @@ class ShockHandler(BaseHandler):
             if preset_wave:
                 return preset_wave
         self.active_dynamic_preset = None
+        if mode_name == 'shock':
+            return self.scale_wavestr(
+                self.get_mode_conf('shock')['wave'],
+                to_strength * wave_scale,
+            )
         return self.generate_wave_100ms_improved(
             mode_conf['freq_ms'],
             from_strength,
@@ -295,13 +316,6 @@ class ShockHandler(BaseHandler):
             last_strength = current_strength
             await self.DG_CONN.broadcast_wave(self.channel, wavestr=wave)
     
-    async def send_shock_wave(self, shock_time, shockwave: str):
-        shockwave_duration = max(0.1, (shockwave.count(',') + 1) * 0.1)
-        loop_end_time = time.time() + shock_time
-        while time.time() < loop_end_time:
-            await self.DG_CONN.broadcast_wave(self.channel, wavestr=shockwave)
-            await asyncio.sleep(shockwave_duration)
-
     def get_shock_wavestrs(self):
         shock_conf = self.get_mode_conf('shock')
         preset_name = shock_conf.get('wave_preset')
@@ -311,30 +325,63 @@ class ShockHandler(BaseHandler):
             return preset_wavestrs
         return [shock_conf['wave']]
 
-    async def send_shock_wavestrs(self, shock_time):
-        wavestrs = self.get_shock_wavestrs()
-        loop_end_time = time.time() + shock_time
-        while time.time() < loop_end_time:
-            for wavestr in wavestrs:
-                if time.time() >= loop_end_time:
-                    break
-                duration = max(0.1, (wavestr.count(',') + 1) * 0.1)
-                self.log_output(
-                    source='shock',
-                    wave=wavestr,
-                    extra=f"duration={duration:.2f}s preset={self.get_mode_conf('shock').get('wave_preset') or '-'}",
-                )
-                await self.DG_CONN.broadcast_wave(self.channel, wavestr=wavestr)
-                await asyncio.sleep(duration)
+    def get_shock_strength(self, current_time):
+        if self.shock_started_at <= 0:
+            return 0
+        duration = self.get_shock_duration()
+        elapsed = current_time - self.shock_started_at
+        if elapsed <= 0:
+            return 1
+        return max(0.0, 1.0 - (elapsed / duration))
+
+    async def shock_background_wave_feeder(self):
+        tick_time_window = self.bg_wave_update_time_window / 20
+        next_tick_time = 0
+        while 1:
+            current_time = time.time()
+            if current_time < next_tick_time:
+                await asyncio.sleep(tick_time_window)
+                continue
+            next_tick_time = current_time + self.bg_wave_update_time_window
+            if self.is_cleared:
+                self.shock_last_strength = 0
+                continue
+            current_strength = self.get_shock_strength(current_time)
+            if current_strength <= 0:
+                self.shock_last_strength = 0
+                continue
+            wave = self.build_dynamic_wave(
+                'shock',
+                self.shock_last_strength,
+                current_strength,
+                preset_name=self.get_mode_conf('shock').get('wave_preset'),
+                wave_scale=self.get_mode_conf('shock').get('wave_scale', 1.0),
+            )
+            self.log_output(
+                source='shock',
+                strength=current_strength,
+                wave=wave,
+                extra=(
+                    f"from={self.shock_last_strength:.3f} to={current_strength:.3f} "
+                    f"duration={self.get_shock_duration():.2f}s preset={self.get_mode_conf('shock').get('wave_preset') or '-'}"
+                ),
+            )
+            self.shock_last_strength = current_strength
+            await self.DG_CONN.broadcast_wave(self.channel, wavestr=wave)
     
     async def handler_shock(self, distance, context=None):
         current_time = time.time()
-        if distance > self.mode_config['trigger_range']['bottom'] and current_time > self.to_clear_time:
-            shock_duration = self.mode_config['shock']['duration']
+        if distance > self.mode_config['trigger_range']['bottom']:
+            shock_duration = self.get_shock_duration()
             await self.set_clear_after(shock_duration)
+            self.shock_started_at = current_time
+            self.shock_last_strength = 0
             preset_names = self.get_mode_conf('shock').get('wave_preset') or '-'
-            self.log_trigger(context, value=distance, extra=f"duration={shock_duration:.2f}s preset={preset_names}")
-            asyncio.create_task(self.send_shock_wavestrs(shock_duration))
+            self.log_trigger(
+                context,
+                value=distance,
+                extra=f"duration={shock_duration:.2f}s preset={preset_names} action=reset-to-peak",
+            )
 
     async def handler_touch(self, distance, context=None):
         await self.set_clear_after(0.5)
