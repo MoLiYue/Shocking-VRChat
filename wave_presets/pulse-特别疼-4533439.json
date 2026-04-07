@@ -1,0 +1,14 @@
+{
+  "name": "pulse-特别疼-4533439",
+  "source_file": "pulse-特别疼-4533439.pulse",
+  "num_ops": 7,
+  "header": {
+    "rest_ticks": 0,
+    "speed": 1,
+    "balance": 16,
+    "raw_header": "0,1,16"
+  },
+  "wavestrs": [
+    "[\"3D3D3D3D64646464\", \"3D3D3D3D64646464\", \"F0E9E3DC64646464\", \"D6CFC9C264646464\", \"F0F0F0F064320000\", \"F0F0F0F032644321\", \"F0F00A0A00640000\"]"
+  ]
+}
