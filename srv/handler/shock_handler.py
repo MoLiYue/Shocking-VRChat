@@ -35,6 +35,12 @@ class ShockHandler(BaseHandler):
         self.touch_dist_arr = collections.deque(maxlen=20)
         self.dynamic_wave_index = 0
         self.active_dynamic_preset = None
+        self.dynamic_wave_heads = {
+            'distance': 0.0,
+            'touch': 0.0,
+            'shock': 0.0,
+        }
+        self.active_mode_presets = {}
         self.shock_started_at = 0
         self.shock_last_strength = 0
 
@@ -122,6 +128,8 @@ class ShockHandler(BaseHandler):
                 self.touch_dist_arr.clear()
                 self.dynamic_wave_index = 0
                 self.active_dynamic_preset = None
+                self.dynamic_wave_heads = {key: 0 for key in self.dynamic_wave_heads}
+                self.active_mode_presets = {}
                 self.shock_started_at = 0
                 self.shock_last_strength = 0
                 await self.DG_CONN.broadcast_clear_wave(self.channel)
@@ -237,24 +245,66 @@ class ShockHandler(BaseHandler):
     def get_shock_duration(self):
         return max(0.1, float(self.get_mode_conf('shock').get('duration', 2)))
 
+    def get_dynamic_window_size(self, mode_name):
+        mode_conf = self.get_mode_conf(mode_name)
+        window_size = int(mode_conf.get('wave_window_ops', 4))
+        return max(1, min(32, window_size))
+
+    def get_dynamic_sample_step(self, mode_name):
+        mode_conf = self.get_mode_conf(mode_name)
+        sample_step = float(mode_conf.get('wave_sample_step', 1.0))
+        return max(0.25, min(8.0, sample_step))
+
+    def get_dynamic_window_advance(self, mode_name):
+        mode_conf = self.get_mode_conf(mode_name)
+        default_advance = 4.0 * self.get_dynamic_sample_step(mode_name)
+        advance = float(mode_conf.get('wave_advance_samples', default_advance))
+        return max(0.25, min(32.0, advance))
+
+    def get_dynamic_envelope_curve(self, mode_name):
+        mode_conf = self.get_mode_conf(mode_name)
+        return mode_conf.get('wave_envelope_curve', 'smoothstep')
+
     def build_dynamic_wave(self, mode_name, from_strength, to_strength, *, preset_name=None, wave_scale=None):
         mode_conf = self.get_mode_conf(mode_name)
         preset_name = preset_name if preset_name is not None else mode_conf.get('wave_preset')
         wave_scale = mode_conf.get('wave_scale', 1.0) if wave_scale is None else wave_scale
         wave_scale = max(0.0, min(1.0, wave_scale))
-        if preset_name:
-            if preset_name != self.active_dynamic_preset:
-                self.dynamic_wave_index = 0
-                self.active_dynamic_preset = preset_name
-            self.dynamic_wave_index += 1
-            scaled_strength = to_strength * wave_scale
-            preset_wave = self._wave_library.build_scaled_single_op(
+        if preset_name and mode_name in ['distance', 'touch']:
+            if preset_name != self.active_mode_presets.get(mode_name):
+                self.dynamic_wave_heads[mode_name] = 0
+                self.active_mode_presets[mode_name] = preset_name
+            start_position = self.dynamic_wave_heads[mode_name]
+            window_size = self.get_dynamic_window_size(mode_name)
+            preset_wave = self._wave_library.build_resampled_window(
                 preset_name,
-                self.dynamic_wave_index - 1,
+                start_position,
+                window_size,
+                from_strength,
+                to_strength,
+                wave_scale=wave_scale,
+                sample_step=self.get_dynamic_sample_step(mode_name),
+                envelope_curve=self.get_dynamic_envelope_curve(mode_name),
+            )
+            if preset_wave:
+                self.dynamic_wave_heads[mode_name] = start_position + self.get_dynamic_window_advance(mode_name)
+                self.active_dynamic_preset = preset_name
+                return preset_wave
+        if preset_name and mode_name == 'shock':
+            if preset_name != self.active_mode_presets.get(mode_name):
+                self.active_mode_presets[mode_name] = preset_name
+            self.active_dynamic_preset = preset_name
+            scaled_strength = to_strength * wave_scale
+            preset_wave = self._wave_library.build_scaled_window(
+                preset_name,
+                int(self.dynamic_wave_heads[mode_name]),
+                self.get_dynamic_window_size(mode_name),
                 scaled_strength,
             )
             if preset_wave:
+                self.dynamic_wave_heads[mode_name] += 1
                 return preset_wave
+        self.active_mode_presets.pop(mode_name, None)
         self.active_dynamic_preset = None
         if mode_name == 'shock':
             return self.scale_wavestr(

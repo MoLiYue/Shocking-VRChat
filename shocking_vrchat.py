@@ -87,6 +87,10 @@ SETTINGS = {
                     'freq_ms': 10,
                     'wave_preset': None,
                     'wave_scale': 1.0,
+                    'wave_window_ops': 4,
+                    'wave_sample_step': 1.0,
+                    'wave_advance_samples': 4.0,
+                    'wave_envelope_curve': 'smoothstep',
                 },
                 'trigger_range': {
                     'bottom': 0.0,
@@ -96,6 +100,10 @@ SETTINGS = {
                     'freq_ms': 10,
                     'wave_preset': 'pulse-搓搓揉揉-9058076',
                     'wave_scale': 0.35,
+                    'wave_window_ops': 4,
+                    'wave_sample_step': 1.0,
+                    'wave_advance_samples': 4.0,
+                    'wave_envelope_curve': 'smoothstep',
                     'preset_bands': [
                         {
                             'threshold': 0.25,
@@ -147,6 +155,10 @@ SETTINGS = {
                     'freq_ms': 10,
                     'wave_preset': None,
                     'wave_scale': 1.0,
+                    'wave_window_ops': 4,
+                    'wave_sample_step': 1.0,
+                    'wave_advance_samples': 4.0,
+                    'wave_envelope_curve': 'smoothstep',
                 },
                 'trigger_range': {
                     'bottom': 0.0,
@@ -156,6 +168,10 @@ SETTINGS = {
                     'freq_ms': 10,
                     'wave_preset': 'pulse-搓搓揉揉-9058076',
                     'wave_scale': 0.35,
+                    'wave_window_ops': 4,
+                    'wave_sample_step': 1.0,
+                    'wave_advance_samples': 4.0,
+                    'wave_envelope_curve': 'smoothstep',
                     'preset_bands': [
                         {
                             'threshold': 0.25,
