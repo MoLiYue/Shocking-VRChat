@@ -47,7 +47,7 @@ class TuyaHandler(BaseHandler):
         self.is_cleared = False
         self.to_clear_time = time.time() + val
 
-    async def handler_level(self, distance):
+    async def handler_level(self, distance, context=None):
         await self.set_clear_after(5)
         strength = 0
         trigger_bottom = self.mode_config['trigger_range']['bottom']
@@ -60,6 +60,12 @@ class TuyaHandler(BaseHandler):
                 )
             strength = 1 if strength > 1 else strength
         self.distance_current_strength = strength
+        logger.info(
+            f"[machine-trigger] mode={self.mode} "
+            f"param={context.get('address') if context else '-'} "
+            f"raw={context.get('raw_args') if context else [distance]} "
+            f"value={distance:.3f} strength={strength:.3f}"
+        )
 
     async def distance_background_wave_feeder(self):
         tick_time_window = self.distance_update_time_window / 20

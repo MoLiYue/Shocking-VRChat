@@ -26,20 +26,44 @@ SETTINGS_BASIC = {
     'dglab3':{
         'channel_a': {
             'avatar_params': [
-                '/avatar/parameters/pcs/contact/enterPass',
-                '/avatar/parameters/Shock/TouchAreaA',
-                '/avatar/parameters/Shock/TouchAreaC',
-                '/avatar/parameters/Shock/wildcard/*',
+                {
+                    'path': '/avatar/parameters/pcs/contact/enterPass',
+                    'mode': 'distance',
+                },
+                {
+                    'path': '/avatar/parameters/Shock/TouchAreaA',
+                    'mode': 'distance',
+                },
+                {
+                    'path': '/avatar/parameters/Shock/TouchAreaC',
+                    'mode': 'distance',
+                },
+                {
+                    'path': '/avatar/parameters/Shock/wildcard/*',
+                    'mode': 'distance',
+                },
             ],
             'mode': 'distance',
             'strength_limit': 100,
         },
         'channel_b': {
             'avatar_params': [
-                '/avatar/parameters/pcs/contact/enterPass',
-                '/avatar/parameters/lms-penis-proximityA*',
-                '/avatar/parameters/Shock/TouchAreaB',
-                '/avatar/parameters/Shock/TouchAreaC',
+                {
+                    'path': '/avatar/parameters/pcs/contact/enterPass',
+                    'mode': 'distance',
+                },
+                {
+                    'path': '/avatar/parameters/lms-penis-proximityA*',
+                    'mode': 'distance',
+                },
+                {
+                    'path': '/avatar/parameters/Shock/TouchAreaB',
+                    'mode': 'distance',
+                },
+                {
+                    'path': '/avatar/parameters/Shock/TouchAreaC',
+                    'mode': 'distance',
+                },
             ],
             'mode': 'distance',
             'strength_limit': 100,
@@ -55,9 +79,13 @@ SETTINGS = {
                 'shock': {
                     'duration': 2,
                     'wave': '["0A0A0A0A64646464","0A0A0A0A64646464","0A0A0A0A64646464","0A0A0A0A64646464","0A0A0A0A64646464","0A0A0A0A64646464","0A0A0A0A64646464","0A0A0A0A64646464","0A0A0A0A64646464","0A0A0A0A64646464"]',
+                    'wave_preset': None,
+                    'wave_scale': 1.0,
                 },
                 'distance': {
                     'freq_ms': 10,
+                    'wave_preset': None,
+                    'wave_scale': 1.0,
                 },
                 'trigger_range': {
                     'bottom': 0.0,
@@ -65,6 +93,25 @@ SETTINGS = {
                 },
                 'touch': {
                     'freq_ms': 10,
+                    'wave_preset': 'pulse-搓搓揉揉-9058076',
+                    'wave_scale': 0.35,
+                    'preset_bands': [
+                        {
+                            'threshold': 0.25,
+                            'wave_preset': 'pulse-摸摸拍拍-9049275',
+                            'wave_scale': 0.25,
+                        },
+                        {
+                            'threshold': 0.55,
+                            'wave_preset': 'pulse-搓搓揉揉-9058076',
+                            'wave_scale': 0.35,
+                        },
+                        {
+                            'threshold': 0.8,
+                            'wave_preset': 'pulse-加速揉搓-9113608',
+                            'wave_scale': 0.5,
+                        },
+                    ],
                     'n_derivative': 1, # 0 for distance, 1 for velocity, 2 for acceleration, 3 for jerk
                     'derivative_params': [
                         {
@@ -92,9 +139,13 @@ SETTINGS = {
                 'shock': {
                     'duration': 2,
                     'wave': '["0A0A0A0A64646464","0A0A0A0A64646464","0A0A0A0A64646464","0A0A0A0A64646464","0A0A0A0A64646464","0A0A0A0A64646464","0A0A0A0A64646464","0A0A0A0A64646464","0A0A0A0A64646464","0A0A0A0A64646464"]',
+                    'wave_preset': None,
+                    'wave_scale': 1.0,
                 },
                 'distance': {
                     'freq_ms': 10,
+                    'wave_preset': None,
+                    'wave_scale': 1.0,
                 },
                 'trigger_range': {
                     'bottom': 0.0,
@@ -102,6 +153,25 @@ SETTINGS = {
                 },
                 'touch': {
                     'freq_ms': 10,
+                    'wave_preset': 'pulse-搓搓揉揉-9058076',
+                    'wave_scale': 0.35,
+                    'preset_bands': [
+                        {
+                            'threshold': 0.25,
+                            'wave_preset': 'pulse-摸摸拍拍-9049275',
+                            'wave_scale': 0.25,
+                        },
+                        {
+                            'threshold': 0.55,
+                            'wave_preset': 'pulse-搓搓揉揉-9058076',
+                            'wave_scale': 0.35,
+                        },
+                        {
+                            'threshold': 0.8,
+                            'wave_preset': 'pulse-加速揉搓-9113608',
+                            'wave_scale': 0.5,
+                        },
+                    ],
                     'n_derivative': 1,
                     'derivative_params': [
                         {
@@ -148,7 +218,45 @@ SETTINGS = {
         }
     }
 }
+DEFAULT_SETTINGS_BASIC = copy.deepcopy(SETTINGS_BASIC)
+DEFAULT_SETTINGS = copy.deepcopy(SETTINGS)
 SERVER_IP = None
+
+
+def merge_defaults(defaults, current):
+    if isinstance(defaults, dict) and isinstance(current, dict):
+        merged = copy.deepcopy(current)
+        for key, value in defaults.items():
+            if key in merged:
+                merged[key] = merge_defaults(value, merged[key])
+            else:
+                merged[key] = copy.deepcopy(value)
+        return merged
+    return copy.deepcopy(current)
+
+
+def normalize_avatar_param_entries(channel_settings: dict):
+    default_mode = channel_settings.get('mode', 'distance')
+    normalized = []
+    for entry in channel_settings.get('avatar_params', []):
+        if isinstance(entry, str):
+            normalized.append({
+                'path': entry,
+                'mode': default_mode,
+            })
+        elif isinstance(entry, dict):
+            path = entry.get('path')
+            if not path:
+                logger.warning(f'Ignoring avatar param config without path: {entry}')
+                continue
+            normalized.append({
+                'path': path,
+                'mode': entry.get('mode', default_mode),
+            })
+        else:
+            logger.warning(f'Ignoring invalid avatar param config: {entry}')
+    channel_settings['avatar_params'] = normalized
+    return channel_settings
 
 @app.route('/get_ip')
 def get_current_ip():
@@ -361,6 +469,9 @@ def config_init():
     with open(CONFIG_FILENAME_BASIC, 'r', encoding='utf-8') as fr:
         SETTINGS_BASIC = yaml.safe_load(fr)
 
+    SETTINGS = merge_defaults(DEFAULT_SETTINGS, SETTINGS)
+    SETTINGS_BASIC = merge_defaults(DEFAULT_SETTINGS_BASIC, SETTINGS_BASIC)
+
     if SETTINGS.get('version', None) != CONFIG_FILE_VERSION or SETTINGS_BASIC.get('version', None) != CONFIG_FILE_VERSION:
         logger.error(f"Configuration file version mismatch! Please delete the {CONFIG_FILENAME_BASIC} and {CONFIG_FILENAME} files and run the program again to generate the latest version of the configuration files.")
         raise Exception(f'配置文件版本不匹配！请删除 {CONFIG_FILENAME_BASIC} {CONFIG_FILENAME} 文件后再次运行程序，以生成最新版本的配置文件。')
@@ -373,6 +484,7 @@ def config_init():
         SETTINGS['dglab3'][chann]['avatar_params'] = SETTINGS_BASIC['dglab3'][chann]['avatar_params']
         SETTINGS['dglab3'][chann]['mode'] = SETTINGS_BASIC['dglab3'][chann]['mode']
         SETTINGS['dglab3'][chann]['strength_limit'] = SETTINGS_BASIC['dglab3'][chann]['strength_limit']
+        normalize_avatar_param_entries(SETTINGS['dglab3'][chann])
 
     logger.remove()
     logger.add(sys.stderr, level=SETTINGS['log_level'])
@@ -386,12 +498,20 @@ def main():
 
     for chann in ['A', 'B']:
         config_chann_name = f'channel_{chann.lower()}'
-        chann_mode = SETTINGS['dglab3'][config_chann_name]['mode']
-        shock_handler = ShockHandler(SETTINGS=SETTINGS, DG_CONN = DGConnection, channel_name=chann)
-        handlers.append(shock_handler)
-        for param in SETTINGS['dglab3'][config_chann_name]['avatar_params']:
-            logger.success(f"Channel {chann} Mode：{chann_mode} Listening：{param}")
-            dispatcher.map(param, shock_handler.osc_handler)
+        channel_handlers = {}
+        for param_entry in SETTINGS['dglab3'][config_chann_name]['avatar_params']:
+            param_path = param_entry['path']
+            param_mode = param_entry['mode']
+            if param_mode not in channel_handlers:
+                channel_handlers[param_mode] = ShockHandler(
+                    SETTINGS=SETTINGS,
+                    DG_CONN=DGConnection,
+                    channel_name=chann,
+                    handler_mode=param_mode,
+                )
+                handlers.append(channel_handlers[param_mode])
+            logger.success(f"Channel {chann} mode {param_mode} listening {param_path}")
+            dispatcher.map(param_path, channel_handlers[param_mode].osc_handler)
     
     if 'machine' in SETTINGS and 'tuya' in SETTINGS['machine']:
         TuyaConn = TuYaConnection(
