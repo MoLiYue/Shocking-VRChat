@@ -11,6 +11,10 @@ on:
 jobs:
   build-windows:
     runs-on: windows-latest
+    defaults:
+      run:
+        shell: pwsh
+        working-directory: ${{ github.workspace }}
 
     steps:
       - name: Checkout repository
@@ -27,13 +31,25 @@ jobs:
           pip install -r requirements.txt
           pip install pyinstaller
 
+      - name: Show workspace
+        run: |
+          Write-Host "Workspace: $env:GITHUB_WORKSPACE"
+          Get-Location
+          Get-ChildItem -Force
+
       - name: Build executable
-        run: pyinstaller shocking_vrchat.spec
+        run: |
+          pyinstaller `
+            --onefile `
+            --name shocking_vrchat `
+            --add-data "templates\tiny-qr.html;templates" `
+            --add-data "wave_presets\*.json;wave_presets" `
+            shocking_vrchat.py
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
           name: shocking-vrchat-windows
           path: |
-            dist/**
-            build/**
+            ${{ github.workspace }}/dist/**
+            ${{ github.workspace }}/build/**

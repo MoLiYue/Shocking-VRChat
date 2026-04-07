@@ -3,7 +3,10 @@
 ## build
 
 ```cmd
-pyinstaller --onefile shocking_vrchat.py --add-data "templates\tiny-qr.html;templates"
+pyinstaller --onefile shocking_vrchat.py ^
+  --name shocking_vrchat ^
+  --add-data "templates\tiny-qr.html;templates" ^
+  --add-data "wave_presets\*.json;wave_presets"
 ```
 
 ## touch advanced mode
