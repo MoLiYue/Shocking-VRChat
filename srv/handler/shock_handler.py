@@ -51,6 +51,10 @@ class ShockHandler(BaseHandler):
         elif self.shock_mode == 'touch':
             asyncio.ensure_future(self.touch_background_wave_feeder())
 
+    def refresh_settings(self):
+        self.shock_settings = self.SETTINGS['dglab3'][f'channel_{self.channel.lower()}']
+        self.mode_config = self.shock_settings['mode_config']
+
     def osc_handler(self, address, *args):
         val = self.param_sanitizer(args)
         context = {
@@ -93,7 +97,7 @@ class ShockHandler(BaseHandler):
             msg += f" normalized={normalized:.3f}"
         if extra:
             msg += f" {extra}"
-        logger.info(msg)
+        logger.debug(msg)
 
     def log_output(self, *, source, strength=None, wave=None, extra=''):
         msg = f"[output] channel={self.channel} mode={self.shock_mode} source={source}"
@@ -103,7 +107,7 @@ class ShockHandler(BaseHandler):
             msg += f" {self.summarize_wave(wave)}"
         if extra:
             msg += f" {extra}"
-        logger.info(msg)
+        logger.debug(msg)
 
     async def clear_check(self):
         # logger.info(f'Channel {self.channel} started clear check.')
@@ -121,7 +125,7 @@ class ShockHandler(BaseHandler):
                 self.shock_started_at = 0
                 self.shock_last_strength = 0
                 await self.DG_CONN.broadcast_clear_wave(self.channel)
-                logger.info(f"[clear] channel={self.channel} mode={self.shock_mode} reason=timeout")
+                logger.debug(f"[clear] channel={self.channel} mode={self.shock_mode} reason=timeout")
     
     async def feed_wave(self):
         raise NotImplemented

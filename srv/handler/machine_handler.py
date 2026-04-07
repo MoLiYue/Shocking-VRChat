@@ -29,6 +29,12 @@ class TuyaHandler(BaseHandler):
         if self.mode == 'level':
             asyncio.ensure_future(self.distance_background_wave_feeder())
 
+    def refresh_settings(self):
+        if 'machine' not in self.SETTINGS or 'tuya' not in self.SETTINGS['machine']:
+            return
+        self.settings = self.SETTINGS['machine']['tuya']
+        self.mode_config = self.settings['mode_config']
+
 
     async def clear_check(self):
         # logger.info(f'Channel {self.channel} started clear check.')
@@ -60,7 +66,7 @@ class TuyaHandler(BaseHandler):
                 )
             strength = 1 if strength > 1 else strength
         self.distance_current_strength = strength
-        logger.info(
+        logger.debug(
             f"[machine-trigger] mode={self.mode} "
             f"param={context.get('address') if context else '-'} "
             f"raw={context.get('raw_args') if context else [distance]} "

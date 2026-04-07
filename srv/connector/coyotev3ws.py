@@ -160,3 +160,12 @@ class DGConnection():
         for conn in WS_CONNECTIONS:
             conn : cls
             await conn.set_strength_0_to_1(channel=channel, value=value)
+
+    @classmethod
+    def refresh_limits_from_settings(cls, settings: dict):
+        limit_a = settings['dglab3']['channel_a']['strength_limit']
+        limit_b = settings['dglab3']['channel_b']['strength_limit']
+        for conn in WS_CONNECTIONS:
+            conn: cls
+            conn.strength_limit['A'] = limit_a
+            conn.strength_limit['B'] = limit_b

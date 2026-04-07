@@ -22,6 +22,7 @@ app = Flask(__name__)
 CONFIG_FILE_VERSION  = 'v0.2'
 CONFIG_FILENAME = f'settings-advanced-{CONFIG_FILE_VERSION}.yaml'
 CONFIG_FILENAME_BASIC = f'settings-{CONFIG_FILE_VERSION}.yaml'
+CONFIG_HOT_RELOAD_INTERVAL = 1.0
 SETTINGS_BASIC = {
     'dglab3':{
         'channel_a': {
@@ -221,6 +222,8 @@ SETTINGS = {
 DEFAULT_SETTINGS_BASIC = copy.deepcopy(SETTINGS_BASIC)
 DEFAULT_SETTINGS = copy.deepcopy(SETTINGS)
 SERVER_IP = None
+CONFIG_MTIMES = {}
+handlers = []
 
 
 def merge_defaults(defaults, current):
@@ -257,6 +260,124 @@ def normalize_avatar_param_entries(channel_settings: dict):
             logger.warning(f'Ignoring invalid avatar param config: {entry}')
     channel_settings['avatar_params'] = normalized
     return channel_settings
+
+
+def load_config_files():
+    with open(CONFIG_FILENAME, 'r', encoding='utf-8') as fr:
+        settings = yaml.safe_load(fr)
+    with open(CONFIG_FILENAME_BASIC, 'r', encoding='utf-8') as fr:
+        settings_basic = yaml.safe_load(fr)
+
+    settings = merge_defaults(DEFAULT_SETTINGS, settings)
+    settings_basic = merge_defaults(DEFAULT_SETTINGS_BASIC, settings_basic)
+
+    if settings.get('version', None) != CONFIG_FILE_VERSION or settings_basic.get('version', None) != CONFIG_FILE_VERSION:
+        raise Exception(
+            f'Configuration file version mismatch: {CONFIG_FILENAME_BASIC} {CONFIG_FILENAME}'
+        )
+
+    if settings['ws']['master_uuid'] is None:
+        settings['ws']['master_uuid'] = str(uuid.uuid4())
+
+    for chann in ['channel_a', 'channel_b']:
+        settings['dglab3'][chann]['avatar_params'] = settings_basic['dglab3'][chann]['avatar_params']
+        settings['dglab3'][chann]['mode'] = settings_basic['dglab3'][chann]['mode']
+        settings['dglab3'][chann]['strength_limit'] = settings_basic['dglab3'][chann]['strength_limit']
+        normalize_avatar_param_entries(settings['dglab3'][chann])
+
+    return settings, settings_basic
+
+
+def reset_logger():
+    logger.remove()
+    logger.add(sys.stderr, level=SETTINGS['log_level'])
+
+
+def update_config_mtimes():
+    global CONFIG_MTIMES
+    CONFIG_MTIMES = {
+        CONFIG_FILENAME: os.path.getmtime(CONFIG_FILENAME) if os.path.exists(CONFIG_FILENAME) else None,
+        CONFIG_FILENAME_BASIC: os.path.getmtime(CONFIG_FILENAME_BASIC) if os.path.exists(CONFIG_FILENAME_BASIC) else None,
+    }
+
+
+def has_config_file_changed():
+    for path, previous_mtime in CONFIG_MTIMES.items():
+        current_mtime = os.path.getmtime(path) if os.path.exists(path) else None
+        if current_mtime != previous_mtime:
+            return True
+    return False
+
+
+def apply_hot_reloadable_settings(new_settings, new_settings_basic):
+    global SERVER_IP
+    old_settings = copy.deepcopy(SETTINGS)
+    old_settings_basic = copy.deepcopy(SETTINGS_BASIC)
+
+    restart_required_reasons = []
+
+    if new_settings['osc'] != old_settings['osc']:
+        restart_required_reasons.append('osc')
+        new_settings['osc'] = old_settings['osc']
+    if new_settings['ws'] != old_settings['ws']:
+        restart_required_reasons.append('ws')
+        new_settings['ws'] = old_settings['ws']
+    if new_settings['web_server'] != old_settings['web_server']:
+        restart_required_reasons.append('web_server')
+        new_settings['web_server'] = old_settings['web_server']
+    if new_settings.get('SERVER_IP') != old_settings.get('SERVER_IP'):
+        restart_required_reasons.append('SERVER_IP')
+        new_settings['SERVER_IP'] = old_settings.get('SERVER_IP')
+    if new_settings_basic['dglab3'] != old_settings_basic['dglab3']:
+        old_basic = old_settings_basic['dglab3']
+        new_basic = new_settings_basic['dglab3']
+        if any(
+            new_basic[ch]['avatar_params'] != old_basic[ch]['avatar_params'] or
+            new_basic[ch]['mode'] != old_basic[ch]['mode']
+            for ch in ['channel_a', 'channel_b']
+        ):
+            restart_required_reasons.append('avatar_params/mode')
+            for ch in ['channel_a', 'channel_b']:
+                new_settings_basic['dglab3'][ch]['avatar_params'] = old_basic[ch]['avatar_params']
+                new_settings_basic['dglab3'][ch]['mode'] = old_basic[ch]['mode']
+                new_settings['dglab3'][ch]['avatar_params'] = old_settings['dglab3'][ch]['avatar_params']
+                new_settings['dglab3'][ch]['mode'] = old_settings['dglab3'][ch]['mode']
+
+    SETTINGS.clear()
+    SETTINGS.update(new_settings)
+    SETTINGS_BASIC.clear()
+    SETTINGS_BASIC.update(new_settings_basic)
+
+    SERVER_IP = SETTINGS['SERVER_IP'] or get_current_ip()
+    reset_logger()
+    DGConnection.refresh_limits_from_settings(SETTINGS)
+
+    for handler in handlers:
+        if hasattr(handler, 'refresh_settings'):
+            handler.refresh_settings()
+
+    if restart_required_reasons:
+        logger.warning(
+            f"[hot-reload] Applied runtime-safe config changes. Restart required for: {', '.join(restart_required_reasons)}"
+        )
+    logger.success("[hot-reload] Configuration reloaded.")
+
+
+def hot_reload_configs():
+    try:
+        new_settings, new_settings_basic = load_config_files()
+        apply_hot_reloadable_settings(new_settings, new_settings_basic)
+        update_config_mtimes()
+    except Exception:
+        logger.error(traceback.format_exc())
+        logger.error("[hot-reload] Failed to reload configuration.")
+
+
+def config_hot_reload_loop():
+    while True:
+        time.sleep(CONFIG_HOT_RELOAD_INTERVAL)
+        if has_config_file_changed():
+            hot_reload_configs()
 
 @app.route('/get_ip')
 def get_current_ip():
@@ -464,30 +585,15 @@ def config_init():
         config_save()
         raise ConfigFileInited()
 
-    with open(CONFIG_FILENAME, 'r', encoding='utf-8') as fr:
-        SETTINGS = yaml.safe_load(fr)
-    with open(CONFIG_FILENAME_BASIC, 'r', encoding='utf-8') as fr:
-        SETTINGS_BASIC = yaml.safe_load(fr)
-
-    SETTINGS = merge_defaults(DEFAULT_SETTINGS, SETTINGS)
-    SETTINGS_BASIC = merge_defaults(DEFAULT_SETTINGS_BASIC, SETTINGS_BASIC)
+    SETTINGS, SETTINGS_BASIC = load_config_files()
 
     if SETTINGS.get('version', None) != CONFIG_FILE_VERSION or SETTINGS_BASIC.get('version', None) != CONFIG_FILE_VERSION:
         logger.error(f"Configuration file version mismatch! Please delete the {CONFIG_FILENAME_BASIC} and {CONFIG_FILENAME} files and run the program again to generate the latest version of the configuration files.")
         raise Exception(f'配置文件版本不匹配！请删除 {CONFIG_FILENAME_BASIC} {CONFIG_FILENAME} 文件后再次运行程序，以生成最新版本的配置文件。')
-    if SETTINGS['ws']['master_uuid'] is None:
-        SETTINGS['ws']['master_uuid'] = str(uuid.uuid4())
-        config_save()
     SERVER_IP = SETTINGS['SERVER_IP'] or get_current_ip()
 
-    for chann in ['channel_a', 'channel_b']:
-        SETTINGS['dglab3'][chann]['avatar_params'] = SETTINGS_BASIC['dglab3'][chann]['avatar_params']
-        SETTINGS['dglab3'][chann]['mode'] = SETTINGS_BASIC['dglab3'][chann]['mode']
-        SETTINGS['dglab3'][chann]['strength_limit'] = SETTINGS_BASIC['dglab3'][chann]['strength_limit']
-        normalize_avatar_param_entries(SETTINGS['dglab3'][chann])
-
-    logger.remove()
-    logger.add(sys.stderr, level=SETTINGS['log_level'])
+    reset_logger()
+    update_config_mtimes()
     logger.success("The configuration file initialization is complete. The WebSocket service needs to listen for incoming connections. If a firewall prompt appears, please click Allow Access.")
     logger.success("配置文件初始化完成，Websocket服务需要监听外来连接，如弹出防火墙提示，请点击允许访问。")
 
@@ -528,6 +634,8 @@ def main():
 
     th = Thread(target=async_main_wrapper, daemon=True)
     th.start()
+    reload_th = Thread(target=config_hot_reload_loop, daemon=True)
+    reload_th.start()
 
     if SETTINGS['general']['auto_open_qr_web_page']:
         import webbrowser
