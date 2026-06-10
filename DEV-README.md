@@ -2,12 +2,33 @@
 
 ## build
 
+Current packaging uses the checked-in spec file and builds a `onedir` bundle.
+
+1. Create or activate the local virtual environment.
+2. Install dependencies:
+
 ```cmd
-pyinstaller --onefile shocking_vrchat.py ^
-  --name shocking_vrchat ^
-  --add-data "templates\tiny-qr.html;templates" ^
-  --add-data "wave_presets\*.json;wave_presets"
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+.\.venv\Scripts\python.exe -m pip install pyinstaller
 ```
+
+3. Build:
+
+```cmd
+.\.venv\Scripts\python.exe -m PyInstaller --clean -y shocking_vrchat.spec
+```
+
+4. Output:
+
+```text
+dist\shocking_vrchat\shocking_vrchat.exe
+```
+
+Notes:
+
+- Do not switch back to `--onefile` unless you also re-verify runtime extraction and bundled resource loading.
+- The spec already includes the HTML templates and `wave_presets/*.json`.
+- If a previous built exe is still running, stop it before rebuilding, otherwise PyInstaller may fail to overwrite `dist\shocking_vrchat`.
 
 ## touch advanced mode
 

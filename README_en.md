@@ -151,6 +151,35 @@ ws: # WebSocket service configuration
   master_uuid: 6da2fd3b-a6e5-4af4-afc1-96bfd2e9e95c # Automatically generated randomly on first startup
 ```
 
+## Build
+
+The current Windows packaging flow uses the committed spec file and builds a `onedir` bundle.
+
+1. Install dependencies into the local virtual environment:
+
+```cmd
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+.\.venv\Scripts\python.exe -m pip install pyinstaller
+```
+
+2. Build with PyInstaller:
+
+```cmd
+.\.venv\Scripts\python.exe -m PyInstaller --clean -y shocking_vrchat.spec
+```
+
+3. The executable will be generated at:
+
+```text
+dist\shocking_vrchat\shocking_vrchat.exe
+```
+
+Notes:
+
+- The spec already bundles `templates/*.html` and `wave_presets/*.json`.
+- If `dist\shocking_vrchat` cannot be overwritten, make sure no previous `shocking_vrchat.exe` process is still running.
+- This repo currently uses `onedir` instead of `onefile` because runtime resource loading is more reliable in the current setup.
+
 ## FAQ
 
 ### Is there an escape route?

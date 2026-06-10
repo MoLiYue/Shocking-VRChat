@@ -27,6 +27,9 @@ class DGWSMessage():
         return ret
 
 class DGConnection():
+    wave_observer = None
+    clear_observer = None
+
     def __init__(self, ws_connection: WebSocketCommonProtocol, client_uuid=None, SETTINGS:dict=None) -> None:
         if SETTINGS is None:
             raise ValueError("DGConnection SETTINGS not provided.")
@@ -145,12 +148,22 @@ class DGConnection():
 
     @classmethod
     async def broadcast_wave(cls, channel='A', wavestr=DEFAULT_WAVE):
+        if cls.wave_observer is not None:
+            try:
+                cls.wave_observer(channel, wavestr)
+            except Exception:
+                logger.exception('wave_observer failed')
         for conn in WS_CONNECTIONS:
             conn : cls
             await conn.send_wave(channel=channel, wavestr=wavestr)
 
     @classmethod
     async def broadcast_clear_wave(cls, channel='A'):
+        if cls.clear_observer is not None:
+            try:
+                cls.clear_observer(channel)
+            except Exception:
+                logger.exception('clear_observer failed')
         for conn in WS_CONNECTIONS:
             conn : cls
             await conn.clear_wave(channel=channel)

@@ -154,6 +154,35 @@ ws: # Websocket 服务配置
 
 ```
 
+## Build
+
+当前 Windows 打包流程使用仓库内的 `shocking_vrchat.spec`，并输出 `onedir` 目录版可执行文件。
+
+1. 先在本地虚拟环境中安装依赖：
+
+```cmd
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+.\.venv\Scripts\python.exe -m pip install pyinstaller
+```
+
+2. 执行打包：
+
+```cmd
+.\.venv\Scripts\python.exe -m PyInstaller --clean -y shocking_vrchat.spec
+```
+
+3. 产物路径：
+
+```text
+dist\shocking_vrchat\shocking_vrchat.exe
+```
+
+说明：
+
+- `shocking_vrchat.spec` 已经包含 `templates/*.html` 和 `wave_presets/*.json`。
+- 如果 `dist\shocking_vrchat` 无法覆盖，请先确认旧的 `shocking_vrchat.exe` 进程已经退出。
+- 当前仓库默认使用 `onedir`，而不是 `onefile`，这样对模板和波形资源的运行时加载更稳定。
+
 ## FAQ
 
 ### 是否有逃生通道

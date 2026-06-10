@@ -18,7 +18,16 @@ from srv.command_queue import CommandQueue, CommandPriority
 from pythonosc.osc_server import AsyncIOOSCUDPServer
 from pythonosc.dispatcher import Dispatcher
 
-app = Flask(__name__)
+
+def get_runtime_base_dir():
+    if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
+        return sys._MEIPASS
+    return os.path.dirname(os.path.abspath(__file__))
+
+
+RUNTIME_BASE_DIR = get_runtime_base_dir()
+app = Flask(__name__, template_folder=os.path.join(RUNTIME_BASE_DIR, "templates"))
+WAVE_HISTORY_SAMPLE_MS = 25
 
 CONFIG_FILE_VERSION  = 'v0.2'
 CONFIG_FILENAME = f'settings-advanced-{CONFIG_FILE_VERSION}.yaml'
@@ -422,7 +431,14 @@ def web_index():
 
 @app.route("/qr")
 def web_qr():
-    return render_template('tiny-qr.html', content=f'https://www.dungeon-lab.com/app-download.php#DGLAB-SOCKET#ws://{SERVER_IP}:{SETTINGS["ws"]["listen_port"]}/{SETTINGS["ws"]["master_uuid"]}')
+    return render_template('tiny-qr.html', content=get_qr_content())
+
+
+def get_qr_content():
+    return (
+        f'https://www.dungeon-lab.com/app-download.php#DGLAB-SOCKET#ws://'
+        f'{SERVER_IP}:{SETTINGS["ws"]["listen_port"]}/{SETTINGS["ws"]["master_uuid"]}'
+    )
 
 @app.route('/conns')
 def get_conns():
@@ -480,7 +496,12 @@ async def api_v1_status():
 
 @app.route('/api/v1/wave_history')
 def api_v1_wave_history():
-    return {'A': list(_wave_history['A']), 'B': list(_wave_history['B'])}
+    return {'A': _get_wave_history_snapshot('A'), 'B': _get_wave_history_snapshot('B')}
+
+
+@app.route('/api/v1/qr_payload')
+def api_v1_qr_payload():
+    return {'content': get_qr_content()}
 
 @app.route('/api/v1/shock/<channel>/<second>', endpoint='api_v1_shock')
 @allow_vrchat_only
@@ -604,17 +625,50 @@ command_queue = CommandQueue()
 
 # Wave history ring buffer for dashboard visualization
 _wave_history = {'A': collections.deque(maxlen=200), 'B': collections.deque(maxlen=200)}
+_wave_history_last_update = {'A': 0.0, 'B': 0.0}
 
 def _record_wave(channel, wavestr):
     """Parse wavestr and append strength samples to history."""
     try:
+        channel = channel.upper()
         ops = json.loads(wavestr)
         for op in ops:
             # Each op is 16 hex chars: 8 freq + 8 strength (4 sub-steps)
             strengths = [int(op[8+i*2:10+i*2], 16) for i in range(4)]
             _wave_history[channel].extend(strengths)
+        _wave_history_last_update[channel] = time.monotonic()
     except Exception:
         pass
+
+
+def _clear_wave_history(channel):
+    channel = channel.upper()
+    if channel not in _wave_history:
+        return
+    _wave_history[channel].clear()
+    _wave_history_last_update[channel] = 0.0
+
+
+DGConnection.wave_observer = _record_wave
+DGConnection.clear_observer = _clear_wave_history
+
+
+def _get_wave_history_snapshot(channel):
+    history = list(_wave_history[channel])
+    if not history:
+        return []
+
+    last_update = _wave_history_last_update.get(channel, 0.0)
+    if last_update <= 0.0:
+        return history
+
+    elapsed_ms = max(0.0, (time.monotonic() - last_update) * 1000.0)
+    elapsed_samples = int(elapsed_ms // WAVE_HISTORY_SAMPLE_MS)
+    if elapsed_samples <= 0:
+        return history
+    if elapsed_samples >= len(history):
+        return [0] * len(history)
+    return history[elapsed_samples:] + [0] * elapsed_samples
 
 
 async def command_queue_processor():
@@ -626,10 +680,8 @@ async def command_queue_processor():
                 handler_fn = cmd.value['handler']
                 await handler_fn(cmd.value['val'], context=cmd.value['context'])
             elif cmd.action == 'wave':
-                _record_wave(cmd.channel, cmd.value)
                 await DGConnection.broadcast_wave(channel=cmd.channel, wavestr=cmd.value)
             elif cmd.action == 'clear':
-                _wave_history[cmd.channel].clear()
                 await DGConnection.broadcast_clear_wave(cmd.channel)
             command_queue.task_done()
         except Exception as e:

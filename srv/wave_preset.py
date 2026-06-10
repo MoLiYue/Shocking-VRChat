@@ -1,12 +1,20 @@
 import json
 import math
+import sys
 from pathlib import Path
 from typing import Dict, List, Optional
 
 from loguru import logger
 
 
-PRESET_DIR = Path(__file__).resolve().parent.parent / "wave_presets"
+
+def get_runtime_base_dir() -> Path:
+    if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
+        return Path(sys._MEIPASS)
+    return Path(__file__).resolve().parent.parent
+
+
+PRESET_DIR = get_runtime_base_dir() / "wave_presets"
 
 
 def _coerce_ops(raw_wave_data) -> List[str]:
