@@ -1,0 +1,308 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Shocking VRChat - 控制面板</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #1a1a2e; color: #eee; min-height: 100vh; padding: 20px; }
+h1 { text-align: center; margin-bottom: 20px; color: #e94560; }
+.grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; max-width: 900px; margin: 0 auto; }
+.card { background: #16213e; border-radius: 12px; padding: 20px; border: 1px solid #0f3460; }
+.card h2 { color: #e94560; margin-bottom: 12px; font-size: 1.1em; }
+.status-dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 6px; }
+.status-dot.online { background: #4caf50; }
+.status-dot.offline { background: #f44336; }
+.channel-row { display: flex; align-items: center; justify-content: space-between; margin: 8px 0; padding: 8px; background: #0f3460; border-radius: 8px; }
+.channel-label { font-weight: bold; font-size: 1.1em; }
+.strength-bar { width: 120px; height: 20px; background: #1a1a2e; border-radius: 10px; overflow: hidden; position: relative; }
+.strength-fill { height: 100%; border-radius: 10px; transition: width 0.3s; }
+.strength-fill.ch-a { background: linear-gradient(90deg, #4caf50, #8bc34a); }
+.strength-fill.ch-b { background: linear-gradient(90deg, #2196f3, #03a9f4); }
+.strength-val { font-size: 0.9em; min-width: 60px; text-align: right; }
+.controls { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+.btn { padding: 8px 16px; border: none; border-radius: 6px; cursor: pointer; font-size: 0.9em; transition: transform 0.1s, opacity 0.2s; }
+.btn:active { transform: scale(0.95); }
+.btn-red { background: #e94560; color: #fff; }
+.btn-green { background: #4caf50; color: #fff; }
+.btn-blue { background: #2196f3; color: #fff; }
+.btn-gray { background: #555; color: #fff; }
+.btn:disabled { opacity: 0.4; cursor: not-allowed; }
+select, input[type=range] { background: #0f3460; color: #eee; border: 1px solid #333; border-radius: 6px; padding: 6px; }
+select { width: 100%; margin-top: 4px; }
+input[type=range] { width: 100%; margin-top: 4px; }
+.range-label { display: flex; justify-content: space-between; font-size: 0.8em; color: #aaa; margin-top: 2px; }
+.log-area { max-height: 200px; overflow-y: auto; font-family: monospace; font-size: 0.8em; background: #0a0a1a; padding: 10px; border-radius: 8px; margin-top: 8px; }
+.log-entry { padding: 2px 0; border-bottom: 1px solid #1a1a2e; }
+.log-entry.warn { color: #ff9800; }
+.log-entry.error { color: #f44336; }
+.qr-section { text-align: center; margin-top: 12px; }
+.qr-section img { max-width: 200px; border-radius: 8px; }
+.full-width { grid-column: 1 / -1; }
+@media (max-width: 640px) { .grid { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<h1>⚡ Shocking VRChat</h1>
+<div class="grid">
+  <!-- 设备状态 -->
+  <div class="card">
+    <h2>📱 设备状态</h2>
+    <div id="device-status">
+      <p><span class="status-dot offline" id="conn-dot"></span><span id="conn-text">未连接</span></p>
+    </div>
+    <div class="channel-row">
+      <span class="channel-label">A</span>
+      <div class="strength-bar"><div class="strength-fill ch-a" id="bar-a" style="width:0%"></div></div>
+      <span class="strength-val" id="val-a">0 / 0</span>
+    </div>
+    <div class="channel-row">
+      <span class="channel-label">B</span>
+      <div class="strength-bar"><div class="strength-fill ch-b" id="bar-b" style="width:0%"></div></div>
+      <span class="strength-val" id="val-b">0 / 0</span>
+    </div>
+  </div>
+
+  <!-- 二维码 -->
+  <div class="card">
+    <h2>🔗 连接二维码</h2>
+    <div class="qr-section">
+      <div id="qr-container"></div>
+      <p style="margin-top:8px;font-size:0.85em;color:#aaa;">APP 扫码连接</p>
+    </div>
+  </div>
+
+  <!-- 强度控制 -->
+  <div class="card">
+    <h2>🎚️ 强度控制</h2>
+    <label style="font-size:0.9em;">目标通道</label>
+    <select id="ctrl-channel">
+      <option value="A">A 通道</option>
+      <option value="B">B 通道</option>
+      <option value="all">全部</option>
+    </select>
+    <label style="font-size:0.9em;margin-top:8px;display:block;">强度</label>
+    <input type="range" id="strength-slider" min="0" max="100" value="0">
+    <div class="range-label"><span>0</span><span id="slider-val">0</span><span>100</span></div>
+    <div class="controls" style="margin-top:12px;">
+      <button class="btn btn-red" onclick="sendStrength('set')">设定</button>
+      <button class="btn btn-green" onclick="sendStrength('shock')">⚡ 一键开火</button>
+      <button class="btn btn-gray" onclick="sendStop()">⏹ 停止</button>
+    </div>
+  </div>
+
+  <!-- 波形选择 -->
+  <div class="card">
+    <h2>🌊 波形</h2>
+    <label style="font-size:0.9em;">波形预设</label>
+    <select id="wave-select"></select>
+    <label style="font-size:0.9em;margin-top:8px;display:block;">持续时间 (秒)</label>
+    <input type="range" id="wave-duration" min="1" max="10" value="3">
+    <div class="range-label"><span>1s</span><span id="duration-val">3s</span><span>10s</span></div>
+    <div class="controls" style="margin-top:12px;">
+      <button class="btn btn-blue" onclick="sendWave()">▶ 发送波形</button>
+      <button class="btn btn-gray" onclick="clearWave()">🗑 清空队列</button>
+    </div>
+  </div>
+
+  <!-- 波形显示 -->
+  <div class="card full-width">
+    <h2>📈 实时波形</h2>
+    <div style="display:flex;gap:12px;flex-wrap:wrap;">
+      <div style="flex:1;min-width:300px;">
+        <p style="font-size:0.85em;color:#8bc34a;margin-bottom:4px;">A 通道</p>
+        <canvas id="wave-canvas-a" height="100" style="width:100%;background:#0a0a1a;border-radius:8px;"></canvas>
+      </div>
+      <div style="flex:1;min-width:300px;">
+        <p style="font-size:0.85em;color:#03a9f4;margin-bottom:4px;">B 通道</p>
+        <canvas id="wave-canvas-b" height="100" style="width:100%;background:#0a0a1a;border-radius:8px;"></canvas>
+      </div>
+    </div>
+  </div>
+
+  <!-- 日志 -->
+  <div class="card full-width">
+    <h2>📋 日志</h2>
+    <div class="log-area" id="log-area"></div>
+  </div>
+</div>
+
+<script>
+const API_BASE = window.location.origin;
+let pollTimer = null;
+
+// --- 状态轮询 ---
+async function pollStatus() {
+  try {
+    const resp = await fetch(API_BASE + '/api/v1/status');
+    const data = await resp.json();
+    const devices = data.devices || [];
+    const dot = document.getElementById('conn-dot');
+    const text = document.getElementById('conn-text');
+    if (devices.length > 0) {
+      dot.className = 'status-dot online';
+      text.textContent = `已连接 (${devices.length} 台设备)`;
+      const dev = devices[0];
+      if (dev.attr && dev.attr.strength) {
+        updateBars(dev.attr.strength);
+      }
+    } else {
+      dot.className = 'status-dot offline';
+      text.textContent = '未连接';
+      updateBars({A:0, B:0});
+    }
+  } catch(e) {
+    document.getElementById('conn-dot').className = 'status-dot offline';
+    document.getElementById('conn-text').textContent = '服务器离线';
+  }
+}
+
+function updateBars(strength) {
+  const a = strength.A || 0;
+  const b = strength.B || 0;
+  document.getElementById('bar-a').style.width = Math.min(a, 100) + '%';
+  document.getElementById('bar-b').style.width = Math.min(b, 100) + '%';
+  document.getElementById('val-a').textContent = a + ' / 200';
+  document.getElementById('val-b').textContent = b + ' / 200';
+}
+
+// --- 强度控制 ---
+function sendStrength(mode) {
+  const channel = document.getElementById('ctrl-channel').value;
+  const val = document.getElementById('strength-slider').value;
+  if (mode === 'shock') {
+    const duration = parseFloat(val) / 20 || 1;
+    apiFetch(`/api/v1/shock/${channel}/${Math.min(duration, 5)}`);
+    addLog(`⚡ 开火: ${channel} 持续${duration.toFixed(1)}s`);
+  } else {
+    // 用 sendwave 发送固定强度波形
+    const strengthHex = Math.min(parseInt(val), 100).toString(16).padStart(2, '0').toUpperCase();
+    const wavedata = `0A0A0A0A${strengthHex}${strengthHex}${strengthHex}${strengthHex}`;
+    apiFetch(`/api/v1/sendwave/${channel}/10/${wavedata}`);
+    addLog(`🎚️ 设定强度: ${channel} = ${val}`);
+  }
+}
+
+function sendStop() {
+  const channel = document.getElementById('ctrl-channel').value;
+  const channels = channel === 'all' ? ['A', 'B'] : [channel];
+  channels.forEach(ch => {
+    apiFetch(`/api/v1/sendwave/${ch}/10/0A0A0A0A00000000`);
+  });
+  addLog('⏹ 停止输出');
+}
+
+// --- 波形控制 ---
+async function loadWavePresets() {
+  try {
+    const resp = await fetch(API_BASE + '/api/v1/wave_presets');
+    const data = await resp.json();
+    const sel = document.getElementById('wave-select');
+    sel.innerHTML = '';
+    (data.presets || []).forEach(name => {
+      const opt = document.createElement('option');
+      opt.value = name;
+      opt.textContent = name.replace(/^pulse-/, '').replace(/-\d+$/, '');
+      sel.appendChild(opt);
+    });
+  } catch(e) {
+    addLog('⚠️ 无法加载波形预设列表', 'warn');
+  }
+}
+
+function sendWave() {
+  const channel = document.getElementById('ctrl-channel').value;
+  const preset = document.getElementById('wave-select').value;
+  const duration = document.getElementById('wave-duration').value;
+  if (!preset) { addLog('⚠️ 请选择波形', 'warn'); return; }
+  const channels = channel === 'all' ? ['A', 'B'] : [channel];
+  channels.forEach(ch => {
+    apiFetch(`/api/v1/wave_preset/${ch}/${preset}/${duration}`);
+  });
+  addLog(`🌊 发送波形: ${preset} → ${channel} (${duration}s)`);
+}
+
+function clearWave() {
+  const channel = document.getElementById('ctrl-channel').value;
+  const channels = channel === 'all' ? ['A', 'B'] : [channel];
+  channels.forEach(ch => {
+    apiFetch(`/api/v1/sendwave/${ch}/1/0A0A0A0A00000000`);
+  });
+  addLog('🗑 清空波形队列');
+}
+
+// --- 工具函数 ---
+async function apiFetch(path) {
+  try {
+    const resp = await fetch(API_BASE + path, {headers: {'User-Agent': 'UnityPlayer/2022.3.22f1-DWR (UnityWebRequest/1.0, libcurl/8.5.0-DEV)'}});
+    if (!resp.ok) addLog(`❌ API错误: ${resp.status}`, 'error');
+  } catch(e) {
+    addLog(`❌ 请求失败: ${e.message}`, 'error');
+  }
+}
+
+function addLog(msg, level='') {
+  const area = document.getElementById('log-area');
+  const entry = document.createElement('div');
+  entry.className = 'log-entry ' + level;
+  entry.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+  area.prepend(entry);
+  if (area.children.length > 100) area.lastChild.remove();
+}
+
+// --- 滑块实时显示 ---
+document.getElementById('strength-slider').oninput = function() {
+  document.getElementById('slider-val').textContent = this.value;
+};
+document.getElementById('wave-duration').oninput = function() {
+  document.getElementById('duration-val').textContent = this.value + 's';
+};
+
+// --- QR码 ---
+async function loadQR() {
+  const container = document.getElementById('qr-container');
+  container.innerHTML = `<a href="${API_BASE}/qr" target="_blank"><button class="btn btn-blue">打开二维码页面</button></a>`;
+}
+
+// --- 波形绘制 ---
+function drawWave(canvasId, samples, color) {
+  const canvas = document.getElementById(canvasId);
+  const ctx = canvas.getContext('2d');
+  canvas.width = canvas.clientWidth * (window.devicePixelRatio || 1);
+  canvas.height = canvas.clientHeight * (window.devicePixelRatio || 1);
+  const w = canvas.width, h = canvas.height;
+  ctx.clearRect(0, 0, w, h);
+  if (!samples || samples.length === 0) return;
+  ctx.beginPath();
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 1.5;
+  const len = samples.length;
+  for (let i = 0; i < len; i++) {
+    const x = (i / (len - 1)) * w;
+    const y = h - (samples[i] / 100) * h;
+    i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+  }
+  ctx.stroke();
+}
+
+async function pollWaveHistory() {
+  try {
+    const resp = await fetch(API_BASE + '/api/v1/wave_history');
+    const data = await resp.json();
+    drawWave('wave-canvas-a', data.A, '#8bc34a');
+    drawWave('wave-canvas-b', data.B, '#03a9f4');
+  } catch(e) {}
+}
+
+// --- 初始化 ---
+pollStatus();
+pollTimer = setInterval(pollStatus, 3000);
+pollWaveHistory();
+setInterval(pollWaveHistory, 500);
+loadWavePresets();
+loadQR();
+addLog('🚀 控制面板已启动');
+</script>
+</body>
+</html>

@@ -6,10 +6,16 @@ import time, asyncio, math, json
 
 from ..connector.coyotev3ws import DGConnection
 from ..wave_preset import WavePresetLibrary
+from ..command_queue import CommandQueue, CommandPriority
 
 
 class ShockHandler(BaseHandler):
     _wave_library = WavePresetLibrary()
+    _command_queue: CommandQueue = None  # Shared across all handlers
+
+    @classmethod
+    def set_command_queue(cls, queue: CommandQueue):
+        cls._command_queue = queue
 
     def __init__(self, SETTINGS: dict, DG_CONN: DGConnection, channel_name: str, handler_mode: str = None) -> None:
         self.SETTINGS = SETTINGS
@@ -70,8 +76,22 @@ class ShockHandler(BaseHandler):
             'mode': self.shock_mode,
             'channel': self.channel,
         }
-        asyncio.ensure_future(self._handler(val, context=context))
+        if self._command_queue:
+            asyncio.ensure_future(self._enqueue_osc(val, context))
+        else:
+            asyncio.ensure_future(self._handler(val, context=context))
         return None
+
+    async def _enqueue_osc(self, val, context):
+        accepted = await self._command_queue.put(
+            CommandPriority.OSC_INTERACTION,
+            self.channel,
+            'osc_trigger',
+            value={'val': val, 'context': context, 'handler': self._handler},
+            source_id=f"{self.channel}_{self.shock_mode}_{context.get('address', '')}",
+        )
+        if not accepted:
+            logger.debug(f"[queue] dropped (cooldown): {self.channel} {self.shock_mode} {context.get('address')}")
 
     @staticmethod
     def summarize_wave(wavestr):

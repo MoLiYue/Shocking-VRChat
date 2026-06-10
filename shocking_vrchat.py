@@ -1,5 +1,6 @@
 from typing import List
 import asyncio
+import collections
 import yaml, uuid, os, sys, traceback, time, socket, re, json
 from threading import Thread
 from loguru import logger
@@ -12,7 +13,7 @@ from websockets.server import serve as wsserve
 import srv
 from srv.connector.coyotev3ws import DGWSMessage, DGConnection
 from srv.handler.shock_handler import ShockHandler
-from srv.handler.machine_handler import TuyaHandler, TuYaConnection
+from srv.command_queue import CommandQueue, CommandPriority
 
 from pythonosc.osc_server import AsyncIOOSCUDPServer
 from pythonosc.dispatcher import Dispatcher
@@ -405,7 +406,7 @@ def get_current_ip():
 
 @app.route("/")
 def web_index():
-    return redirect("/qr", code=302)
+    return redirect("/dashboard", code=302)
 
 @app.route("/qr")
 def web_qr():
@@ -462,9 +463,12 @@ async def api_v1_status():
         'healthy': 'ok',
         'devices': [
             *[{"type": 'shock', 'device':'coyotev3', 'attr': {'strength':conn.strength, 'uuid':conn.uuid}} for conn in srv.WS_CONNECTIONS],
-            *[{"type": 'machine', 'device':'tuya', 'attr': {}} for conn in []], # TODO
         ]
     }
+
+@app.route('/api/v1/wave_history')
+def api_v1_wave_history():
+    return {'A': list(_wave_history['A']), 'B': list(_wave_history['B'])}
 
 @app.route('/api/v1/shock/<channel>/<second>', endpoint='api_v1_shock')
 @allow_vrchat_only
@@ -482,10 +486,12 @@ async def api_v1_shock(channel, second):
     repeat = int(10 * second)
     for _ in range(repeat // 10):
         for chan in channels:
-            await api_v1_sendwave(chan, 10, '0A0A0A0A64646464')
+            wavestr = json.dumps(['0A0A0A0A64646464'] * 10, separators=(',', ':'))
+            await command_queue.put(CommandPriority.API, chan, 'wave', value=wavestr, source_id='api_shock')
     if repeat % 10 > 0:
         for chan in channels:
-            await api_v1_sendwave(chan, repeat % 10, '0A0A0A0A64646464')
+            wavestr = json.dumps(['0A0A0A0A64646464'] * (repeat % 10), separators=(',', ':'))
+            await command_queue.put(CommandPriority.API, chan, 'wave', value=wavestr, source_id='api_shock')
     return {'result': 'OK'}
 
 @app.route('/api/v1/sendwave/<channel>/<repeat>/<wavedata>', endpoint='api_v1_sendwave')
@@ -518,10 +524,9 @@ async def api_v1_sendwave(channel, repeat, wavedata):
     except:
         logger.warning('[API][sendwave] Invalid wave, set to 0A0A0A0A64646464.')
         wavedata = '0A0A0A0A64646464'
-    wavestr = [wavedata for _ in range(repeat)]
-    wavestr = json.dumps(wavestr, separators=(',', ':'))
+    wavestr = json.dumps([wavedata] * repeat, separators=(',', ':'))
     logger.success(f'[API][sendwave] C:{channel} R:{repeat} W:{wavedata}')
-    await DGConnection.broadcast_wave(channel=channel, wavestr=wavestr)
+    await command_queue.put(CommandPriority.API, channel, 'wave', value=wavestr, source_id='api_sendwave')
     return {'result': 'OK'}
 
 def strip_basic_settings(settings: dict):
@@ -552,11 +557,80 @@ def update_config():
         'message': "Some Message, like, Please restart."
     }
 
+@app.route('/dashboard')
+def web_dashboard():
+    return render_template('dashboard.html')
+
+@app.route('/api/v1/wave_presets')
+def api_v1_wave_presets():
+    from srv.wave_preset import WavePresetLibrary
+    lib = WavePresetLibrary()
+    return {'presets': list(lib.presets.keys())}
+
+@app.route('/api/v1/wave_preset/<channel>/<preset_name>/<int:duration>')
+async def api_v1_wave_preset(channel, preset_name, duration):
+    from srv.wave_preset import WavePresetLibrary
+    lib = WavePresetLibrary()
+    preset = lib.get(preset_name)
+    if not preset:
+        return {'error': 'preset not found'}, 404
+    channel = channel.upper()
+    if channel not in ['A', 'B']:
+        channel = 'A'
+    duration = min(max(duration, 1), 10)
+    # Send wave data in chunks to cover duration
+    ops = preset['ops']
+    ops_needed = duration * 10  # 10 ops per second
+    repeated = (ops * ((ops_needed // len(ops)) + 1))[:ops_needed]
+    for i in range(0, len(repeated), 80):
+        chunk = repeated[i:i+80]
+        wavestr = json.dumps(chunk, separators=(',', ':'))
+        await command_queue.put(CommandPriority.API, channel, 'wave', value=wavestr, source_id='api_wave_preset')
+    return {'result': 'OK', 'ops_sent': len(repeated)}
+
+command_queue = CommandQueue()
+
+# Wave history ring buffer for dashboard visualization
+_wave_history = {'A': collections.deque(maxlen=200), 'B': collections.deque(maxlen=200)}
+
+def _record_wave(channel, wavestr):
+    """Parse wavestr and append strength samples to history."""
+    try:
+        ops = json.loads(wavestr)
+        for op in ops:
+            # Each op is 16 hex chars: 8 freq + 8 strength (4 sub-steps)
+            strengths = [int(op[8+i*2:10+i*2], 16) for i in range(4)]
+            _wave_history[channel].extend(strengths)
+    except Exception:
+        pass
+
+
+async def command_queue_processor():
+    """Process commands from the priority queue."""
+    while True:
+        try:
+            cmd = await command_queue.get()
+            if cmd.action == 'osc_trigger':
+                handler_fn = cmd.value['handler']
+                await handler_fn(cmd.value['val'], context=cmd.value['context'])
+            elif cmd.action == 'wave':
+                _record_wave(cmd.channel, cmd.value)
+                await DGConnection.broadcast_wave(channel=cmd.channel, wavestr=cmd.value)
+            elif cmd.action == 'clear':
+                _wave_history[cmd.channel].clear()
+                await DGConnection.broadcast_clear_wave(cmd.channel)
+            command_queue.task_done()
+        except Exception as e:
+            logger.error(f"[command_queue] error: {e}")
+            await asyncio.sleep(0.01)
+
+
 async def wshandler(connection):
     client = DGConnection(connection, SETTINGS=SETTINGS)
     await client.serve()
 
 async def async_main():
+    asyncio.ensure_future(command_queue_processor())
     for handler in handlers:
         handler.start_background_jobs()
     try: 
@@ -618,6 +692,8 @@ def main():
     dispatcher = Dispatcher()
     handlers = []
 
+    ShockHandler.set_command_queue(command_queue)
+
     for chann in ['A', 'B']:
         config_chann_name = f'channel_{chann.lower()}'
         channel_handlers = {}
@@ -635,19 +711,6 @@ def main():
             logger.success(f"Channel {chann} mode {param_mode} listening {param_path}")
             dispatcher.map(param_path, channel_handlers[param_mode].osc_handler)
     
-    if 'machine' in SETTINGS and 'tuya' in SETTINGS['machine']:
-        TuyaConn = TuYaConnection(
-            access_id=SETTINGS['machine']['tuya']['access_id'],
-            access_key=SETTINGS['machine']['tuya']['access_key'],
-            device_ids=SETTINGS['machine']['tuya']['device_ids'],
-        )
-        machine_tuya_handler = TuyaHandler(SETTINGS=SETTINGS, DEV_CONN=TuyaConn)
-        handlers.append(machine_tuya_handler)
-        for param in SETTINGS['machine']['tuya']['avatar_params']:
-            logger.success(f"Machine Listening：{param}")
-            dispatcher.map(param, machine_tuya_handler.osc_handler)
-
-
     th = Thread(target=async_main_wrapper, daemon=True)
     th.start()
     reload_th = Thread(target=config_hot_reload_loop, daemon=True)
