@@ -1,6 +1,7 @@
 # Project files
 settings*.yaml
 profiles/
+curve_config.yaml
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

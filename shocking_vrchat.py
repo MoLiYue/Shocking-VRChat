@@ -138,6 +138,9 @@ SETTINGS = {
                         },
                     ],
                     'n_derivative': 1, # 0 for distance, 1 for velocity, 2 for acceleration, 3 for jerk
+                    'min_duration': 0.8,      # 触发后最小波形播放时长（秒）
+                    'burst_threshold': 0.3,   # 短于此秒数视为短触发（一激灵）
+                    'burst_scale': 1.0,       # 短触发时的波形强度倍率
                     'derivative_params': [
                         {
                             "top": 1,
@@ -212,6 +215,9 @@ SETTINGS = {
                         },
                     ],
                     'n_derivative': 1,
+                    'min_duration': 0.8,
+                    'burst_threshold': 0.3,
+                    'burst_scale': 1.0,
                     'derivative_params': [
                         {
                             "top": 1,
@@ -633,6 +639,81 @@ def update_config():
 def web_dashboard():
     return render_template('dashboard.html')
 
+@app.route('/curve')
+def web_curve_editor():
+    return render_template('curve_editor.html')
+
+# --- Curve Mapping ---
+DEFAULT_CURVE_POINTS = [{'x': 0, 'y': 0}, {'x': 0.1, 'y': 0}, {'x': 1, 'y': 1}]  # ReLU
+_curve_config = {'a': None, 'b': None}  # None means use default
+
+def _load_curve_config():
+    global _curve_config
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)) if not getattr(sys, "frozen", False) else os.path.dirname(sys.executable), 'curve_config.yaml')
+    if os.path.exists(path):
+        with open(path, 'r', encoding='utf-8') as f:
+            data = yaml.safe_load(f) or {}
+            _curve_config['a'] = data.get('channel_a')
+            _curve_config['b'] = data.get('channel_b')
+
+def _save_curve_config():
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)) if not getattr(sys, "frozen", False) else os.path.dirname(sys.executable), 'curve_config.yaml')
+    data = {'channel_a': _curve_config['a'], 'channel_b': _curve_config['b']}
+    with open(path, 'w', encoding='utf-8') as f:
+        yaml.safe_dump(data, f, allow_unicode=True)
+
+def get_curve_points(channel):
+    ch = channel.lower()
+    return _curve_config.get(ch) or DEFAULT_CURVE_POINTS
+
+def apply_curve(value, points):
+    """Linearly interpolate value through control points."""
+    if not points or value <= 0:
+        return 0.0
+    if value >= 1:
+        return min(1.0, points[-1]['y'] if points else 1.0)
+    for i in range(len(points) - 1):
+        if value >= points[i]['x'] and value <= points[i + 1]['x']:
+            dx = points[i + 1]['x'] - points[i]['x']
+            if dx <= 0:
+                return points[i]['y']
+            t = (value - points[i]['x']) / dx
+            return points[i]['y'] + t * (points[i + 1]['y'] - points[i]['y'])
+    # value beyond last point
+    return points[-1]['y'] if points else value
+
+@app.route('/api/v1/curve/<channel>', methods=['GET'])
+def api_v1_curve_get(channel):
+    ch = channel.lower()
+    if ch not in ('a', 'b'):
+        return jsonify({'error': 'invalid channel'}), 400
+    pts = _curve_config.get(ch) or DEFAULT_CURVE_POINTS
+    return jsonify({'channel': ch, 'points': pts})
+
+@app.route('/api/v1/curve/<channel>', methods=['POST'])
+def api_v1_curve_set(channel):
+    ch = channel.lower()
+    if ch not in ('a', 'b'):
+        return jsonify({'success': False, 'message': 'invalid channel'}), 400
+    data = request.get_json()
+    pts = data.get('points', [])
+    # Validate
+    validated = []
+    for p in pts:
+        x = max(0.0, min(1.0, float(p.get('x', 0))))
+        y = max(0.0, min(1.0, float(p.get('y', 0))))
+        validated.append({'x': round(x, 4), 'y': round(y, 4)})
+    validated.sort(key=lambda p: p['x'])
+    _curve_config[ch] = validated
+    _save_curve_config()
+    # Update handlers
+    for handler in handlers:
+        if hasattr(handler, 'refresh_curve'):
+            handler.refresh_curve()
+    return jsonify({'success': True, 'points': validated})
+
+_load_curve_config()
+
 # --- Profile Management ---
 PROFILES_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)) if not getattr(sys, "frozen", False) else os.path.dirname(sys.executable), 'profiles')
 
@@ -899,6 +980,7 @@ def main():
 
     ShockHandler.set_command_queue(command_queue)
     ShockHandler.osc_activity_observer = _record_osc_activity
+    ShockHandler._curve_getter = get_curve_points
 
     for chann in ['A', 'B']:
         config_chann_name = f'channel_{chann.lower()}'

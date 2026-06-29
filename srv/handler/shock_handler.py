@@ -13,6 +13,7 @@ class ShockHandler(BaseHandler):
     _wave_library = WavePresetLibrary()
     _command_queue: CommandQueue = None  # Shared across all handlers
     osc_activity_observer = None  # Callback for OSC activity tracking
+    _curve_getter = None  # Callback: (channel) -> points list
 
     @classmethod
     def set_command_queue(cls, queue: CommandQueue):
@@ -257,6 +258,29 @@ class ShockHandler(BaseHandler):
             out_distance = 1 if out_distance > 1 else out_distance
         return out_distance
 
+    def apply_strength_curve(self, value):
+        """Apply custom param-to-strength curve mapping."""
+        if not self._curve_getter:
+            return value
+        points = self._curve_getter(self.channel)
+        if not points:
+            return value
+        # Linear interpolation through control points
+        if value <= 0:
+            return 0.0
+        if value >= 1.0:
+            return min(1.0, points[-1].get('y', 1.0) if points else 1.0)
+        for i in range(len(points) - 1):
+            px, py = points[i].get('x', 0), points[i].get('y', 0)
+            nx, ny = points[i + 1].get('x', 0), points[i + 1].get('y', 0)
+            if value >= px and value <= nx:
+                dx = nx - px
+                if dx <= 0:
+                    return py
+                t = (value - px) / dx
+                return py + t * (ny - py)
+        return points[-1].get('y', value) if points else value
+
     @staticmethod
     def normalize_between(value, bottom, top):
         if top <= bottom:
@@ -371,6 +395,7 @@ class ShockHandler(BaseHandler):
     async def handler_distance(self, distance, context=None):
         await self.set_clear_after(0.5)
         normalized = self.normalize_distance(distance)
+        normalized = self.apply_strength_curve(normalized)
         self.bg_wave_current_strength = normalized
         self.log_trigger(context, value=distance, normalized=normalized)
 
@@ -469,7 +494,9 @@ class ShockHandler(BaseHandler):
             )
 
     async def handler_touch(self, distance, context=None):
-        await self.set_clear_after(0.5)
+        touch_conf = self.get_mode_conf('touch')
+        min_duration = float(touch_conf.get('min_duration', 0.8))
+        await self.set_clear_after(max(0.5, min_duration))
         out_distance = self.normalize_distance(distance)
         self.log_trigger(context, value=distance, normalized=out_distance)
         if out_distance == 0:
@@ -500,6 +527,7 @@ class ShockHandler(BaseHandler):
         tick_time_window = self.bg_wave_update_time_window / 20
         next_tick_time   = 0
         last_strength    = 0
+        touch_active_since = 0  # timestamp when continuous touch started
         while 1:
             current_time = time.time()
             if current_time < next_tick_time:
@@ -521,8 +549,28 @@ class ShockHandler(BaseHandler):
 
             self.bg_wave_current_strength = current_strength
             if current_strength == last_strength == 0:
+                touch_active_since = 0
                 continue
+
+            # Track how long continuous touch has been active
+            if current_strength > 0 and touch_active_since == 0:
+                touch_active_since = current_time
+            elif current_strength == 0:
+                touch_active_since = 0
+
+            # Burst vs sustained: short touch gets higher scale ("一激灵")
+            touch_conf = self.get_mode_conf('touch')
+            burst_threshold = float(touch_conf.get('burst_threshold', 0.3))  # seconds
+            burst_scale = float(touch_conf.get('burst_scale', 1.0))
+
+            touch_duration = current_time - touch_active_since if touch_active_since > 0 else 0
             touch_preset, touch_scale = self.resolve_touch_profile(current_strength)
+
+            if touch_duration < burst_threshold:
+                # Short burst: use higher scale for "jolt" effect
+                touch_scale = min(1.0, max(touch_scale, burst_scale))
+            # else: sustained touch uses normal resolve_touch_profile scale (softer)
+
             wave = self.build_dynamic_wave(
                 'touch',
                 last_strength,
