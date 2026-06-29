@@ -34,6 +34,8 @@ class ShockHandler(BaseHandler):
             self._handler = self.handler_shock
         elif self.shock_mode == 'touch':
             self._handler = self.handler_touch
+        elif self.shock_mode == 'combo':
+            self._handler = self.handler_combo
         else:
             raise ValueError(f"Not supported mode: {self.shock_mode}")
         
@@ -54,6 +56,11 @@ class ShockHandler(BaseHandler):
 
         self.to_clear_time    = 0
         self.is_cleared       = True
+
+        # Combo mode state
+        self.combo_touch_start = 0      # when current continuous touch began
+        self.combo_in_touch_mode = False  # currently dispatching to touch logic
+        self.combo_shock_fired = False    # already fired shock for this touch
     
     def start_background_jobs(self):
         # logger.info(f"Channel: {self.channel}, background job started.")
@@ -64,6 +71,8 @@ class ShockHandler(BaseHandler):
             asyncio.ensure_future(self.shock_background_wave_feeder())
         elif self.shock_mode == 'touch':
             asyncio.ensure_future(self.touch_background_wave_feeder())
+        elif self.shock_mode == 'combo':
+            asyncio.ensure_future(self.combo_background_wave_feeder())
 
     def refresh_settings(self):
         self.shock_settings = self.SETTINGS['dglab3'][f'channel_{self.channel.lower()}']
@@ -159,6 +168,9 @@ class ShockHandler(BaseHandler):
                 self.active_mode_presets = {}
                 self.shock_started_at = 0
                 self.shock_last_strength = 0
+                self.combo_touch_start = 0
+                self.combo_in_touch_mode = False
+                self.combo_shock_fired = False
                 await self.DG_CONN.broadcast_clear_wave(self.channel)
                 logger.debug(f"[clear] channel={self.channel} mode={self.shock_mode} reason=timeout")
     
@@ -494,9 +506,7 @@ class ShockHandler(BaseHandler):
             )
 
     async def handler_touch(self, distance, context=None):
-        touch_conf = self.get_mode_conf('touch')
-        min_duration = float(touch_conf.get('min_duration', 0.8))
-        await self.set_clear_after(max(0.5, min_duration))
+        await self.set_clear_after(0.5)
         out_distance = self.normalize_distance(distance)
         self.log_trigger(context, value=distance, normalized=out_distance)
         if out_distance == 0:
@@ -527,7 +537,6 @@ class ShockHandler(BaseHandler):
         tick_time_window = self.bg_wave_update_time_window / 20
         next_tick_time   = 0
         last_strength    = 0
-        touch_active_since = 0  # timestamp when continuous touch started
         while 1:
             current_time = time.time()
             if current_time < next_tick_time:
@@ -549,28 +558,8 @@ class ShockHandler(BaseHandler):
 
             self.bg_wave_current_strength = current_strength
             if current_strength == last_strength == 0:
-                touch_active_since = 0
                 continue
-
-            # Track how long continuous touch has been active
-            if current_strength > 0 and touch_active_since == 0:
-                touch_active_since = current_time
-            elif current_strength == 0:
-                touch_active_since = 0
-
-            # Burst vs sustained: short touch gets higher scale ("一激灵")
-            touch_conf = self.get_mode_conf('touch')
-            burst_threshold = float(touch_conf.get('burst_threshold', 0.3))  # seconds
-            burst_scale = float(touch_conf.get('burst_scale', 1.0))
-
-            touch_duration = current_time - touch_active_since if touch_active_since > 0 else 0
             touch_preset, touch_scale = self.resolve_touch_profile(current_strength)
-
-            if touch_duration < burst_threshold:
-                # Short burst: use higher scale for "jolt" effect
-                touch_scale = min(1.0, max(touch_scale, burst_scale))
-            # else: sustained touch uses normal resolve_touch_profile scale (softer)
-
             wave = self.build_dynamic_wave(
                 'touch',
                 last_strength,
@@ -593,3 +582,106 @@ class ShockHandler(BaseHandler):
             last_strength = current_strength
             await self.DG_CONN.broadcast_wave(self.channel, wavestr=wave)
 
+
+    def get_combo_conf(self):
+        return self.mode_config.get('combo', {})
+
+    async def handler_combo(self, distance, context=None):
+        """Combo mode: dispatch to shock (short) or touch (sustained)."""
+        combo_conf = self.get_combo_conf()
+        threshold = float(combo_conf.get('switch_duration', 0.3))
+        trigger_bottom = self.mode_config['trigger_range']['bottom']
+        current_time = time.time()
+
+        if distance > trigger_bottom:
+            # Touch is active
+            if self.combo_touch_start == 0:
+                # New touch begins
+                self.combo_touch_start = current_time
+                self.combo_in_touch_mode = False
+                self.combo_shock_fired = False
+
+            touch_duration = current_time - self.combo_touch_start
+
+            if touch_duration >= threshold and not self.combo_in_touch_mode:
+                # Switch to touch mode
+                self.combo_in_touch_mode = True
+                self.touch_dist_arr.clear()
+                logger.debug(f"[combo] channel={self.channel} switched to touch after {touch_duration:.2f}s")
+
+            if self.combo_in_touch_mode:
+                # Sustained: feed to touch logic
+                await self.handler_touch(distance, context=context)
+            else:
+                # Still in burst window, accumulate for potential shock
+                # Keep extending clear timer
+                shock_duration = self.get_shock_duration()
+                await self.set_clear_after(max(threshold + 0.2, shock_duration))
+        else:
+            # Touch released
+            if self.combo_touch_start > 0:
+                touch_duration = current_time - self.combo_touch_start
+                if touch_duration < threshold and not self.combo_shock_fired:
+                    # Short touch → fire shock
+                    self.combo_shock_fired = True
+                    await self.handler_shock(distance=trigger_bottom + 0.01, context=context)
+                    logger.debug(f"[combo] channel={self.channel} fired shock (duration={touch_duration:.2f}s)")
+                self.combo_touch_start = 0
+                self.combo_in_touch_mode = False
+
+    async def combo_background_wave_feeder(self):
+        """Combo feeder: runs both shock and touch feeders, output based on current combo state."""
+        tick_time_window = self.bg_wave_update_time_window / 20
+        next_tick_time = 0
+        last_touch_strength = 0
+        while 1:
+            current_time = time.time()
+            if current_time < next_tick_time:
+                await asyncio.sleep(tick_time_window)
+                continue
+            next_tick_time = current_time + self.bg_wave_update_time_window
+
+            if self.is_cleared:
+                self.shock_last_strength = 0
+                last_touch_strength = 0
+                continue
+
+            if self.combo_in_touch_mode:
+                # Touch wave output
+                n_derivative = self.mode_config['touch']['n_derivative']
+                derivative_values = self.compute_derivative()
+                if n_derivative < 0 or n_derivative >= len(derivative_values):
+                    n_derivative = 1
+                current_strength = derivative_values[n_derivative]
+                derivative_params = self.mode_config['touch']['derivative_params'][n_derivative]
+                current_strength = self.normalize_between(
+                    abs(current_strength),
+                    derivative_params['bottom'],
+                    derivative_params['top'],
+                )
+                self.bg_wave_current_strength = current_strength
+                if current_strength == last_touch_strength == 0:
+                    continue
+                touch_preset, touch_scale = self.resolve_touch_profile(current_strength)
+                wave = self.build_dynamic_wave(
+                    'touch', last_touch_strength, current_strength,
+                    preset_name=touch_preset, wave_scale=touch_scale,
+                )
+                self.log_output(source='combo/touch', strength=current_strength, wave=wave)
+                last_touch_strength = current_strength
+                await self.DG_CONN.broadcast_wave(self.channel, wavestr=wave)
+            else:
+                # Shock wave output (if shock was triggered)
+                last_touch_strength = 0
+                current_strength = self.get_shock_strength(current_time)
+                if current_strength <= 0:
+                    self.shock_last_strength = 0
+                    continue
+                wave = self.build_dynamic_wave(
+                    'shock', self.shock_last_strength, current_strength,
+                    preset_name=self.get_mode_conf('shock').get('wave_preset'),
+                    wave_scale=self.get_mode_conf('shock').get('wave_scale', 1.0),
+                )
+                self.log_output(source='combo/shock', strength=current_strength, wave=wave)
+                self.shock_last_strength = current_strength
+                await self.DG_CONN.broadcast_wave(self.channel, wavestr=wave)

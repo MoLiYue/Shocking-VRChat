@@ -1,10 +1,8 @@
-from typing import List
 import asyncio
 import collections
 import yaml, uuid, os, sys, traceback, time, socket, re, json
 from threading import Thread
 from loguru import logger
-import traceback
 import copy
 
 from flask import Flask, render_template, redirect, request, jsonify
@@ -82,176 +80,80 @@ SETTINGS_BASIC = {
     },
     'version': CONFIG_FILE_VERSION,
 }
+
+DEFAULT_SHOCK_WAVE = '["0A0A0A0A64646464","0A0A0A0A64646464","0A0A0A0A64646464","0A0A0A0A64646464","0A0A0A0A64646464","0A0A0A0A64646464","0A0A0A0A64646464","0A0A0A0A64646464","0A0A0A0A64646464","0A0A0A0A64646464"]'
+
+def _default_mode_config():
+    return {
+        'shock': {
+            'duration': 2,
+            'wave': DEFAULT_SHOCK_WAVE,
+            'wave_preset': None,
+            'wave_scale': 1.0,
+        },
+        'distance': {
+            'freq_ms': 10,
+            'wave_preset': None,
+            'wave_scale': 1.0,
+            'base_strength': 0.18,
+            'dynamic_range': 0.30,
+            'texture_floor': 0.35,
+            'wave_window_ops': 4,
+            'wave_sample_step': 1.0,
+            'wave_advance_samples': 4.0,
+            'wave_envelope_curve': 'smoothstep',
+        },
+        'trigger_range': {
+            'bottom': 0.0,
+            'top': 1.0,
+        },
+        'touch': {
+            'freq_ms': 10,
+            'wave_preset': 'pulse-搓搓揉揉-9058076',
+            'wave_scale': 0.35,
+            'base_strength': 0.20,
+            'dynamic_range': 0.25,
+            'texture_floor': 0.45,
+            'wave_window_ops': 4,
+            'wave_sample_step': 1.0,
+            'wave_advance_samples': 4.0,
+            'wave_envelope_curve': 'smoothstep',
+            'preset_bands': [
+                {'threshold': 0.25, 'wave_preset': 'pulse-摸摸拍拍-9049275', 'wave_scale': 0.25},
+                {'threshold': 0.55, 'wave_preset': 'pulse-搓搓揉揉-9058076', 'wave_scale': 0.35},
+                {'threshold': 0.8, 'wave_preset': 'pulse-加速揉搓-9113608', 'wave_scale': 0.5},
+            ],
+            'n_derivative': 1,
+            'derivative_params': [
+                {'top': 1, 'bottom': 0},
+                {'top': 5, 'bottom': 0},
+                {'top': 50, 'bottom': 0},
+                {'top': 500, 'bottom': 0},
+            ],
+        },
+        'combo': {
+            'switch_duration': 0.3,
+        },
+    }
+
 SETTINGS = {
     'SERVER_IP': None,
     'dglab3': {
-        'channel_a': {
-            'mode_config':{
-                'shock': {
-                    'duration': 2,
-                    'wave': '["0A0A0A0A64646464","0A0A0A0A64646464","0A0A0A0A64646464","0A0A0A0A64646464","0A0A0A0A64646464","0A0A0A0A64646464","0A0A0A0A64646464","0A0A0A0A64646464","0A0A0A0A64646464","0A0A0A0A64646464"]',
-                    'wave_preset': None,
-                    'wave_scale': 1.0,
-                },
-                'distance': {
-                    'freq_ms': 10,
-                    'wave_preset': None,
-                    'wave_scale': 1.0,
-                    'base_strength': 0.18,
-                    'dynamic_range': 0.30,
-                    'texture_floor': 0.35,
-                    'wave_window_ops': 4,
-                    'wave_sample_step': 1.0,
-                    'wave_advance_samples': 4.0,
-                    'wave_envelope_curve': 'smoothstep',
-                },
-                'trigger_range': {
-                    'bottom': 0.0,
-                    'top': 1.0,
-                },
-                'touch': {
-                    'freq_ms': 10,
-                    'wave_preset': 'pulse-搓搓揉揉-9058076',
-                    'wave_scale': 0.35,
-                    'base_strength': 0.20,
-                    'dynamic_range': 0.25,
-                    'texture_floor': 0.45,
-                    'wave_window_ops': 4,
-                    'wave_sample_step': 1.0,
-                    'wave_advance_samples': 4.0,
-                    'wave_envelope_curve': 'smoothstep',
-                    'preset_bands': [
-                        {
-                            'threshold': 0.25,
-                            'wave_preset': 'pulse-摸摸拍拍-9049275',
-                            'wave_scale': 0.25,
-                        },
-                        {
-                            'threshold': 0.55,
-                            'wave_preset': 'pulse-搓搓揉揉-9058076',
-                            'wave_scale': 0.35,
-                        },
-                        {
-                            'threshold': 0.8,
-                            'wave_preset': 'pulse-加速揉搓-9113608',
-                            'wave_scale': 0.5,
-                        },
-                    ],
-                    'n_derivative': 1, # 0 for distance, 1 for velocity, 2 for acceleration, 3 for jerk
-                    'min_duration': 0.8,      # 触发后最小波形播放时长（秒）
-                    'burst_threshold': 0.3,   # 短于此秒数视为短触发（一激灵）
-                    'burst_scale': 1.0,       # 短触发时的波形强度倍率
-                    'derivative_params': [
-                        {
-                            "top": 1,
-                            "bottom": 0,
-                        },
-                        {
-                            "top": 5,
-                            "bottom": 0,
-                        },
-                        {
-                            "top": 50,
-                            "bottom": 0,
-                        },
-                        {
-                            "top": 500,
-                            "bottom": 0,
-                        },
-                    ]
-                },
-            }
-        },
-        'channel_b': {
-            'mode_config':{
-                'shock': {
-                    'duration': 2,
-                    'wave': '["0A0A0A0A64646464","0A0A0A0A64646464","0A0A0A0A64646464","0A0A0A0A64646464","0A0A0A0A64646464","0A0A0A0A64646464","0A0A0A0A64646464","0A0A0A0A64646464","0A0A0A0A64646464","0A0A0A0A64646464"]',
-                    'wave_preset': None,
-                    'wave_scale': 1.0,
-                },
-                'distance': {
-                    'freq_ms': 10,
-                    'wave_preset': None,
-                    'wave_scale': 1.0,
-                    'base_strength': 0.18,
-                    'dynamic_range': 0.30,
-                    'texture_floor': 0.35,
-                    'wave_window_ops': 4,
-                    'wave_sample_step': 1.0,
-                    'wave_advance_samples': 4.0,
-                    'wave_envelope_curve': 'smoothstep',
-                },
-                'trigger_range': {
-                    'bottom': 0.0,
-                    'top': 1.0,
-                },
-                'touch': {
-                    'freq_ms': 10,
-                    'wave_preset': 'pulse-搓搓揉揉-9058076',
-                    'wave_scale': 0.35,
-                    'base_strength': 0.20,
-                    'dynamic_range': 0.25,
-                    'texture_floor': 0.45,
-                    'wave_window_ops': 4,
-                    'wave_sample_step': 1.0,
-                    'wave_advance_samples': 4.0,
-                    'wave_envelope_curve': 'smoothstep',
-                    'preset_bands': [
-                        {
-                            'threshold': 0.25,
-                            'wave_preset': 'pulse-摸摸拍拍-9049275',
-                            'wave_scale': 0.25,
-                        },
-                        {
-                            'threshold': 0.55,
-                            'wave_preset': 'pulse-搓搓揉揉-9058076',
-                            'wave_scale': 0.35,
-                        },
-                        {
-                            'threshold': 0.8,
-                            'wave_preset': 'pulse-加速揉搓-9113608',
-                            'wave_scale': 0.5,
-                        },
-                    ],
-                    'n_derivative': 1,
-                    'min_duration': 0.8,
-                    'burst_threshold': 0.3,
-                    'burst_scale': 1.0,
-                    'derivative_params': [
-                        {
-                            "top": 1,
-                            "bottom": 0,
-                        },
-                        {
-                            "top": 5,
-                            "bottom": 0,
-                        },
-                        {
-                            "top": 50,
-                            "bottom": 0,
-                        },
-                        {
-                            "top": 500,
-                            "bottom": 0,
-                        },
-                    ]
-                },
-            }
-        },
+        'channel_a': {'mode_config': _default_mode_config()},
+        'channel_b': {'mode_config': _default_mode_config()},
     },
-    'ws':{
+    'ws': {
         'master_uuid': None,
         'listen_host': '0.0.0.0',
-        'listen_port': 28846 
+        'listen_port': 28846,
     },
-    'osc':{
+    'osc': {
         'listen_host': '127.0.0.1',
         'listen_port': 9001,
     },
-    'web_server':{
+    'web_server': {
         'listen_host': '127.0.0.1',
-        'listen_port': 8800
+        'listen_port': 8800,
     },
     'log_level': 'INFO',
     'version': CONFIG_FILE_VERSION,
@@ -260,8 +162,8 @@ SETTINGS = {
         'local_ip_detect': {
             'host': '223.5.5.5',
             'port': 80,
-        }
-    }
+        },
+    },
 }
 DEFAULT_SETTINGS_BASIC = copy.deepcopy(SETTINGS_BASIC)
 DEFAULT_SETTINGS = copy.deepcopy(SETTINGS)
@@ -423,13 +325,16 @@ def config_hot_reload_loop():
         if has_config_file_changed():
             hot_reload_configs()
 
-@app.route('/get_ip')
 def get_current_ip():
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     s.connect((SETTINGS['general']['local_ip_detect']['host'], SETTINGS['general']['local_ip_detect']['port']))
     client_ip = s.getsockname()[0]
     s.close()
     return client_ip
+
+@app.route('/get_ip')
+def web_get_ip():
+    return get_current_ip()
 
 @app.route("/")
 def web_index():
@@ -445,15 +350,6 @@ def get_qr_content():
         f'https://www.dungeon-lab.com/app-download.php#DGLAB-SOCKET#ws://'
         f'{SERVER_IP}:{SETTINGS["ws"]["listen_port"]}/{SETTINGS["ws"]["master_uuid"]}'
     )
-
-@app.route('/conns')
-def get_conns():
-    return str(srv.WS_CONNECTIONS)
-
-@app.route('/sendwav')
-async def sendwav():
-    await DGConnection.broadcast_wave(channel='A', wavestr=srv.waveData[0])
-    return 'OK'
 
 @app.after_request
 async def after_request_hook(response):
@@ -483,7 +379,7 @@ def handle_Exception(e):
 # User-Agent: UnityPlayer/2022.3.22f1-DWR (UnityWebRequest/1.0, libcurl/8.5.0-DEV)\r\n
 def allow_vrchat_only(func):
     async def wrapper(*args, **kwargs):
-        ua = request.headers.get('User-Agent')
+        ua = request.headers.get('User-Agent', '')
         if 'UnityPlayer' not in ua:
             raise ClientNotAllowed
         if 'NSPlayer' in ua or 'WMFSDK' in ua:
@@ -622,19 +518,6 @@ def get_config():
         'advanced': strip_basic_settings(SETTINGS),
     }
 
-@app.route('/api/v1/config', methods=['POST'])
-def update_config():
-    # TODO: Hot apply settings
-    err = {
-        'success': False,
-        'message': "Some error",
-    }
-    return {
-        'success': True,
-        'need_restart': False,
-        'message': "Some Message, like, Please restart."
-    }
-
 @app.route('/dashboard')
 def web_dashboard():
     return render_template('dashboard.html')
@@ -642,6 +525,53 @@ def web_dashboard():
 @app.route('/curve')
 def web_curve_editor():
     return render_template('curve_editor.html')
+
+@app.route('/combo')
+def web_combo_editor():
+    return render_template('combo_editor.html')
+
+@app.route('/api/v1/combo/<channel>', methods=['GET'])
+def api_v1_combo_get(channel):
+    ch = channel.lower()
+    if ch not in ('a', 'b'):
+        return jsonify({'error': 'invalid channel'}), 400
+    cfg = SETTINGS['dglab3'][f'channel_{ch}']['mode_config']
+    return jsonify({
+        'combo': cfg.get('combo', {}),
+        'shock': cfg.get('shock', {}),
+        'touch': cfg.get('touch', {}),
+        'trigger_range': cfg.get('trigger_range', {}),
+    })
+
+@app.route('/api/v1/combo/<channel>', methods=['POST'])
+def api_v1_combo_set(channel):
+    ch = channel.lower()
+    if ch not in ('a', 'b'):
+        return jsonify({'success': False, 'message': 'invalid channel'}), 400
+    data = request.get_json()
+    cfg = SETTINGS['dglab3'][f'channel_{ch}']['mode_config']
+    # Update combo config
+    if 'combo' in data:
+        cfg.setdefault('combo', {}).update(data['combo'])
+    # Update shock params
+    if 'shock' in data:
+        for key in ('duration', 'wave_preset', 'wave_scale'):
+            if key in data['shock']:
+                cfg['shock'][key] = data['shock'][key]
+    # Update touch params
+    if 'touch' in data:
+        for key in ('wave_preset', 'wave_scale', 'n_derivative'):
+            if key in data['touch']:
+                cfg['touch'][key] = data['touch'][key]
+    # Update trigger_range
+    if 'trigger_range' in data:
+        cfg['trigger_range'].update(data['trigger_range'])
+    # Hot reload handlers
+    for handler in handlers:
+        if hasattr(handler, 'refresh_settings'):
+            handler.refresh_settings()
+    config_save()
+    return jsonify({'success': True})
 
 # --- Curve Mapping ---
 DEFAULT_CURVE_POINTS = [{'x': 0, 'y': 0}, {'x': 0.1, 'y': 0}, {'x': 1, 'y': 1}]  # ReLU
@@ -945,10 +875,11 @@ def async_main_wrapper():
     asyncio.run(async_main())
 
 def config_save():
-    with open(CONFIG_FILENAME, 'w', encoding='utf-8') as fw:
-        yaml.safe_dump(SETTINGS, fw, allow_unicode=True)
-    with open(CONFIG_FILENAME_BASIC, 'w', encoding='utf-8') as fw:
-        yaml.safe_dump(SETTINGS_BASIC, fw, allow_unicode=True)
+    for path, data in [(CONFIG_FILENAME, SETTINGS), (CONFIG_FILENAME_BASIC, SETTINGS_BASIC)]:
+        tmp = path + '.tmp'
+        with open(tmp, 'w', encoding='utf-8') as fw:
+            yaml.safe_dump(data, fw, allow_unicode=True)
+        os.replace(tmp, path)
 
 class ConfigFileInited(Exception):
     pass
