@@ -235,6 +235,22 @@ button {
 .log-entry { padding: 4px 0; color: #d6e2ff; }
 .log-entry.warn { color: var(--amber); }
 .log-entry.error { color: #ff8b8b; }
+.osc-feed { max-height: 180px; overflow-y: auto; }
+.osc-entry { display: flex; gap: 8px; padding: 4px 8px; border-radius: 4px; font-size: 12px; font-family: Consolas, monospace; align-items: center; }
+.osc-entry:nth-child(odd) { background: rgba(255,255,255,0.02); }
+.osc-ch { font-weight: 700; min-width: 18px; }
+.osc-ch.a { color: var(--green); }
+.osc-ch.b { color: var(--blue); }
+.osc-mode { color: var(--amber); min-width: 60px; font-size: 11px; }
+.osc-path { color: #bfccec; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.osc-val { color: var(--accent); min-width: 50px; text-align: right; }
+.osc-time { color: #555; min-width: 55px; font-size: 11px; }
+.status-detail { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-top: 10px; font-size: 12px; color: var(--muted); }
+.status-detail span { padding: 4px 8px; background: rgba(255,255,255,0.02); border-radius: 6px; }
+.status-detail .label { color: #666; }
+.wave-preview-wrap { position: relative; margin: 8px 0; }
+.wave-preview-wrap canvas { display: block; width: 100%; height: 80px; border-radius: 10px; background: #0a1020; border: 1px solid rgba(255,255,255,0.04); }
+.wave-preview-info { position: absolute; top: 6px; right: 10px; font-size: 11px; color: #666; }
 @media (max-width: 920px) {
   .grid, .wave-grid, .status-grid { grid-template-columns: 1fr; }
   .hero { flex-direction: column; align-items: start; }
@@ -276,6 +292,10 @@ button {
             <div class="metric" id="metric-b">当前强度: 0</div>
           </div>
         </div>
+        <div class="status-detail" id="status-detail">
+          <span><span class="label">OSC: </span><span id="osc-status">监听中</span></span>
+          <span><span class="label">最近触发: </span><span id="last-trigger">-</span></span>
+        </div>
       </section>
 
       <section class="card">
@@ -293,12 +313,33 @@ button {
       </section>
 
       <section class="card">
+        <h2>OSC 触发实况</h2>
+        <div class="osc-feed" id="osc-feed"></div>
+      </section>
+
+      <section class="card">
         <h2>日志</h2>
         <div class="log" id="log-area"></div>
       </section>
     </div>
 
     <div class="stack">
+      <section class="card">
+        <h2>场景预设</h2>
+        <div class="form-row">
+          <div style="display:flex;gap:8px;align-items:center">
+            <select id="profile-select" style="flex:1"><option value="">-- 选择预设 --</option></select>
+            <button class="btn-green" onclick="loadProfile()" title="加载">▶</button>
+            <button class="btn-red" onclick="deleteProfile()" title="删除">✕</button>
+          </div>
+          <div style="display:flex;gap:8px;margin-top:8px">
+            <input type="text" id="profile-name-input" placeholder="新预设名称" style="flex:1;padding:8px 12px;border-radius:10px;border:1px solid rgba(255,255,255,0.08);background:var(--panel-2);color:var(--text);font-size:14px">
+            <button class="btn-blue" onclick="saveProfile()">保存当前</button>
+          </div>
+          <div class="metric" id="profile-msg"></div>
+        </div>
+      </section>
+
       <section class="card">
         <h2>连接二维码</h2>
         <div class="qr-wrap">
@@ -333,14 +374,19 @@ button {
         <h2>波形测试</h2>
         <div class="form-row">
           <label>波形预设
-            <select id="wave-select"></select>
+            <select id="wave-select" onchange="previewWave()"></select>
           </label>
+          <div class="wave-preview-wrap">
+            <canvas id="wave-preview-canvas"></canvas>
+            <div class="wave-preview-info" id="wave-preview-info"></div>
+          </div>
           <label>持续时间
             <input type="range" id="wave-duration" min="1" max="10" value="3">
           </label>
           <div class="range-meta"><span>1s</span><span id="duration-val">3s</span><span>10s</span></div>
           <div class="buttons">
             <button class="btn-blue" onclick="sendWave()">发送预设</button>
+            <button class="btn-green" onclick="quickTest()">试一下 (1s)</button>
             <button class="btn-gray" onclick="clearWave()">清空队列</button>
           </div>
         </div>
@@ -352,17 +398,65 @@ button {
 <script>
 const API_BASE = window.location.origin;
 
-function updateBars(strength) {
-  const a = Number(strength?.A || 0);
-  const b = Number(strength?.B || 0);
-  const aMax = Math.max(a, 100);
-  const bMax = Math.max(b, 100);
-  document.getElementById("bar-a").style.width = Math.min(a, 100) + "%";
-  document.getElementById("bar-b").style.width = Math.min(b, 100) + "%";
-  document.getElementById("val-a").textContent = a + " / " + aMax;
-  document.getElementById("val-b").textContent = b + " / " + bMax;
-  document.getElementById("metric-a").textContent = "当前强度: " + a;
-  document.getElementById("metric-b").textContent = "当前强度: " + b;
+async function loadProfiles() {
+  try {
+    const resp = await fetch(API_BASE + "/api/v1/profiles");
+    const data = await resp.json();
+    const sel = document.getElementById("profile-select");
+    const current = sel.value;
+    sel.innerHTML = '<option value="">-- 选择预设 --</option>';
+    (data.profiles || []).forEach(name => {
+      const opt = document.createElement("option");
+      opt.value = name;
+      opt.textContent = name;
+      sel.appendChild(opt);
+    });
+    if (current) sel.value = current;
+  } catch (e) {}
+}
+
+async function saveProfile() {
+  const name = document.getElementById("profile-name-input").value.trim();
+  if (!name) { profileMsg("请输入预设名称", true); return; }
+  try {
+    const resp = await fetch(API_BASE + "/api/v1/profiles/" + encodeURIComponent(name), { method: "PUT" });
+    const data = await resp.json();
+    if (data.success) {
+      profileMsg("已保存: " + data.name);
+      document.getElementById("profile-name-input").value = "";
+      loadProfiles();
+    } else { profileMsg(data.message || "保存失败", true); }
+  } catch (e) { profileMsg("请求失败", true); }
+}
+
+async function loadProfile() {
+  const name = document.getElementById("profile-select").value;
+  if (!name) { profileMsg("请先选择预设", true); return; }
+  try {
+    const resp = await fetch(API_BASE + "/api/v1/profiles/" + encodeURIComponent(name), { method: "POST" });
+    const data = await resp.json();
+    if (data.success) { profileMsg("已加载: " + name); addLog("切换预设: " + name); }
+    else { profileMsg(data.message || "加载失败", true); }
+  } catch (e) { profileMsg("请求失败", true); }
+}
+
+async function deleteProfile() {
+  const name = document.getElementById("profile-select").value;
+  if (!name) { profileMsg("请先选择预设", true); return; }
+  if (!confirm("确定删除预设 \"" + name + "\"？")) return;
+  try {
+    const resp = await fetch(API_BASE + "/api/v1/profiles/" + encodeURIComponent(name), { method: "DELETE" });
+    const data = await resp.json();
+    if (data.success) { profileMsg("已删除"); loadProfiles(); }
+    else { profileMsg(data.message || "删除失败", true); }
+  } catch (e) { profileMsg("请求失败", true); }
+}
+
+function profileMsg(msg, isErr) {
+  const el = document.getElementById("profile-msg");
+  el.textContent = msg;
+  el.style.color = isErr ? "#ff8b8b" : "var(--green)";
+  setTimeout(() => { el.textContent = ""; }, 3000);
 }
 
 async function pollStatus() {
@@ -376,16 +470,61 @@ async function pollStatus() {
       dot.classList.add("online");
       text.textContent = "已连接 " + devices.length + " 台设备";
       const dev = devices[0];
-      updateBars(dev.attr?.strength || {A: 0, B: 0});
+      const str = dev.attr?.strength || {A: 0, B: 0};
+      const max = dev.attr?.strength_max || {A: 0, B: 0};
+      const limit = dev.attr?.strength_limit || {A: 100, B: 100};
+      updateBars(str, max, limit);
     } else {
       dot.classList.remove("online");
-      text.textContent = "未连接";
-      updateBars({A: 0, B: 0});
+      text.textContent = "等待郊狼 APP 连接...";
+      updateBars({A: 0, B: 0}, {A: 0, B: 0}, {A: 100, B: 100});
+    }
+    // OSC status
+    document.getElementById("osc-status").textContent = data.osc_listening || "-";
+    if (data.last_osc_time) {
+      const ago = Math.round((Date.now() / 1000) - data.last_osc_time);
+      document.getElementById("last-trigger").textContent = ago < 2 ? "刚刚" : ago + "s 前";
+    } else {
+      document.getElementById("last-trigger").textContent = "无数据";
     }
   } catch (e) {
     document.getElementById("conn-dot").classList.remove("online");
     document.getElementById("conn-text").textContent = "服务不可用";
   }
+}
+
+function updateBars(strength, max, limit) {
+  const a = Number(strength?.A || 0);
+  const b = Number(strength?.B || 0);
+  const aLimit = Math.min(Number(max?.A || 0), Number(limit?.A || 100));
+  const bLimit = Math.min(Number(max?.B || 0), Number(limit?.B || 100));
+  document.getElementById("bar-a").style.width = (aLimit > 0 ? Math.min(a / aLimit * 100, 100) : 0) + "%";
+  document.getElementById("bar-b").style.width = (bLimit > 0 ? Math.min(b / bLimit * 100, 100) : 0) + "%";
+  document.getElementById("val-a").textContent = a + " / " + aLimit;
+  document.getElementById("val-b").textContent = b + " / " + bLimit;
+  document.getElementById("metric-a").textContent = "强度: " + a + " / 上限: " + aLimit;
+  document.getElementById("metric-b").textContent = "强度: " + b + " / 上限: " + bLimit;
+}
+
+let _lastOscEventTime = 0;
+async function pollOscActivity() {
+  try {
+    const resp = await fetch(API_BASE + "/api/v1/osc_activity");
+    const data = await resp.json();
+    const events = data.events || [];
+    if (!events.length) return;
+    // Only render if there are new events
+    if (events[0].time <= _lastOscEventTime) return;
+    _lastOscEventTime = events[0].time;
+    const feed = document.getElementById("osc-feed");
+    feed.innerHTML = events.slice(0, 30).map(e => {
+      const t = new Date(e.time * 1000);
+      const timeStr = t.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit', second:'2-digit'});
+      const chClass = e.channel === 'A' ? 'a' : 'b';
+      const shortPath = e.address.replace('/avatar/parameters/', '.../');
+      return `<div class="osc-entry"><span class="osc-ch ${chClass}">${e.channel}</span><span class="osc-mode">${e.mode}</span><span class="osc-path" title="${e.address}">${shortPath}</span><span class="osc-val">${e.value}</span><span class="osc-time">${timeStr}</span></div>`;
+    }).join('');
+  } catch (e) {}
 }
 
 async function apiFetch(path) {
@@ -442,6 +581,7 @@ async function loadWavePresets() {
       opt.textContent = name.replace(/^pulse-/, "").replace(/-\d+$/, "");
       sel.appendChild(opt);
     });
+    if (sel.options.length > 0) previewWave();
   } catch (e) {
     addLog("无法加载波形预设", "warn");
   }
@@ -458,6 +598,64 @@ function sendWave() {
   const channels = channel === "all" ? ["A", "B"] : [channel];
   channels.forEach((ch) => apiFetch("/api/v1/wave_preset/" + ch + "/" + encodeURIComponent(preset) + "/" + duration));
   addLog("发送预设 " + preset + " 到 " + channel + "，持续 " + duration + "s");
+}
+
+function quickTest() {
+  const channel = document.getElementById("ctrl-channel").value;
+  const preset = document.getElementById("wave-select").value;
+  if (!preset) { addLog("请先选择波形预设", "warn"); return; }
+  const channels = channel === "all" ? ["A", "B"] : [channel];
+  channels.forEach((ch) => apiFetch("/api/v1/wave_preset/" + ch + "/" + encodeURIComponent(preset) + "/1"));
+  addLog("快速测试 " + preset + " → " + channel + " (1s)");
+}
+
+async function previewWave() {
+  const preset = document.getElementById("wave-select").value;
+  const canvas = document.getElementById("wave-preview-canvas");
+  const info = document.getElementById("wave-preview-info");
+  const ctx = canvas.getContext("2d");
+  const ratio = window.devicePixelRatio || 1;
+  const w = canvas.clientWidth;
+  const h = canvas.clientHeight;
+  canvas.width = w * ratio;
+  canvas.height = h * ratio;
+  ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+  ctx.clearRect(0, 0, w, h);
+  if (!preset) { info.textContent = ""; return; }
+  try {
+    const resp = await fetch(API_BASE + "/api/v1/wave_presets/" + encodeURIComponent(preset) + "/preview");
+    const data = await resp.json();
+    if (data.error) { info.textContent = "不可用"; return; }
+    const samples = data.strength_samples || [];
+    if (!samples.length) { info.textContent = "无数据"; return; }
+    info.textContent = data.ops_count + " ops · " + (data.duration_ms / 1000).toFixed(1) + "s";
+    // Draw waveform
+    const padding = 4;
+    const drawW = w - padding * 2;
+    const drawH = h - padding * 2;
+    // Fill area
+    ctx.beginPath();
+    ctx.moveTo(padding, h - padding);
+    samples.forEach((s, i) => {
+      const x = padding + (i / (samples.length - 1)) * drawW;
+      const y = (h - padding) - s * drawH;
+      ctx.lineTo(x, y);
+    });
+    ctx.lineTo(padding + drawW, h - padding);
+    ctx.closePath();
+    ctx.fillStyle = "rgba(99, 179, 255, 0.15)";
+    ctx.fill();
+    // Draw line
+    ctx.beginPath();
+    samples.forEach((s, i) => {
+      const x = padding + (i / (samples.length - 1)) * drawW;
+      const y = (h - padding) - s * drawH;
+      if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    });
+    ctx.strokeStyle = "#63b3ff";
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+  } catch (e) { info.textContent = "加载失败"; }
 }
 
 function clearWave() {
@@ -529,10 +727,13 @@ window.addEventListener("resize", () => {
 
 pollStatus();
 pollWaveHistory();
+pollOscActivity();
 loadWavePresets();
+loadProfiles();
 loadQrPanel();
-setInterval(pollStatus, 3000);
+setInterval(pollStatus, 2000);
 setInterval(pollWaveHistory, 250);
+setInterval(pollOscActivity, 500);
 addLog("仪表盘已加载");
 </script>
 </body>

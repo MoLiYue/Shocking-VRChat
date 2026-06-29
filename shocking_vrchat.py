@@ -489,14 +489,29 @@ def allow_vrchat_only(func):
 async def api_v1_status():
     return {
         'healthy': 'ok',
+        'osc_listening': f"{SETTINGS['osc']['listen_host']}:{SETTINGS['osc']['listen_port']}",
+        'last_osc_time': _osc_activity[0]['time'] if _osc_activity else None,
         'devices': [
-            *[{"type": 'shock', 'device':'coyotev3', 'attr': {'strength':conn.strength, 'uuid':conn.uuid}} for conn in srv.WS_CONNECTIONS],
-        ]
+            {
+                "type": 'shock',
+                'device': 'coyotev3',
+                'attr': {
+                    'strength': conn.strength,
+                    'strength_max': conn.strength_max,
+                    'strength_limit': conn.strength_limit,
+                    'uuid': conn.uuid,
+                }
+            } for conn in srv.WS_CONNECTIONS
+        ],
     }
 
 @app.route('/api/v1/wave_history')
 def api_v1_wave_history():
     return {'A': _get_wave_history_snapshot('A'), 'B': _get_wave_history_snapshot('B')}
+
+@app.route('/api/v1/osc_activity')
+def api_v1_osc_activity():
+    return {'events': list(_osc_activity)}
 
 
 @app.route('/api/v1/qr_payload')
@@ -570,6 +585,30 @@ def strip_basic_settings(settings: dict):
         del ret['dglab3'][chann]['strength_limit'] 
     return ret
 
+@app.route('/setup')
+def web_setup_wizard():
+    return render_template('setup_wizard.html')
+
+@app.route('/api/v1/setup', methods=['POST'])
+def api_v1_setup():
+    global SETTINGS, SETTINGS_BASIC, SERVER_IP
+    try:
+        data = request.get_json()
+        for ch in ['channel_a', 'channel_b']:
+            ch_data = data.get(ch, {})
+            SETTINGS_BASIC['dglab3'][ch]['mode'] = ch_data.get('mode', 'distance')
+            SETTINGS_BASIC['dglab3'][ch]['strength_limit'] = int(ch_data.get('strength_limit', 100))
+            SETTINGS_BASIC['dglab3'][ch]['avatar_params'] = [
+                {'path': p, 'mode': ch_data.get('mode', 'distance')} for p in ch_data.get('avatar_params', [])
+            ]
+        SETTINGS['ws']['master_uuid'] = str(uuid.uuid4())
+        config_save()
+        # Signal that setup is done so the main thread can proceed
+        app.config['SETUP_COMPLETE'] = True
+        return jsonify({'success': True, 'message': 'Configuration saved.'})
+    except Exception as e:
+        return jsonify({'success': False, 'message': str(e)}), 500
+
 @app.route('/api/v1/config', methods=['GET', 'HEAD', 'OPTIONS'])
 def get_config():
     return {
@@ -594,11 +633,101 @@ def update_config():
 def web_dashboard():
     return render_template('dashboard.html')
 
+# --- Profile Management ---
+PROFILES_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)) if not getattr(sys, "frozen", False) else os.path.dirname(sys.executable), 'profiles')
+
+def _ensure_profiles_dir():
+    os.makedirs(PROFILES_DIR, exist_ok=True)
+
+def _safe_profile_name(name):
+    return re.sub(r'[^\w\u4e00-\u9fff\-]', '_', name.strip())[:50]
+
+@app.route('/api/v1/profiles', methods=['GET'])
+def api_v1_profiles_list():
+    _ensure_profiles_dir()
+    profiles = []
+    for f in sorted(os.listdir(PROFILES_DIR)):
+        if f.endswith('.yaml'):
+            profiles.append(f[:-5])
+    return jsonify({'profiles': profiles})
+
+@app.route('/api/v1/profiles/<name>', methods=['PUT'])
+def api_v1_profiles_save(name):
+    _ensure_profiles_dir()
+    safe_name = _safe_profile_name(name)
+    if not safe_name:
+        return jsonify({'success': False, 'message': 'Invalid name'}), 400
+    profile_data = {
+        'basic': copy.deepcopy(SETTINGS_BASIC),
+        'advanced': strip_basic_settings(SETTINGS),
+    }
+    path = os.path.join(PROFILES_DIR, safe_name + '.yaml')
+    with open(path, 'w', encoding='utf-8') as fw:
+        yaml.safe_dump(profile_data, fw, allow_unicode=True)
+    return jsonify({'success': True, 'name': safe_name})
+
+@app.route('/api/v1/profiles/<name>', methods=['POST'])
+def api_v1_profiles_load(name):
+    safe_name = _safe_profile_name(name)
+    path = os.path.join(PROFILES_DIR, safe_name + '.yaml')
+    if not os.path.exists(path):
+        return jsonify({'success': False, 'message': 'Profile not found'}), 404
+    try:
+        with open(path, 'r', encoding='utf-8') as fr:
+            profile_data = yaml.safe_load(fr)
+        # Write to config files then hot-reload
+        new_basic = merge_defaults(DEFAULT_SETTINGS_BASIC, profile_data.get('basic', {}))
+        new_advanced = merge_defaults(DEFAULT_SETTINGS, profile_data.get('advanced', {}))
+        # Restore basic fields into advanced
+        for ch in ['channel_a', 'channel_b']:
+            new_advanced['dglab3'][ch]['avatar_params'] = new_basic['dglab3'][ch]['avatar_params']
+            new_advanced['dglab3'][ch]['mode'] = new_basic['dglab3'][ch]['mode']
+            new_advanced['dglab3'][ch]['strength_limit'] = new_basic['dglab3'][ch]['strength_limit']
+            normalize_avatar_param_entries(new_advanced['dglab3'][ch])
+        # Preserve ws uuid and non-hot-reloadable network settings
+        new_advanced['ws']['master_uuid'] = SETTINGS['ws']['master_uuid']
+        apply_hot_reloadable_settings(new_advanced, new_basic)
+        config_save()
+        return jsonify({'success': True, 'name': safe_name})
+    except Exception as e:
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+@app.route('/api/v1/profiles/<name>', methods=['DELETE'])
+def api_v1_profiles_delete(name):
+    safe_name = _safe_profile_name(name)
+    path = os.path.join(PROFILES_DIR, safe_name + '.yaml')
+    if os.path.exists(path):
+        os.remove(path)
+        return jsonify({'success': True})
+    return jsonify({'success': False, 'message': 'Not found'}), 404
+
 @app.route('/api/v1/wave_presets')
 def api_v1_wave_presets():
     from srv.wave_preset import WavePresetLibrary
     lib = WavePresetLibrary()
     return {'presets': list(lib.presets.keys())}
+
+@app.route('/api/v1/wave_presets/<preset_name>/preview')
+def api_v1_wave_preset_preview(preset_name):
+    from srv.wave_preset import WavePresetLibrary
+    lib = WavePresetLibrary()
+    preset = lib.get(preset_name)
+    if not preset:
+        return {'error': 'preset not found'}, 404
+    # Return downsampled data for visualization (max 200 points)
+    samples = preset.get('strength_samples', [])
+    freq = preset.get('freq_samples', [])
+    if len(samples) > 200:
+        step = len(samples) / 200
+        samples = [samples[int(i * step)] for i in range(200)]
+        freq = [freq[int(i * step)] for i in range(200)]
+    return {
+        'name': preset_name,
+        'ops_count': len(preset.get('ops', [])),
+        'duration_ms': len(preset.get('ops', [])) * 100,
+        'strength_samples': [round(s, 3) for s in samples],
+        'freq_samples': [round(f, 1) for f in freq],
+    }
 
 @app.route('/api/v1/wave_preset/<channel>/<preset_name>/<int:duration>')
 async def api_v1_wave_preset(channel, preset_name, duration):
@@ -622,6 +751,18 @@ async def api_v1_wave_preset(channel, preset_name, duration):
     return {'result': 'OK', 'ops_sent': len(repeated)}
 
 command_queue = CommandQueue()
+
+# OSC activity ring buffer for dashboard live feedback
+_osc_activity = collections.deque(maxlen=50)
+
+def _record_osc_activity(address, value, channel, mode):
+    _osc_activity.appendleft({
+        'time': time.time(),
+        'address': address,
+        'value': round(value, 4),
+        'channel': channel,
+        'mode': mode,
+    })
 
 # Wave history ring buffer for dashboard visualization
 _wave_history = {'A': collections.deque(maxlen=200), 'B': collections.deque(maxlen=200)}
@@ -757,6 +898,7 @@ def main():
     handlers = []
 
     ShockHandler.set_command_queue(command_queue)
+    ShockHandler.osc_activity_observer = _record_osc_activity
 
     for chann in ['A', 'B']:
         config_chann_name = f'channel_{chann.lower()}'
@@ -795,8 +937,36 @@ if __name__ == "__main__":
         config_init()
         main()
     except ConfigFileInited:
-        logger.success('The configuration file initialization is complete. Please modify it as needed and restart the program.')
-        logger.success('配置文件初始化完成，请按需修改后重启程序。')
+        logger.success('Configuration files not found. Starting setup wizard...')
+        logger.success('未找到配置文件，正在启动配置向导...')
+        import webbrowser
+        port = SETTINGS['web_server']['listen_port']
+        webbrowser.open_new_tab(f"http://127.0.0.1:{port}/setup")
+        app.config['SETUP_COMPLETE'] = False
+        # Run wizard web server in a thread so we can detect completion
+        from threading import Event
+        _setup_done = Event()
+
+        @app.route('/api/v1/setup/poll')
+        def setup_poll():
+            return jsonify({'done': app.config.get('SETUP_COMPLETE', False)})
+
+        def _run_wizard_server():
+            app.run('127.0.0.1', port, debug=False, use_reloader=False)
+
+        wizard_th = Thread(target=_run_wizard_server, daemon=True)
+        wizard_th.start()
+
+        # Wait for setup completion then restart into main
+        import time as _time
+        while not app.config.get('SETUP_COMPLETE', False):
+            _time.sleep(0.5)
+
+        logger.success('Setup wizard completed. Starting main program...')
+        logger.success('配置向导完成，正在启动主程序...')
+        # Reload config and run
+        config_init()
+        main()
     except Exception as e:
         logger.error(traceback.format_exc())
         logger.error("Unexpected Error.")

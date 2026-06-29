@@ -12,6 +12,7 @@ from ..command_queue import CommandQueue, CommandPriority
 class ShockHandler(BaseHandler):
     _wave_library = WavePresetLibrary()
     _command_queue: CommandQueue = None  # Shared across all handlers
+    osc_activity_observer = None  # Callback for OSC activity tracking
 
     @classmethod
     def set_command_queue(cls, queue: CommandQueue):
@@ -76,6 +77,11 @@ class ShockHandler(BaseHandler):
             'mode': self.shock_mode,
             'channel': self.channel,
         }
+        if self.osc_activity_observer:
+            try:
+                self.osc_activity_observer(address, val, self.channel, self.shock_mode)
+            except Exception:
+                pass
         if self._command_queue:
             asyncio.ensure_future(self._enqueue_osc(val, context))
         else:
