@@ -134,6 +134,9 @@ def _default_mode_config():
         'combo': {
             'switch_duration': 0.3,
         },
+        'boost': {
+            'value': 30,
+        },
     }
 
 SETTINGS = {
@@ -420,6 +423,73 @@ def api_v1_osc_activity():
 def api_v1_qr_payload():
     return {'content': get_qr_content()}
 
+@app.route('/api/v1/strength/<channel>/<action>/<int:value>', endpoint='api_v1_strength')
+async def api_v1_strength(channel, action, value):
+    """Adjust device strength. action: set/add/sub. value: 0-200."""
+    channel = channel.upper()
+    if channel == 'ALL':
+        channels = ['A', 'B']
+    elif channel in ('A', 'B'):
+        channels = [channel]
+    else:
+        return {'error': 'invalid channel'}, 400
+    mode_map = {'set': '2', 'add': '1', 'sub': '0'}
+    mode = mode_map.get(action)
+    if mode is None:
+        return {'error': 'action must be set/add/sub'}, 400
+    value = max(0, min(200, value))
+    for ch in channels:
+        for conn in srv.WS_CONNECTIONS:
+            await conn.set_strength(ch, mode=mode, value=value, force=True)
+    return {'result': 'OK', 'action': action, 'value': value, 'channels': channels}
+
+# --- Strength Boost (temporary +N with auto-revert) ---
+_strength_boost = {'A': 0, 'B': 0}
+_strength_boost_expire = {'A': 0.0, 'B': 0.0}
+
+@app.route('/api/v1/strength_boost/<channel>/<int:value>/<float:duration>', endpoint='api_v1_strength_boost')
+@app.route('/api/v1/strength_boost/<channel>/<int:value>/<int:duration>', endpoint='api_v1_strength_boost_int')
+async def api_v1_strength_boost(channel, value, duration):
+    """Temporarily boost strength by value, auto-reverts after duration seconds."""
+    channel = channel.upper()
+    if channel == 'ALL':
+        channels = ['A', 'B']
+    elif channel in ('A', 'B'):
+        channels = [channel]
+    else:
+        return {'error': 'invalid channel'}, 400
+    value = max(1, min(100, value))
+    duration = max(0.5, min(30.0, float(duration)))
+    for ch in channels:
+        already_boosted = _strength_boost[ch]
+        if already_boosted == 0:
+            # Apply new boost
+            for conn in srv.WS_CONNECTIONS:
+                await conn.set_strength(ch, mode='1', value=value, force=True)
+            _strength_boost[ch] = value
+        elif already_boosted != value:
+            # Adjust to new boost level
+            for conn in srv.WS_CONNECTIONS:
+                await conn.set_strength(ch, mode='0', value=already_boosted, force=True)
+                await conn.set_strength(ch, mode='1', value=value, force=True)
+            _strength_boost[ch] = value
+        # Reset/extend expiry
+        _strength_boost_expire[ch] = time.time() + duration
+    return {'result': 'OK', 'boost': value, 'duration': duration, 'channels': channels}
+
+async def _strength_boost_checker():
+    """Background task: revert expired strength boosts."""
+    while True:
+        await asyncio.sleep(0.1)
+        now = time.time()
+        for ch in ['A', 'B']:
+            if _strength_boost[ch] > 0 and now >= _strength_boost_expire[ch]:
+                boost_val = _strength_boost[ch]
+                _strength_boost[ch] = 0
+                for conn in srv.WS_CONNECTIONS:
+                    await conn.set_strength(ch, mode='0', value=boost_val, force=True)
+                logger.debug(f"[boost] channel={ch} reverted -{boost_val}")
+
 @app.route('/api/v1/shock/<channel>/<second>', endpoint='api_v1_shock')
 @allow_vrchat_only
 async def api_v1_shock(channel, second):
@@ -503,9 +573,11 @@ def api_v1_setup():
             SETTINGS_BASIC['dglab3'][ch]['avatar_params'] = [
                 {'path': p, 'mode': ch_data.get('mode', 'distance')} for p in ch_data.get('avatar_params', [])
             ]
+        if 'osc' in data:
+            SETTINGS['osc']['listen_port'] = int(data['osc'].get('listen_port', 9001))
+            SETTINGS['osc']['listen_host'] = data['osc'].get('listen_host', '127.0.0.1')
         SETTINGS['ws']['master_uuid'] = str(uuid.uuid4())
         config_save()
-        # Signal that setup is done so the main thread can proceed
         app.config['SETUP_COMPLETE'] = True
         return jsonify({'success': True, 'message': 'Configuration saved.'})
     except Exception as e:
@@ -521,6 +593,10 @@ def get_config():
 @app.route('/dashboard')
 def web_dashboard():
     return render_template('dashboard.html')
+
+@app.route('/params')
+def web_param_map():
+    return render_template('param_map.html')
 
 @app.route('/curve')
 def web_curve_editor():
@@ -776,7 +852,7 @@ def _record_osc_activity(address, value, channel, mode):
     })
 
 # Wave history ring buffer for dashboard visualization
-_wave_history = {'A': collections.deque(maxlen=200), 'B': collections.deque(maxlen=200)}
+_wave_history = {'A': collections.deque(maxlen=800), 'B': collections.deque(maxlen=800)}
 _wave_history_last_update = {'A': 0.0, 'B': 0.0}
 
 def _record_wave(channel, wavestr):
@@ -812,15 +888,22 @@ def _get_wave_history_snapshot(channel):
 
     last_update = _wave_history_last_update.get(channel, 0.0)
     if last_update <= 0.0:
-        return history
+        return history[-200:]
 
     elapsed_ms = max(0.0, (time.monotonic() - last_update) * 1000.0)
     elapsed_samples = int(elapsed_ms // WAVE_HISTORY_SAMPLE_MS)
+
+    # Only pad zeros after data stops arriving (indicates playback ended)
     if elapsed_samples <= 0:
-        return history
-    if elapsed_samples >= len(history):
-        return [0] * len(history)
-    return history[elapsed_samples:] + [0] * elapsed_samples
+        return history[-200:]
+    if elapsed_samples >= 200:
+        return [0] * 200
+
+    # Take the most recent samples and pad trailing zeros for elapsed silence
+    tail = history[-200:]
+    if elapsed_samples >= len(tail):
+        return [0] * len(tail)
+    return tail[elapsed_samples:] + [0] * elapsed_samples
 
 
 async def command_queue_processor():
@@ -847,6 +930,7 @@ async def wshandler(connection):
 
 async def async_main():
     asyncio.ensure_future(command_queue_processor())
+    asyncio.ensure_future(_strength_boost_checker())
     for handler in handlers:
         handler.start_background_jobs()
     try: 

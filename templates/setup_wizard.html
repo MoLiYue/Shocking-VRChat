@@ -56,6 +56,7 @@ select:focus, input:focus { outline: none; border-color: #64b5f6; }
     <div class="dot" id="dot-1"></div>
     <div class="dot" id="dot-2"></div>
     <div class="dot" id="dot-3"></div>
+    <div class="dot" id="dot-4"></div>
   </div>
 
   <!-- Step 0: Channel A mode -->
@@ -68,6 +69,7 @@ select:focus, input:focus { outline: none; border-color: #64b5f6; }
         <option value="shock">shock - 电击模式（触发后固定时长电击）</option>
         <option value="touch">touch - 触摸模式（根据触摸速度控制强度）</option>
         <option value="combo">combo - 组合模式（短触=电击，长摸=柔和）</option>
+        <option value="boost">boost - 强度增减模式（按住+N，松开恢复）</option>
       </select>
     </div>
     <div class="form-group">
@@ -77,6 +79,7 @@ select:focus, input:focus { outline: none; border-color: #64b5f6; }
         <option value="shock">shock - 电击模式（触发后固定时长电击）</option>
         <option value="touch">touch - 触摸模式（根据触摸速度控制强度）</option>
         <option value="combo">combo - 组合模式（短触=电击，长摸=柔和）</option>
+        <option value="boost">boost - 强度增减模式（按住+N，松开恢复）</option>
       </select>
     </div>
     <div class="btn-row">
@@ -131,9 +134,28 @@ select:focus, input:focus { outline: none; border-color: #64b5f6; }
     </div>
   </div>
 
-  <!-- Step 3: Confirm & Save -->
+  <!-- Step 3: OSC port -->
   <div class="step" id="step-3">
-    <div class="step-title">Step 4 - 确认配置</div>
+    <div class="step-title">Step 4 - OSC 端口</div>
+    <div class="form-group">
+      <label>OSC 监听端口</label>
+      <input type="number" id="osc-port" value="9001" min="1024" max="65535">
+      <p class="hint">VRChat 默认发送 OSC 到 9001 端口。如果你有面捕软件占用了该端口，请修改为其他值（如 9021），并配合 osc-repeater 使用。</p>
+    </div>
+    <div class="form-group">
+      <label>OSC 监听地址</label>
+      <input type="text" id="osc-host" value="127.0.0.1">
+      <p class="hint">如果 VRChat 在同一台电脑上运行，保持 127.0.0.1。如果在其他设备上运行，改为 0.0.0.0</p>
+    </div>
+    <div class="btn-row">
+      <button class="btn btn-back" onclick="prevStep()">← 上一步</button>
+      <button class="btn btn-next" onclick="nextStep()">下一步 →</button>
+    </div>
+  </div>
+
+  <!-- Step 4: Confirm & Save -->
+  <div class="step" id="step-4">
+    <div class="step-title">Step 5 - 确认配置</div>
     <div class="result" id="config-preview"></div>
     <div class="btn-row">
       <button class="btn btn-back" onclick="prevStep()">← 上一步</button>
@@ -166,7 +188,7 @@ const COMMON_PARAMS = [
 ];
 
 let currentStep = 0;
-const totalSteps = 4;
+const totalSteps = 5;
 const selectedParams = { a: new Set(), b: new Set() };
 
 function initParamLists() {
@@ -220,9 +242,12 @@ function buildConfig() {
   const strengthB = parseInt(document.getElementById('strength-b').value) || 100;
   const paramsA = [...selectedParams.a];
   const paramsB = [...selectedParams.b];
+  const oscPort = parseInt(document.getElementById('osc-port').value) || 9001;
+  const oscHost = document.getElementById('osc-host').value.trim() || '127.0.0.1';
   return {
     channel_a: { mode: modeA, strength_limit: strengthA, avatar_params: paramsA },
     channel_b: { mode: modeB, strength_limit: strengthB, avatar_params: paramsB },
+    osc: { listen_port: oscPort, listen_host: oscHost },
   };
 }
 
@@ -241,6 +266,10 @@ function updatePreview() {
     '    avatar_params:',
     ...cfg.channel_b.avatar_params.map(p => `    - ${p}`),
     `version: v0.2`,
+    '',
+    'osc:',
+    `  listen_host: ${cfg.osc.listen_host}`,
+    `  listen_port: ${cfg.osc.listen_port}`,
   ];
   document.getElementById('config-preview').textContent = lines.join('\n');
 }

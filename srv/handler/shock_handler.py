@@ -36,6 +36,8 @@ class ShockHandler(BaseHandler):
             self._handler = self.handler_touch
         elif self.shock_mode == 'combo':
             self._handler = self.handler_combo
+        elif self.shock_mode == 'boost':
+            self._handler = self.handler_boost
         else:
             raise ValueError(f"Not supported mode: {self.shock_mode}")
         
@@ -61,6 +63,9 @@ class ShockHandler(BaseHandler):
         self.combo_touch_start = 0      # when current continuous touch began
         self.combo_in_touch_mode = False  # currently dispatching to touch logic
         self.combo_shock_fired = False    # already fired shock for this touch
+
+        # Boost mode state
+        self.boost_active = False         # currently boosted
     
     def start_background_jobs(self):
         # logger.info(f"Channel: {self.channel}, background job started.")
@@ -685,3 +690,20 @@ class ShockHandler(BaseHandler):
                 self.log_output(source='combo/shock', strength=current_strength, wave=wave)
                 self.shock_last_strength = current_strength
                 await self.DG_CONN.broadcast_wave(self.channel, wavestr=wave)
+
+    async def handler_boost(self, distance, context=None):
+        """Boost mode: param > threshold → strength +N, param back to 0 → strength -N."""
+        trigger_bottom = self.mode_config['trigger_range']['bottom']
+        boost_conf = self.get_mode_conf('boost')
+        boost_value = int(boost_conf.get('value', 30))
+
+        if distance > trigger_bottom:
+            if not self.boost_active:
+                self.boost_active = True
+                await self.DG_CONN.broadcast_strength_adjust(self.channel, mode='1', value=boost_value)
+                self.log_trigger(context, value=distance, extra=f"boost +{boost_value}")
+        else:
+            if self.boost_active:
+                self.boost_active = False
+                await self.DG_CONN.broadcast_strength_adjust(self.channel, mode='0', value=boost_value)
+                self.log_trigger(context, value=distance, extra=f"boost -{boost_value} (reverted)")

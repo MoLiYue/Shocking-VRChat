@@ -262,7 +262,7 @@ button {
   <div class="hero">
     <div>
       <h1>Shocking VRChat</h1>
-      <p>实时状态、波形观察和快速测试都放在这一页里。<a href="/curve" style="color:#63b3ff;margin-left:12px;font-size:0.85em">📈 强度曲线编辑器</a><a href="/combo" style="color:#63b3ff;margin-left:12px;font-size:0.85em">⚡ Combo 配置</a></p>
+      <p>实时状态、波形观察和快速测试都放在这一页里。<a href="/curve" style="color:#63b3ff;margin-left:12px;font-size:0.85em">📈 强度曲线</a><a href="/combo" style="color:#63b3ff;margin-left:12px;font-size:0.85em">⚡ Combo</a><a href="/params" style="color:#63b3ff;margin-left:12px;font-size:0.85em">🗂 参数映射</a></p>
     </div>
     <div class="badge">
       <span class="dot" id="conn-dot"></span>
@@ -556,9 +556,10 @@ function sendStrength(mode) {
     addLog("Shock " + channel + " 持续 " + duration.toFixed(1) + "s");
     return;
   }
+  const channels = channel === "all" ? ["A", "B"] : [channel];
   const strengthHex = Math.min(parseInt(val, 10), 100).toString(16).padStart(2, "0").toUpperCase();
   const wavedata = "0A0A0A0A" + strengthHex + strengthHex + strengthHex + strengthHex;
-  apiFetch("/api/v1/sendwave/" + channel + "/10/" + wavedata);
+  channels.forEach(ch => apiFetch("/api/v1/sendwave/" + ch + "/10/" + wavedata));
   addLog("发送固定强度到 " + channel + ": " + val);
 }
 

@@ -182,3 +182,10 @@ class DGConnection():
             conn: cls
             conn.strength_limit['A'] = limit_a
             conn.strength_limit['B'] = limit_b
+
+    @classmethod
+    async def broadcast_strength_adjust(cls, channel='A', mode='1', value=0):
+        """Broadcast strength adjustment. mode: 0=sub, 1=add, 2=set."""
+        for conn in WS_CONNECTIONS:
+            conn: cls
+            await conn.set_strength(channel, mode=mode, value=value, force=True)
