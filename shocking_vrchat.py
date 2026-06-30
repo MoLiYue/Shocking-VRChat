@@ -1367,7 +1367,8 @@ if __name__ == "__main__":
 
         logger.success('Setup wizard completed. Starting main program...')
         logger.success('配置向导完成，正在启动主程序...')
-        # Reload config and run
+        # Reload config and run (don't open browser again, wizard page already redirected)
+        SETTINGS['general']['auto_open_qr_web_page'] = False
         config_init()
         main()
     except Exception as e:
