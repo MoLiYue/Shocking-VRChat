@@ -176,41 +176,40 @@ onMounted(loadChannel)
 </template>
 
 <style scoped>
-.subtitle { color: var(--muted); font-size: 0.85em; margin: 4px 0 16px; }
-.tabs { display: flex; gap: 8px; margin-bottom: 16px; align-items: center; }
-.tabs button { padding: 8px 20px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); color: var(--muted); cursor: pointer; }
-.tabs button.active { border-color: var(--blue); color: var(--blue); }
-.dirty-badge { color: var(--amber); font-size: 0.82em; margin-left: 12px; }
-.settings-row { display: flex; gap: 20px; margin-bottom: 16px; }
+.subtitle { color: var(--text-muted); font-size: var(--text-sm); margin: var(--sp-1) 0 var(--sp-5); }
+.tabs { display: flex; gap: var(--sp-2); margin-bottom: var(--sp-4); align-items: center; }
+.tabs button { padding: var(--sp-2) var(--sp-5); border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface); color: var(--text-secondary); cursor: pointer; font-size: var(--text-sm); transition: all var(--transition); }
+.tabs button.active { border-color: var(--accent); color: var(--accent-hover); background: rgba(99,102,241,0.08); }
+.dirty-badge { color: var(--warning); font-size: var(--text-xs); margin-left: var(--sp-3); }
+.settings-row { display: flex; gap: var(--sp-5); margin-bottom: var(--sp-4); }
 .setting { flex: 1; }
-.setting label { display: block; font-size: 0.8em; color: var(--muted); margin-bottom: 4px; }
-.setting select, .setting input { width: 100%; padding: 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel-2); color: var(--text); }
+.setting label { display: block; font-size: var(--text-xs); color: var(--text-muted); margin-bottom: var(--sp-1); }
+.setting select, .setting input { width: 100%; }
 table { width: 100%; border-collapse: collapse; }
-th { text-align: left; font-size: 0.75em; color: #555; padding: 8px; border-bottom: 1px solid #1a2540; }
-td { padding: 8px; font-size: 0.85em; border-bottom: 1px solid #111a2e; vertical-align: middle; }
-.path { font-family: monospace; color: #bfccec; word-break: break-all; }
-.mode-badge { display: inline-block; padding: 3px 10px; border-radius: 12px; font-size: 0.78em; font-weight: 600; }
-.mode-distance { background: #1a3a5a; color: var(--blue); }
-.mode-shock { background: #3a1a1a; color: #ff8b8b; }
-.mode-touch { background: #1a3a2a; color: var(--green); }
-.mode-combo { background: #3a2a1a; color: var(--amber); }
-.mode-boost { background: #2a1a3a; color: var(--purple); }
-.actions { display: flex; gap: 4px; }
-.act-btn { border: none; border-radius: 6px; padding: 4px 8px; cursor: pointer; font-size: 0.85em; background: var(--panel-2); color: var(--muted); }
+th { text-align: left; font-size: var(--text-xs); color: var(--text-muted); padding: var(--sp-2) var(--sp-3); border-bottom: 1px solid var(--border-subtle); }
+td { padding: var(--sp-3); font-size: var(--text-sm); border-bottom: 1px solid var(--border-subtle); vertical-align: middle; }
+.path { font-family: var(--font-mono); color: var(--text-secondary); word-break: break-all; }
+.mode-badge { display: inline-block; padding: 2px 10px; border-radius: 99px; font-size: var(--text-xs); font-weight: 600; }
+.mode-distance { background: var(--info-surface); color: var(--info); }
+.mode-shock { background: var(--danger-surface); color: var(--danger); }
+.mode-touch { background: var(--success-surface); color: var(--success); }
+.mode-combo { background: var(--warning-surface); color: var(--warning); }
+.mode-boost { background: rgba(167,139,250,0.1); color: var(--purple); }
+.actions { display: flex; gap: var(--sp-1); }
+.act-btn { border: none; border-radius: var(--radius-sm); padding: var(--sp-1) var(--sp-2); cursor: pointer; font-size: var(--text-sm); background: transparent; color: var(--text-muted); transition: color var(--transition); }
 .act-btn:hover { color: var(--text); }
-.act-btn.del:hover { color: #ff8b8b; }
-.act-btn.save { color: var(--green); }
-.act-btn.cancel { color: #ff8b8b; }
-.editing { background: rgba(99,179,255,0.05); }
-.edit-input, .edit-select { padding: 6px 8px; border: 1px solid var(--blue); border-radius: 6px; background: var(--panel-2); color: var(--text); font-family: monospace; font-size: 0.85em; width: 100%; }
-.add-row { margin-top: 16px; }
-.add-form { display: flex; gap: 8px; align-items: center; }
-.add-input { flex: 1; padding: 9px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel-2); color: var(--text); font-family: monospace; font-size: 0.85em; }
-.add-select { width: 120px; padding: 9px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel-2); color: var(--text); }
-.hint { font-size: 0.78em; color: #555; margin-top: 6px; }
-.save-bar { display: flex; align-items: center; gap: 10px; margin-top: 16px; padding: 12px 16px; background: var(--panel); border-radius: 12px; border: 1px solid var(--line); }
-.msg { font-size: 0.85em; color: var(--green); }
-.msg.err { color: #ff8b8b; }
-.empty { color: #444; text-align: center; padding: 16px; }
-.card + .card { margin-top: 16px; }
+.act-btn.del:hover { color: var(--danger); }
+.act-btn.save { color: var(--success); }
+.act-btn.cancel { color: var(--danger); }
+.editing { background: rgba(99,102,241,0.04); }
+.edit-input, .edit-select { padding: var(--sp-2); border: 1px solid var(--accent); border-radius: var(--radius-sm); background: var(--bg-elevated); color: var(--text); font-family: var(--font-mono); font-size: var(--text-sm); width: 100%; }
+.add-row { margin-top: var(--sp-4); }
+.add-form { display: flex; gap: var(--sp-2); align-items: center; }
+.add-input { flex: 1; padding: var(--sp-2) var(--sp-3); border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--bg-elevated); color: var(--text); font-family: var(--font-mono); font-size: var(--text-sm); }
+.add-select { width: 120px; }
+.hint { font-size: var(--text-xs); color: var(--text-muted); margin-top: var(--sp-2); }
+.save-bar { display: flex; align-items: center; gap: var(--sp-3); margin-top: var(--sp-4); padding: var(--sp-3) var(--sp-4); background: var(--surface); border-radius: var(--radius-md); border: 1px solid var(--border-subtle); }
+.msg { font-size: var(--text-sm); color: var(--success); }
+.msg.err { color: var(--danger); }
+.empty { color: var(--text-muted); text-align: center; padding: var(--sp-5); }
 </style>
