@@ -1352,7 +1352,7 @@ def main():
     reload_th = Thread(target=config_hot_reload_loop, daemon=True)
     reload_th.start()
 
-    if SETTINGS['general']['auto_open_qr_web_page']:
+    if SETTINGS['general']['auto_open_qr_web_page'] and not os.environ.pop('SHOCKING_SKIP_OPEN', None):
         import webbrowser
         webbrowser.open_new_tab(f"http://127.0.0.1:{SETTINGS['web_server']['listen_port']}")
     else:
@@ -1399,8 +1399,8 @@ if __name__ == "__main__":
             _time.sleep(0.5)
 
         logger.success('配置向导完成，正在重启...')
-        # Disable auto-open so restart doesn't open another tab
-        SETTINGS['general']['auto_open_qr_web_page'] = False
+        # Set env var to skip opening browser on this restart only (browser already open)
+        os.environ['SHOCKING_SKIP_OPEN'] = '1'
         config_save()
         time.sleep(1)
         _restart_program()
