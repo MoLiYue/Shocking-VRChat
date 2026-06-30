@@ -3,234 +3,169 @@ import { ref } from 'vue'
 import { useRoute } from 'vue-router'
 
 const route = useRoute()
-const sidebarCollapsed = ref(false)
+const sidebarOpen = ref(true)
 
 const navItems = [
   { path: '/dashboard', label: 'Dashboard', icon: '⚡' },
   { path: '/params', label: '参数管理', icon: '🎛' },
   { path: '/curve', label: '强度曲线', icon: '📈' },
-  { path: '/combo', label: 'Combo 配置', icon: '🔀' },
+  { path: '/combo', label: 'Combo', icon: '🔀' },
   { path: '/recorder', label: '录制回放', icon: '🎙' },
 ]
-
-function getPageTitle() {
-  const item = navItems.find(n => n.path === route.path)
-  return item?.label || ''
-}
 </script>
 
 <template>
-  <div class="app-shell" :class="{ collapsed: sidebarCollapsed }">
+  <div class="shell">
     <!-- Sidebar -->
-    <aside class="sidebar">
-      <div class="sidebar-header">
-        <span class="brand-icon">⚡</span>
-        <span class="brand-text">Shocking VRChat</span>
+    <aside class="sidebar" :class="{ closed: !sidebarOpen }">
+      <div class="sidebar-brand">
+        <span class="brand-glow">⚡</span>
+        <span class="brand-name gradient-text">Shocking</span>
       </div>
-
-      <nav class="nav-list">
+      <nav class="nav">
         <router-link
-          v-for="item in navItems"
-          :key="item.path"
+          v-for="item in navItems" :key="item.path"
           :to="item.path"
-          class="nav-item"
+          class="nav-link"
           active-class="active"
         >
-          <span class="nav-icon">{{ item.icon }}</span>
-          <span class="nav-label">{{ item.label }}</span>
+          <span class="nav-ico">{{ item.icon }}</span>
+          <span class="nav-txt">{{ item.label }}</span>
         </router-link>
       </nav>
-
-      <div class="sidebar-footer">
-        <button class="collapse-btn" @click="sidebarCollapsed = !sidebarCollapsed" :title="sidebarCollapsed ? '展开' : '收起'">
-          {{ sidebarCollapsed ? '→' : '←' }}
-        </button>
-      </div>
+      <button class="toggle-btn" @click="sidebarOpen = !sidebarOpen">
+        {{ sidebarOpen ? '‹' : '›' }}
+      </button>
     </aside>
 
     <!-- Main -->
-    <div class="main-wrapper">
-      <!-- Top bar -->
-      <header class="topbar">
-        <div class="topbar-left">
-          <button class="mobile-menu-btn" @click="sidebarCollapsed = !sidebarCollapsed">☰</button>
-          <h1 class="topbar-title">{{ getPageTitle() }}</h1>
-        </div>
-        <div class="topbar-right">
-          <slot name="topbar-actions" />
-        </div>
-      </header>
-
-      <!-- Page content -->
-      <main class="page-content">
-        <router-view v-slot="{ Component }">
-          <transition name="fade" mode="out-in">
-            <component :is="Component" />
-          </transition>
-        </router-view>
-      </main>
-    </div>
+    <main class="main">
+      <router-view v-slot="{ Component }">
+        <transition name="page" mode="out-in">
+          <component :is="Component" />
+        </transition>
+      </router-view>
+    </main>
   </div>
 </template>
 
 <style scoped>
-.app-shell {
+.shell {
   display: grid;
-  grid-template-columns: 220px 1fr;
+  grid-template-columns: 200px 1fr;
   min-height: 100vh;
-  transition: grid-template-columns var(--transition);
+  transition: grid-template-columns 250ms ease;
 }
-.app-shell.collapsed {
-  grid-template-columns: 60px 1fr;
+.shell:has(.sidebar.closed) {
+  grid-template-columns: 56px 1fr;
 }
 
 /* Sidebar */
 .sidebar {
-  background: var(--bg-elevated);
-  border-right: 1px solid var(--border-subtle);
+  background: rgba(15, 12, 24, 0.95);
+  backdrop-filter: blur(20px);
+  border-right: 1px solid var(--border);
   display: flex;
   flex-direction: column;
-  overflow: hidden;
+  padding: var(--sp-4) 0;
   position: sticky;
   top: 0;
   height: 100vh;
+  overflow: hidden;
+  transition: all 250ms ease;
 }
-.sidebar-header {
+.sidebar-brand {
   display: flex;
   align-items: center;
   gap: var(--sp-3);
-  padding: var(--sp-5) var(--sp-4);
-  border-bottom: 1px solid var(--border-subtle);
-  min-height: 60px;
+  padding: var(--sp-3) var(--sp-4) var(--sp-6);
 }
-.brand-icon { font-size: 1.3em; }
-.brand-text {
-  font-size: var(--text-sm);
-  font-weight: 700;
-  color: var(--text);
-  white-space: nowrap;
-  overflow: hidden;
-  transition: opacity var(--transition);
+.brand-glow {
+  font-size: 1.4em;
+  filter: drop-shadow(0 0 6px rgba(139,92,246,0.5));
 }
-.collapsed .brand-text { opacity: 0; width: 0; }
+.brand-name {
+  font-size: var(--text-lg);
+  font-weight: 800;
+  letter-spacing: -0.03em;
+}
+.sidebar.closed .brand-name { opacity: 0; width: 0; }
+.sidebar.closed .nav-txt { opacity: 0; width: 0; }
 
-.nav-list {
-  flex: 1;
-  padding: var(--sp-3) var(--sp-2);
-  display: flex;
-  flex-direction: column;
-  gap: var(--sp-1);
-}
-.nav-item {
+.nav { flex: 1; padding: 0 var(--sp-2); display: flex; flex-direction: column; gap: 2px; }
+.nav-link {
   display: flex;
   align-items: center;
   gap: var(--sp-3);
   padding: var(--sp-3) var(--sp-3);
   border-radius: var(--radius-md);
-  color: var(--text-secondary);
+  color: var(--text-muted);
   text-decoration: none;
   font-size: var(--text-sm);
   font-weight: 500;
   transition: all var(--transition);
-  white-space: nowrap;
+  position: relative;
   overflow: hidden;
 }
-.nav-item:hover {
-  background: rgba(255,255,255,0.04);
+.nav-link::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: var(--gradient-btn);
+  opacity: 0;
+  transition: opacity var(--transition);
+}
+.nav-link:hover {
   color: var(--text);
   text-decoration: none;
 }
-.nav-item.active {
-  background: rgba(99,102,241,0.1);
-  color: var(--accent-hover);
+.nav-link:hover::before { opacity: 0.06; }
+.nav-link.active {
+  color: var(--text);
+  background: rgba(139, 92, 246, 0.12);
+  box-shadow: inset 0 0 0 1px rgba(139, 92, 246, 0.2);
 }
-.nav-icon { font-size: 1.1em; flex-shrink: 0; width: 24px; text-align: center; }
-.nav-label { transition: opacity var(--transition); }
-.collapsed .nav-label { opacity: 0; }
+.nav-link.active::before { opacity: 0.1; }
+.nav-ico { font-size: 1.1em; width: 24px; text-align: center; flex-shrink: 0; position: relative; z-index: 1; }
+.nav-txt { position: relative; z-index: 1; white-space: nowrap; transition: opacity 200ms; }
 
-.sidebar-footer {
-  padding: var(--sp-3);
-  border-top: 1px solid var(--border-subtle);
-}
-.collapse-btn {
-  width: 100%;
+.toggle-btn {
+  margin: var(--sp-2) var(--sp-3);
   padding: var(--sp-2);
-  border: none;
+  border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   background: transparent;
   color: var(--text-muted);
   cursor: pointer;
-  font-size: var(--text-sm);
-  transition: color var(--transition);
+  font-size: var(--text-base);
+  transition: all var(--transition);
 }
-.collapse-btn:hover { color: var(--text); }
+.toggle-btn:hover { color: var(--text); border-color: var(--border-hover); }
 
 /* Main content */
-.main-wrapper {
-  display: flex;
-  flex-direction: column;
-  min-height: 100vh;
-  overflow-x: hidden;
-}
-.topbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: var(--sp-4) var(--sp-6);
-  border-bottom: 1px solid var(--border-subtle);
-  background: var(--bg-elevated);
-  position: sticky;
-  top: 0;
-  z-index: 10;
-  backdrop-filter: blur(8px);
-}
-.topbar-left { display: flex; align-items: center; gap: var(--sp-3); }
-.topbar-title {
-  font-size: var(--text-lg);
-  font-weight: 600;
-  letter-spacing: -0.01em;
-}
-.mobile-menu-btn {
-  display: none;
-  border: none;
-  background: none;
-  color: var(--text);
-  font-size: 1.2em;
-  cursor: pointer;
-  padding: var(--sp-1);
-}
-.page-content {
-  flex: 1;
-  padding: var(--sp-6);
-  max-width: 1200px;
+.main {
+  padding: var(--sp-8);
+  max-width: 1100px;
   width: 100%;
 }
 
 /* Page transitions */
-.fade-enter-active, .fade-leave-active {
-  transition: opacity 120ms ease;
-}
-.fade-enter-from, .fade-leave-to {
-  opacity: 0;
-}
+.page-enter-active { transition: opacity 150ms ease, transform 150ms ease; }
+.page-leave-active { transition: opacity 100ms ease; }
+.page-enter-from { opacity: 0; transform: translateY(8px); }
+.page-leave-to { opacity: 0; }
 
-/* Responsive */
+/* Mobile */
 @media (max-width: 768px) {
-  .app-shell {
-    grid-template-columns: 1fr;
-  }
+  .shell { grid-template-columns: 1fr; }
   .sidebar {
-    position: fixed;
-    left: -220px;
-    width: 220px;
-    z-index: 100;
-    transition: left var(--transition);
-    box-shadow: 4px 0 24px rgba(0,0,0,0.5);
+    position: fixed; left: 0; top: 0; z-index: 100;
+    width: 200px;
+    transform: translateX(-100%);
+    box-shadow: 4px 0 32px rgba(0,0,0,0.7);
   }
-  .app-shell.collapsed .sidebar { left: -220px; }
-  .app-shell:not(.collapsed) .sidebar { left: 0; }
-  .mobile-menu-btn { display: block; }
-  .sidebar-footer { display: none; }
-  .page-content { padding: var(--sp-4); }
+  .sidebar:not(.closed) { transform: translateX(0); }
+  .main { padding: var(--sp-4); }
 }
 </style>
