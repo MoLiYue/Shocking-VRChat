@@ -13,8 +13,11 @@ const speed = ref(1.0)
 const loop = ref(false)
 const recordings = ref<any[]>([])
 const msg = ref('')
+const oscEvents = ref<any[]>([])
+const canvasARef = ref<HTMLCanvasElement | null>(null)
+const canvasBRef = ref<HTMLCanvasElement | null>(null)
 
-let timer: number | null = null
+let timers: number[] = []
 
 async function startRec() {
   const data = await apiPost('/api/v1/recorder/start')
@@ -45,7 +48,7 @@ async function loadFiles() {
   recordings.value = data.recordings || []
 }
 
-async function poll() {
+async function pollStatus() {
   try {
     const r = await api('/api/v1/recorder/status')
     recActive.value = r.recording
@@ -60,54 +63,99 @@ async function poll() {
   } catch {}
 }
 
-onMounted(() => { loadFiles(); poll(); timer = window.setInterval(poll, 1000) })
-onUnmounted(() => { if (timer) clearInterval(timer) })
+async function pollOsc() {
+  try {
+    const data = await api('/api/v1/osc_activity')
+    oscEvents.value = (data.events || []).slice(0, 20)
+  } catch {}
+}
+
+async function pollWave() {
+  try {
+    const data = await api('/api/v1/wave_history')
+    drawWave(canvasARef.value, data.A || [], '#8b5cf6')
+    drawWave(canvasBRef.value, data.B || [], '#3b82f6')
+  } catch {}
+}
+
+function drawWave(canvas: HTMLCanvasElement | null, samples: number[], color: string) {
+  if (!canvas) return
+  const ratio = window.devicePixelRatio || 1
+  const W = canvas.clientWidth
+  const H = canvas.clientHeight
+  canvas.width = W * ratio
+  canvas.height = H * ratio
+  const ctx = canvas.getContext('2d')!
+  ctx.setTransform(ratio, 0, 0, ratio, 0, 0)
+  ctx.clearRect(0, 0, W, H)
+  const bars = samples.slice(-60)
+  if (!bars.length) return
+  const gap = 2
+  const barW = Math.max(2, (W - gap * (bars.length - 1)) / bars.length)
+  bars.forEach((sample, i) => {
+    const v = Math.max(0, Math.min(100, sample))
+    const barH = (v / 100) * (H - 4)
+    const x = i * (barW + gap)
+    const y = H - barH
+    ctx.globalAlpha = 0.4 + v / 180
+    ctx.fillStyle = color
+    ctx.fillRect(x, y, barW, barH)
+  })
+  ctx.globalAlpha = 1
+}
+
+function shortPath(addr: string) { return addr.replace('/avatar/parameters/', '') }
+function timeStr(ts: number) { return new Date(ts * 1000).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit',second:'2-digit'}) }
+
+onMounted(() => {
+  loadFiles(); pollStatus(); pollOsc(); pollWave()
+  timers.push(window.setInterval(pollStatus, 1000))
+  timers.push(window.setInterval(pollOsc, 500))
+  timers.push(window.setInterval(pollWave, 250))
+})
+onUnmounted(() => timers.forEach(clearInterval))
 </script>
 
 <template>
   <div>
-    <h1>🎙 OSC 录制 / 回放</h1>
+    <h1 class="gradient-text" style="font-size:var(--text-2xl);margin-bottom:var(--sp-5)">OSC 录制 / 回放</h1>
 
-    <div class="grid">
-      <div>
-        <!-- Recording -->
-        <section class="card">
-          <h2>录制</h2>
-          <div class="status-badge" :class="recActive ? 'recording' : ''">
-            <span class="dot" :class="recActive ? 'dot-rec' : ''"></span>
-            {{ recActive ? `录制中 · ${recCount} 条 · ${(recElapsed / 1000).toFixed(1)}s` : '待机' }}
-          </div>
-          <div class="actions">
-            <button class="btn btn-red" :disabled="recActive" @click="startRec">⏺ 开始</button>
-            <button class="btn btn-gray" :disabled="!recActive" @click="stopRec">⏹ 停止</button>
-          </div>
-        </section>
+    <div class="top-grid">
+      <!-- Recording -->
+      <section class="card">
+        <h2>录制</h2>
+        <div class="status-badge" :class="recActive ? 'recording' : ''">
+          <span class="dot" :class="recActive ? 'dot-rec' : ''"></span>
+          {{ recActive ? `录制中 · ${recCount} 条 · ${(recElapsed / 1000).toFixed(1)}s` : '待机' }}
+        </div>
+        <div class="actions">
+          <button class="btn btn-danger" :disabled="recActive" @click="startRec">⏺ 开始</button>
+          <button class="btn btn-gray" :disabled="!recActive" @click="stopRec">⏹ 停止</button>
+        </div>
+      </section>
 
-        <!-- Playback -->
-        <section class="card">
-          <h2>回放控制</h2>
-          <div class="status-badge" :class="playActive ? 'playing' : ''">
-            <span class="dot" :class="playActive ? 'dot-play' : ''"></span>
-            {{ playActive ? `回放中 · ${playFilename}` : '停止' }}
-          </div>
-          <label>速度: {{ speed.toFixed(2) }}x</label>
-          <input type="range" v-model.number="speed" min="0.25" max="3" step="0.25">
-          <label><input type="checkbox" v-model="loop"> 循环回放</label>
-          <div class="actions">
-            <button class="btn btn-gray" :disabled="!playActive" @click="stopPlay">⏹ 停止</button>
-          </div>
-          <div v-if="playActive" class="progress-bar">
-            <div class="fill" :style="{width: (playTotal > 0 ? playProgress / playTotal * 100 : 0) + '%'}"></div>
-          </div>
-        </section>
-      </div>
+      <!-- Playback -->
+      <section class="card">
+        <h2>回放控制</h2>
+        <div class="status-badge" :class="playActive ? 'playing' : ''">
+          <span class="dot" :class="playActive ? 'dot-play' : ''"></span>
+          {{ playActive ? `回放中 · ${playFilename}` : '停止' }}
+        </div>
+        <label>速度: {{ speed.toFixed(2) }}x</label>
+        <input type="range" v-model.number="speed" min="0.25" max="3" step="0.25">
+        <label><input type="checkbox" v-model="loop"> 循环回放</label>
+        <div class="actions">
+          <button class="btn btn-gray" :disabled="!playActive" @click="stopPlay">⏹ 停止</button>
+        </div>
+        <div v-if="playActive" class="progress-bar"><div class="fill" :style="{width: (playTotal > 0 ? playProgress / playTotal * 100 : 0) + '%'}"></div></div>
+      </section>
 
-      <!-- File list -->
+      <!-- Files -->
       <section class="card">
         <h2>录制文件</h2>
         <div class="file-list">
           <div class="file-item" v-for="f in recordings" :key="f.name">
-            <span class="file-name" :title="f.name">{{ f.name }}</span>
+            <span class="file-name">{{ f.name }}</span>
             <span class="file-meta">{{ f.message_count }}条 · {{ (f.duration_ms / 1000).toFixed(1) }}s</span>
             <button class="fbtn play" @click="startPlay(f.name)">▶</button>
             <button class="fbtn del" @click="deleteFile(f.name)">✕</button>
@@ -116,33 +164,89 @@ onUnmounted(() => { if (timer) clearInterval(timer) })
         </div>
       </section>
     </div>
+
+    <!-- Live monitoring -->
+    <div class="monitor-grid">
+      <!-- Wave -->
+      <section class="card">
+        <h2>实时波形</h2>
+        <div class="wave-row">
+          <div class="wave-panel"><div class="wave-ch">A</div><canvas ref="canvasARef" class="wave-canvas"></canvas></div>
+          <div class="wave-panel"><div class="wave-ch">B</div><canvas ref="canvasBRef" class="wave-canvas"></canvas></div>
+        </div>
+      </section>
+
+      <!-- OSC Feed -->
+      <section class="card">
+        <h2>OSC 触发</h2>
+        <div class="osc-feed">
+          <div class="osc-row" v-for="(e, i) in oscEvents" :key="i">
+            <span class="badge" :class="'b-' + e.channel.toLowerCase()">{{ e.channel }}</span>
+            <span class="osc-mode">{{ e.mode }}</span>
+            <span class="osc-path">{{ shortPath(e.address) }}</span>
+            <span class="osc-val">{{ e.value }}</span>
+            <span class="osc-time">{{ timeStr(e.time) }}</span>
+          </div>
+          <div v-if="!oscEvents.length" class="empty">等待数据...</div>
+        </div>
+      </section>
+    </div>
+
     <div v-if="msg" class="msg-toast">{{ msg }}</div>
   </div>
 </template>
 
 <style scoped>
-.grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 16px; }
-.status-badge { display: inline-flex; align-items: center; gap: 8px; padding: 8px 12px; border-radius: 12px; background: #1a2540; font-size: 0.85em; margin-bottom: 12px; }
-.status-badge.recording { background: #3a1a1a; color: #ff8b8b; }
-.status-badge.playing { background: #1a3a2a; color: var(--green); }
-.dot { width: 8px; height: 8px; border-radius: 50%; background: #444; }
-.dot-rec { background: #ff6b6b; animation: pulse 1s infinite; }
-.dot-play { background: var(--green); animation: pulse 1.5s infinite; }
-@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.5} }
-.actions { display: flex; gap: 8px; margin: 8px 0; }
-label { display: block; font-size: 0.82em; color: var(--muted); margin: 8px 0 4px; }
-input[type="range"] { width: 100%; accent-color: var(--blue); }
-.progress-bar { height: 5px; background: #0a1020; border-radius: 4px; margin-top: 8px; overflow: hidden; }
-.fill { height: 100%; background: var(--green); transition: width 0.3s; }
-.file-list { max-height: 400px; overflow-y: auto; }
-.file-item { display: flex; align-items: center; gap: 8px; padding: 8px; border-bottom: 1px solid #111a2e; font-size: 0.85em; }
-.file-name { flex: 1; font-family: monospace; color: #bfccec; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.file-meta { color: #555; font-size: 0.8em; }
-.fbtn { border: none; border-radius: 6px; padding: 4px 10px; cursor: pointer; color: #fff; font-size: 0.8em; }
-.fbtn.play { background: #2fa75b; }
-.fbtn.del { background: #8b3a3a; }
-.empty { padding: 16px; text-align: center; color: #444; }
-.msg-toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); padding: 10px 20px; background: var(--green); color: #000; border-radius: 8px; font-size: 0.85em; }
-.card + .card { margin-top: 16px; }
-@media (max-width: 768px) { .grid { grid-template-columns: 1fr; } }
+.top-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: var(--sp-4); margin-bottom: var(--sp-4); }
+.monitor-grid { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-4); }
+
+.status-badge { display: inline-flex; align-items: center; gap: 8px; padding: var(--sp-2) var(--sp-3); border-radius: var(--radius-md); background: rgba(20,16,32,0.6); font-size: var(--text-sm); margin-bottom: var(--sp-3); }
+.status-badge.recording { background: rgba(239,68,68,0.1); color: var(--danger); }
+.status-badge.playing { background: rgba(34,197,94,0.1); color: var(--success); }
+.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--text-muted); }
+.dot-rec { background: var(--danger); animation: pulse 1s infinite; }
+.dot-play { background: var(--success); animation: pulse 1.5s infinite; }
+@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
+
+.actions { display: flex; gap: var(--sp-2); margin: var(--sp-2) 0; }
+label { display: block; font-size: var(--text-xs); color: var(--text-muted); margin: var(--sp-2) 0 var(--sp-1); }
+.progress-bar { height: 4px; background: rgba(139,92,246,0.1); border-radius: 2px; margin-top: var(--sp-2); overflow: hidden; }
+.fill { height: 100%; background: var(--success); transition: width 0.3s; }
+
+.file-list { max-height: 200px; overflow-y: auto; }
+.file-item { display: flex; align-items: center; gap: var(--sp-2); padding: var(--sp-2); border-radius: var(--radius-sm); font-size: var(--text-sm); transition: background var(--transition); }
+.file-item:hover { background: rgba(139,92,246,0.04); }
+.file-name { flex: 1; color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.file-meta { color: var(--text-muted); font-size: var(--text-xs); }
+.fbtn { border: none; border-radius: var(--radius-sm); padding: 3px 8px; cursor: pointer; color: #fff; font-size: var(--text-xs); transition: transform var(--transition); }
+.fbtn:hover { transform: scale(1.1); }
+.fbtn.play { background: var(--success); }
+.fbtn.del { background: rgba(239,68,68,0.6); }
+
+/* Wave */
+.wave-row { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-3); }
+.wave-panel { position: relative; }
+.wave-ch { position: absolute; top: var(--sp-2); left: var(--sp-3); font-size: var(--text-xs); font-weight: 700; color: var(--text-muted); }
+.wave-canvas { width: 100%; height: 100px; border-radius: var(--radius-md); background: rgba(10,8,16,0.5); border: 1px solid var(--border); }
+
+/* OSC Feed */
+.osc-feed { max-height: 200px; overflow-y: auto; }
+.osc-row { display: flex; gap: var(--sp-2); align-items: center; padding: var(--sp-1) var(--sp-2); font-size: var(--text-xs); border-radius: var(--radius-sm); }
+.osc-row:hover { background: rgba(139,92,246,0.04); }
+.badge { padding: 2px 6px; border-radius: var(--radius-sm); font-weight: 700; font-size: 10px; }
+.b-a { background: rgba(52,211,153,0.12); color: var(--success); }
+.b-b { background: rgba(96,165,250,0.12); color: var(--info); }
+.osc-mode { color: var(--warning); min-width: 44px; }
+.osc-path { flex: 1; color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.osc-val { color: var(--accent-2); min-width: 36px; text-align: right; font-variant-numeric: tabular-nums; }
+.osc-time { color: var(--text-muted); min-width: 50px; text-align: right; }
+
+.empty { padding: var(--sp-4); text-align: center; color: var(--text-muted); font-size: var(--text-sm); }
+.msg-toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); padding: var(--sp-3) var(--sp-5); background: var(--success); color: #000; border-radius: var(--radius-full); font-size: var(--text-sm); font-weight: 500; }
+
+@media (max-width: 768px) {
+  .top-grid { grid-template-columns: 1fr; }
+  .monitor-grid { grid-template-columns: 1fr; }
+  .wave-row { grid-template-columns: 1fr; }
+}
 </style>
