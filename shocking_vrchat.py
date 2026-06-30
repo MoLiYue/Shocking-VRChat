@@ -608,7 +608,7 @@ def get_config():
 
 @app.route('/api/v1/settings', methods=['POST'])
 def api_v1_settings_update():
-    """Update server settings (osc/ws/web_server). Requires restart for network changes."""
+    """Update server settings (osc/ws/web_server). Auto-restarts for network changes."""
     data = request.get_json()
     restart_needed = []
     if 'osc' in data:
@@ -636,11 +636,27 @@ def api_v1_settings_update():
         SETTINGS['log_level'] = data['log_level']
         reset_logger()
     config_save()
+    if restart_needed:
+        # Schedule restart after response is sent
+        def _delayed_restart():
+            time.sleep(1)
+            logger.info("[settings] Restarting due to network config change...")
+            _restart_program()
+        Thread(target=_delayed_restart, daemon=True).start()
     return jsonify({
         'success': True,
         'restart_needed': list(set(restart_needed)),
-        'message': '已保存。' + ('网络配置变更需重启程序生效。' if restart_needed else ''),
+        'message': '已保存。' + ('程序正在重启...' if restart_needed else ''),
     })
+
+def _restart_program():
+    """Restart the current process."""
+    python = sys.executable
+    if getattr(sys, 'frozen', False):
+        # PyInstaller bundled exe
+        os.execv(sys.executable, [sys.executable] + sys.argv[1:])
+    else:
+        os.execv(python, [python] + sys.argv)
 
 @app.route('/api/v1/params/<channel>', methods=['GET'])
 def api_v1_params_get(channel):

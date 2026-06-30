@@ -29,9 +29,25 @@ async function save() {
     web_server: { listen_port: webPort.value, listen_host: webHost.value },
     log_level: logLevel.value,
   })
-  if (data.success) { msg.value = data.message; msgErr.value = false }
-  else { msg.value = data.message || '保存失败'; msgErr.value = true }
-  setTimeout(() => msg.value = '', 5000)
+  if (data.success) {
+    if (data.restart_needed?.length) {
+      msg.value = '已保存，程序正在重启... 请稍候刷新页面。'
+      msgErr.value = false
+      // If web port changed, redirect to new port after delay
+      const newPort = webPort.value
+      const currentPort = window.location.port
+      if (String(newPort) !== currentPort) {
+        setTimeout(() => {
+          window.location.href = `http://${window.location.hostname}:${newPort}/settings`
+        }, 3000)
+      } else {
+        setTimeout(() => window.location.reload(), 3000)
+      }
+    } else {
+      msg.value = data.message; msgErr.value = false
+    }
+  } else { msg.value = data.message || '保存失败'; msgErr.value = true }
+  setTimeout(() => msg.value = '', 8000)
 }
 
 onMounted(load)
