@@ -3,6 +3,9 @@ settings*.yaml
 profiles/
 curve_config.yaml
 recordings/
+static/
+frontend/node_modules/
+frontend/dist/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

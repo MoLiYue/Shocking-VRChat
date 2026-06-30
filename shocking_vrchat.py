@@ -24,7 +24,11 @@ def get_runtime_base_dir():
 
 
 RUNTIME_BASE_DIR = get_runtime_base_dir()
-app = Flask(__name__, template_folder=os.path.join(RUNTIME_BASE_DIR, "templates"))
+STATIC_DIR = os.path.join(RUNTIME_BASE_DIR, "static")
+app = Flask(__name__,
+            template_folder=os.path.join(RUNTIME_BASE_DIR, "templates"),
+            static_folder=STATIC_DIR,
+            static_url_path='')
 WAVE_HISTORY_SAMPLE_MS = 25
 
 CONFIG_FILE_VERSION  = 'v0.2'
@@ -341,7 +345,19 @@ def web_get_ip():
 
 @app.route("/")
 def web_index():
-    return redirect("/dashboard", code=302)
+    return _serve_spa()
+
+def _serve_spa():
+    """Serve Vue SPA index.html, fallback to legacy templates."""
+    spa_index = os.path.join(STATIC_DIR, 'index.html')
+    if os.path.exists(spa_index):
+        return app.send_static_file('index.html')
+    # Fallback: legacy template-based dashboard
+    return redirect("/dashboard-legacy", code=302)
+
+@app.route('/dashboard-legacy')
+def web_dashboard_legacy():
+    return render_template('dashboard.html')
 
 @app.route("/qr")
 def web_qr():
@@ -590,25 +606,47 @@ def get_config():
         'advanced': strip_basic_settings(SETTINGS),
     }
 
-@app.route('/dashboard')
-def web_dashboard():
-    return render_template('dashboard.html')
+@app.route('/api/v1/params/<channel>', methods=['GET'])
+def api_v1_params_get(channel):
+    """Get avatar_params for a channel."""
+    ch = channel.lower()
+    if ch not in ('a', 'b'):
+        return jsonify({'error': 'invalid channel'}), 400
+    ch_key = f'channel_{ch}'
+    params = SETTINGS_BASIC['dglab3'][ch_key].get('avatar_params', [])
+    default_mode = SETTINGS_BASIC['dglab3'][ch_key].get('mode', 'distance')
+    strength_limit = SETTINGS_BASIC['dglab3'][ch_key].get('strength_limit', 100)
+    return jsonify({'params': params, 'default_mode': default_mode, 'strength_limit': strength_limit})
 
-@app.route('/params')
-def web_param_map():
-    return render_template('param_map.html')
-
-@app.route('/recorder')
-def web_recorder():
-    return render_template('osc_recorder.html')
-
-@app.route('/curve')
-def web_curve_editor():
-    return render_template('curve_editor.html')
-
-@app.route('/combo')
-def web_combo_editor():
-    return render_template('combo_editor.html')
+@app.route('/api/v1/params/<channel>', methods=['POST'])
+def api_v1_params_set(channel):
+    """Replace all avatar_params for a channel. Also update default_mode and strength_limit."""
+    ch = channel.lower()
+    if ch not in ('a', 'b'):
+        return jsonify({'success': False, 'message': 'invalid channel'}), 400
+    data = request.get_json()
+    ch_key = f'channel_{ch}'
+    # Update params
+    new_params = data.get('params', [])
+    validated = []
+    for p in new_params:
+        if isinstance(p, str):
+            validated.append({'path': p, 'mode': data.get('default_mode', 'distance')})
+        elif isinstance(p, dict) and p.get('path'):
+            validated.append({'path': p['path'], 'mode': p.get('mode', 'distance')})
+    SETTINGS_BASIC['dglab3'][ch_key]['avatar_params'] = validated
+    # Update default mode and strength limit if provided
+    if 'default_mode' in data:
+        SETTINGS_BASIC['dglab3'][ch_key]['mode'] = data['default_mode']
+    if 'strength_limit' in data:
+        SETTINGS_BASIC['dglab3'][ch_key]['strength_limit'] = int(data['strength_limit'])
+    # Sync into SETTINGS
+    SETTINGS['dglab3'][ch_key]['avatar_params'] = validated
+    SETTINGS['dglab3'][ch_key]['mode'] = SETTINGS_BASIC['dglab3'][ch_key]['mode']
+    SETTINGS['dglab3'][ch_key]['strength_limit'] = SETTINGS_BASIC['dglab3'][ch_key]['strength_limit']
+    normalize_avatar_param_entries(SETTINGS['dglab3'][ch_key])
+    config_save()
+    return jsonify({'success': True, 'params': validated, 'note': 'Restart required for avatar_params changes to take effect.'})
 
 @app.route('/api/v1/combo/<channel>', methods=['GET'])
 def api_v1_combo_get(channel):
@@ -1030,6 +1068,16 @@ async def api_v1_wave_preset(channel, preset_name, duration):
         wavestr = json.dumps(chunk, separators=(',', ':'))
         await command_queue.put(CommandPriority.API, channel, 'wave', value=wavestr, source_id='api_wave_preset')
     return {'result': 'OK', 'ops_sent': len(repeated)}
+
+# SPA catch-all: serve index.html for Vue Router paths
+@app.route('/dashboard')
+@app.route('/curve')
+@app.route('/combo')
+@app.route('/params')
+@app.route('/recorder')
+@app.route('/setup')
+def spa_catch_all():
+    return _serve_spa()
 
 command_queue = CommandQueue()
 
