@@ -169,7 +169,7 @@ onUnmounted(() => timers.forEach(clearInterval))
     <div class="monitor-grid">
       <!-- Wave -->
       <section class="card">
-        <h2>实时波形</h2>
+        <h2>回放波形</h2>
         <div class="wave-row">
           <div class="wave-panel"><div class="wave-ch">A</div><canvas ref="canvasARef" class="wave-canvas"></canvas></div>
           <div class="wave-panel"><div class="wave-ch">B</div><canvas ref="canvasBRef" class="wave-canvas"></canvas></div>
