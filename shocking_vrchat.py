@@ -563,7 +563,7 @@ async def api_v1_sendwave(channel, repeat, wavedata):
         logger.warning('[API][sendwave] Invalid wave, set to 0A0A0A0A64646464.')
         wavedata = '0A0A0A0A64646464'
     wavestr = json.dumps([wavedata] * repeat, separators=(',', ':'))
-    logger.success(f'[API][sendwave] C:{channel} R:{repeat} W:{wavedata}')
+    logger.debug(f'[API][sendwave] C:{channel} R:{repeat} W:{wavedata}')
     await command_queue.put(CommandPriority.API, channel, 'wave', value=wavestr, source_id='api_sendwave')
     return {'result': 'OK'}
 
@@ -859,6 +859,7 @@ def api_v1_profiles_save(name):
     path = os.path.join(PROFILES_DIR, safe_name + '.yaml')
     with open(path, 'w', encoding='utf-8') as fw:
         yaml.safe_dump(profile_data, fw, allow_unicode=True)
+    logger.info(f"[profile] Saved profile: {safe_name}")
     return jsonify({'success': True, 'name': safe_name})
 
 @app.route('/api/v1/profiles/<name>', methods=['POST'])
@@ -883,6 +884,7 @@ def api_v1_profiles_load(name):
         new_advanced['ws']['master_uuid'] = SETTINGS['ws']['master_uuid']
         apply_hot_reloadable_settings(new_advanced, new_basic)
         config_save()
+        logger.success(f"[profile] Loaded profile: {safe_name}")
         return jsonify({'success': True, 'name': safe_name})
     except Exception as e:
         return jsonify({'success': False, 'message': str(e)}), 500
@@ -939,6 +941,7 @@ def api_v1_recorder_start():
     _recording_state['start_time'] = time.perf_counter()
     _recording_state['messages'] = []
     _recording_state['filename'] = f"rec_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+    logger.success(f"[recorder] Started recording: {_recording_state['filename']}")
     return jsonify({'success': True, 'filename': _recording_state['filename']})
 
 @app.route('/api/v1/recorder/stop', methods=['POST'])
@@ -960,6 +963,7 @@ def api_v1_recorder_stop():
     with open(filepath, 'w', encoding='utf-8') as f:
         json.dump(data, f, ensure_ascii=False, separators=(',', ':'))
     _recording_state['messages'] = []
+    logger.success(f"[recorder] Stopped. Saved {len(messages)} messages ({duration_ms/1000:.1f}s) to {filename}")
     return jsonify({'success': True, 'filename': filename, 'message_count': len(messages), 'duration_ms': duration_ms})
 
 @app.route('/api/v1/recorder/status')
@@ -1280,7 +1284,7 @@ class ConfigFileInited(Exception):
     pass
 
 def config_init():
-    logger.info(f'Init settings..., Config filename: {CONFIG_FILENAME_BASIC} {CONFIG_FILENAME}, Config version: {CONFIG_FILE_VERSION}.')
+    logger.info(f'Loading config: {CONFIG_FILENAME_BASIC}, {CONFIG_FILENAME}')
     global SETTINGS, SETTINGS_BASIC, SERVER_IP
     if not (os.path.exists(CONFIG_FILENAME) and os.path.exists(CONFIG_FILENAME_BASIC)):
         SETTINGS['ws']['master_uuid'] = str(uuid.uuid4())
@@ -1290,14 +1294,13 @@ def config_init():
     SETTINGS, SETTINGS_BASIC = load_config_files()
 
     if SETTINGS.get('version', None) != CONFIG_FILE_VERSION or SETTINGS_BASIC.get('version', None) != CONFIG_FILE_VERSION:
-        logger.error(f"Configuration file version mismatch! Please delete the {CONFIG_FILENAME_BASIC} and {CONFIG_FILENAME} files and run the program again to generate the latest version of the configuration files.")
-        raise Exception(f'配置文件版本不匹配！请删除 {CONFIG_FILENAME_BASIC} {CONFIG_FILENAME} 文件后再次运行程序，以生成最新版本的配置文件。')
+        logger.error(f"配置文件版本不匹配！请删除 {CONFIG_FILENAME_BASIC} 和 {CONFIG_FILENAME} 后重启。")
+        raise Exception(f'Config version mismatch. Delete {CONFIG_FILENAME_BASIC} and {CONFIG_FILENAME} to regenerate.')
     SERVER_IP = SETTINGS['SERVER_IP'] or get_current_ip()
 
     reset_logger()
     update_config_mtimes()
-    logger.success("The configuration file initialization is complete. The WebSocket service needs to listen for incoming connections. If a firewall prompt appears, please click Allow Access.")
-    logger.success("配置文件初始化完成，Websocket服务需要监听外来连接，如弹出防火墙提示，请点击允许访问。")
+    logger.success("配置加载完成 | Websocket 需要监听外来连接，如弹出防火墙提示请允许")
 
 def main():
     global dispatcher, handlers
@@ -1341,6 +1344,13 @@ def main():
         if info_ip == '0.0.0.0':
             info_ip = get_current_ip()
         logger.success(f"请打开浏览器访问 http://{info_ip}:{SETTINGS['web_server']['listen_port']}")
+
+    # Startup summary
+    enabled_a = sum(1 for p in SETTINGS['dglab3']['channel_a']['avatar_params'] if p.get('enabled', True))
+    enabled_b = sum(1 for p in SETTINGS['dglab3']['channel_b']['avatar_params'] if p.get('enabled', True))
+    logger.info(f"Channel A: {enabled_a} params | Channel B: {enabled_b} params")
+    logger.info(f"Web: :{SETTINGS['web_server']['listen_port']} | WS: :{SETTINGS['ws']['listen_port']} | OSC: :{SETTINGS['osc']['listen_port']}")
+
     app.run(SETTINGS['web_server']['listen_host'], SETTINGS['web_server']['listen_port'], debug=False)
 
 if __name__ == "__main__":
@@ -1348,8 +1358,7 @@ if __name__ == "__main__":
         config_init()
         main()
     except ConfigFileInited:
-        logger.success('Configuration files not found. Starting setup wizard...')
-        logger.success('未找到配置文件，正在启动配置向导...')
+        logger.success('未找到配置文件，启动配置向导...')
         import webbrowser
         port = SETTINGS['web_server']['listen_port']
         webbrowser.open_new_tab(f"http://127.0.0.1:{port}/setup")
@@ -1373,8 +1382,7 @@ if __name__ == "__main__":
         while not app.config.get('SETUP_COMPLETE', False):
             _time.sleep(0.5)
 
-        logger.success('Setup wizard completed. Restarting program...')
-        logger.success('配置向导完成，正在重启程序...')
+        logger.success('配置向导完成，正在重启...')
         # Disable auto-open so restart doesn't open another tab
         SETTINGS['general']['auto_open_qr_web_page'] = False
         config_save()
@@ -1383,6 +1391,5 @@ if __name__ == "__main__":
     except Exception as e:
         logger.error(traceback.format_exc())
         logger.error("Unexpected Error.")
-    logger.info('Exiting in 1 seconds ... Press Ctrl-C to exit immediately')
-    logger.info('退出等待1秒 ... 按Ctrl-C立即退出')
+    logger.info('正在退出...')
     time.sleep(1)

@@ -75,7 +75,7 @@ class DGConnection():
             else:
                 logger.error(f'ID {self.uuid}, unknown msg {msg.message}')
         elif msg.type == 'heartbeat':
-            logger.info(f'ID {self.uuid}, RECV HB')
+            logger.debug(f'ID {self.uuid}, RECV HB')
     
     def get_upper_strength(self, channel='A'):
         return min(self.strength_max[channel], self.strength_limit[channel])
@@ -90,7 +90,7 @@ class DGConnection():
                 value = limit
         if mode == '2':
             self.strength[channel] = value
-        logger.info(f"Channel {channel}, set strength, mode {mode}, value {value}.")
+        logger.debug(f"Channel {channel}, set strength, mode {mode}, value {value}.")
         msg = DGWSMessage('msg', self.master_uuid, self.uuid, f"strength-{'1' if channel == 'A' else '2'}+{mode}+{value}")
         await msg.send(self)
 
@@ -116,7 +116,7 @@ class DGConnection():
     async def heartbeat(self):
         while 1:
             await asyncio.sleep(60)
-            logger.info(f'ID {self.uuid}, Sending HB.')
+            logger.debug(f'ID {self.uuid}, Sending HB.')
             await self.ws_conn.send(DGWSMessage.HEARTBEAT)
     
     async def connection_init(self):
@@ -125,7 +125,7 @@ class DGConnection():
         await self.set_strength('B', value=1, force=True)
 
     async def serve(self):
-        logger.info(f'New WS conn, id {self.uuid}.')
+        logger.success(f'New device connected, id {self.uuid}.')
         msg = DGWSMessage('bind', clientId=str(self.uuid), targetId='', message='targetId')
         await msg.send(self)
         asyncio.create_task(self.connection_init())
@@ -142,7 +142,7 @@ class DGConnection():
                     DGWSMessage('error',message='500')
             await self.ws_conn.wait_closed()
         finally:
-            logger.warning(f'ID {self.uuid} CLOSED.')
+            logger.warning(f'Device disconnected, id {self.uuid}.')
             hb.cancel()
             WS_CONNECTIONS.remove(self)
 
