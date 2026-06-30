@@ -712,7 +712,13 @@ def api_v1_params_set(channel):
     SETTINGS['dglab3'][ch_key]['strength_limit'] = SETTINGS_BASIC['dglab3'][ch_key]['strength_limit']
     normalize_avatar_param_entries(SETTINGS['dglab3'][ch_key])
     config_save()
-    return jsonify({'success': True, 'params': validated, 'note': 'Restart required for avatar_params changes to take effect.'})
+    # Auto-restart to apply new param registrations
+    def _delayed_restart():
+        time.sleep(1)
+        logger.info("[params] Restarting to apply param changes...")
+        _restart_program()
+    Thread(target=_delayed_restart, daemon=True).start()
+    return jsonify({'success': True, 'params': validated, 'restarting': True})
 
 @app.route('/api/v1/combo/<channel>', methods=['GET'])
 def api_v1_combo_get(channel):
@@ -1079,7 +1085,16 @@ def _playback_worker(filepath, speed, loop):
                 addr = msg['addr']
                 args = msg.get('args', [])
                 try:
-                    client.send_message(addr, args)
+                    # Ensure correct types for OSC (JSON may lose float vs int distinction)
+                    osc_args = []
+                    for a in args:
+                        if isinstance(a, bool):
+                            osc_args.append(a)
+                        elif isinstance(a, int):
+                            osc_args.append(float(a))  # VRChat params are typically float
+                        else:
+                            osc_args.append(a)
+                    client.send_message(addr, osc_args if len(osc_args) != 1 else osc_args[0])
                 except Exception:
                     pass
                 _playback_state['progress'] = i + 1

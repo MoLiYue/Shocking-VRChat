@@ -81,6 +81,22 @@ function confirmEdit() {
 
 function cancelEdit() { editIndex.value = null }
 
+async function waitForRestart() {
+  // Wait for old server to die
+  for (let i = 0; i < 20; i++) {
+    await new Promise(r => setTimeout(r, 300))
+    try { await fetch('/api/v1/status') } catch { break }
+  }
+  // Wait for new server to come up
+  for (let i = 0; i < 30; i++) {
+    await new Promise(r => setTimeout(r, 500))
+    try {
+      const resp = await fetch('/api/v1/status')
+      if (resp.ok) return
+    } catch {}
+  }
+}
+
 async function save() {
   const data = await apiPost(`/api/v1/params/${activeChannel.value}`, {
     params: params.value,
@@ -88,8 +104,12 @@ async function save() {
     strength_limit: strengthLimit.value,
   })
   if (data.success) {
-    showMsg('已保存（参数变更需重启程序生效）', false)
+    showMsg('已保存，正在重启生效...', false)
     dirty.value = false
+    // Wait for restart then reload
+    await waitForRestart()
+    loadChannel()
+    showMsg('已生效', false)
   } else {
     showMsg(data.message || '保存失败', true)
   }
