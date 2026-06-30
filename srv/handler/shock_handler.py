@@ -92,9 +92,9 @@ class ShockHandler(BaseHandler):
             'mode': self.shock_mode,
             'channel': self.channel,
         }
-        if self.osc_activity_observer:
+        if ShockHandler.osc_activity_observer:
             try:
-                self.osc_activity_observer(address, val, self.channel, self.shock_mode)
+                ShockHandler.osc_activity_observer(address, val, self.channel, self.shock_mode)
             except Exception:
                 pass
         if self._command_queue:
