@@ -145,12 +145,16 @@ select, input[type="text"], input[type="number"] {
   padding: var(--sp-3) var(--sp-4);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
-  background: rgba(20, 16, 32, 0.8);
+  background: #1a1225;
   color: var(--text);
   font-size: var(--text-sm);
   font-family: var(--font);
   transition: all var(--transition);
   outline: none;
+}
+select option {
+  background: #1a1225;
+  color: var(--text);
 }
 select:focus, input[type="text"]:focus, input[type="number"]:focus {
   border-color: var(--accent);
