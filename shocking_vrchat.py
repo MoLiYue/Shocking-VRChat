@@ -921,14 +921,15 @@ _playback_state = {
 def _ensure_recordings_dir():
     os.makedirs(RECORDINGS_DIR, exist_ok=True)
 
-def _osc_record_hook(address, value, channel, mode):
-    """Called from osc_activity_observer when recording is active."""
+def _osc_record_hook(address, *args):
+    """Global OSC handler for recording ALL params, not just selected ones."""
     if _recording_state['active']:
         elapsed_ms = (time.perf_counter() - _recording_state['start_time']) * 1000.0
+        # Store raw args (may be multiple values)
         _recording_state['messages'].append({
             't': round(elapsed_ms, 3),
             'addr': address,
-            'args': [value],
+            'args': list(args),
         })
 
 @app.route('/api/v1/recorder/start', methods=['POST'])
@@ -1163,8 +1164,6 @@ def _record_osc_activity(address, value, channel, mode):
         'channel': channel,
         'mode': mode,
     })
-    # Feed to recorder if active
-    _osc_record_hook(address, value, channel, mode)
 
 # Wave history ring buffer for dashboard visualization
 _wave_history = {'A': collections.deque(maxlen=800), 'B': collections.deque(maxlen=800)}
@@ -1305,6 +1304,8 @@ def config_init():
 def main():
     global dispatcher, handlers
     dispatcher = Dispatcher()
+    # Record ALL OSC messages (not just registered params) when recording is active
+    dispatcher.set_default_handler(_osc_record_hook)
     handlers = []
 
     ShockHandler.set_command_queue(command_queue)
