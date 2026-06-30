@@ -51,5 +51,5 @@ onMounted(render)
 
 <style scoped>
 .qr-container { display: flex; justify-content: center; padding: var(--sp-4); }
-.qr-canvas { border-radius: var(--radius-md); max-width: 100%; }
+.qr-canvas { border-radius: var(--radius-md); max-width: 100%; background: #ffffff; padding: 12px; }
 </style>
