@@ -199,6 +199,7 @@ def normalize_avatar_param_entries(channel_settings: dict):
             normalized.append({
                 'path': entry,
                 'mode': default_mode,
+                'enabled': True,
             })
         elif isinstance(entry, dict):
             path = entry.get('path')
@@ -208,6 +209,7 @@ def normalize_avatar_param_entries(channel_settings: dict):
             normalized.append({
                 'path': path,
                 'mode': entry.get('mode', default_mode),
+                'enabled': entry.get('enabled', True),
             })
         else:
             logger.warning(f'Ignoring invalid avatar param config: {entry}')
@@ -678,21 +680,25 @@ def api_v1_params_set(channel):
         return jsonify({'success': False, 'message': 'invalid channel'}), 400
     data = request.get_json()
     ch_key = f'channel_{ch}'
-    # Update params
+    # Update params (preserve enabled field)
     new_params = data.get('params', [])
     validated = []
     for p in new_params:
         if isinstance(p, str):
-            validated.append({'path': p, 'mode': data.get('default_mode', 'distance')})
+            validated.append({'path': p, 'mode': data.get('default_mode', 'distance'), 'enabled': True})
         elif isinstance(p, dict) and p.get('path'):
-            validated.append({'path': p['path'], 'mode': p.get('mode', 'distance')})
+            validated.append({
+                'path': p['path'],
+                'mode': p.get('mode', 'distance'),
+                'enabled': p.get('enabled', True),
+            })
     SETTINGS_BASIC['dglab3'][ch_key]['avatar_params'] = validated
     # Update default mode and strength limit if provided
     if 'default_mode' in data:
         SETTINGS_BASIC['dglab3'][ch_key]['mode'] = data['default_mode']
     if 'strength_limit' in data:
         SETTINGS_BASIC['dglab3'][ch_key]['strength_limit'] = int(data['strength_limit'])
-    # Sync into SETTINGS
+    # Sync into SETTINGS (only enabled params are active)
     SETTINGS['dglab3'][ch_key]['avatar_params'] = validated
     SETTINGS['dglab3'][ch_key]['mode'] = SETTINGS_BASIC['dglab3'][ch_key]['mode']
     SETTINGS['dglab3'][ch_key]['strength_limit'] = SETTINGS_BASIC['dglab3'][ch_key]['strength_limit']
@@ -1298,6 +1304,9 @@ def main():
         config_chann_name = f'channel_{chann.lower()}'
         channel_handlers = {}
         for param_entry in SETTINGS['dglab3'][config_chann_name]['avatar_params']:
+            if not param_entry.get('enabled', True):
+                logger.info(f"Channel {chann} skipping disabled param: {param_entry['path']}")
+                continue
             param_path = param_entry['path']
             param_mode = param_entry['mode']
             if param_mode not in channel_handlers:

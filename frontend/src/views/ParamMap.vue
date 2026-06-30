@@ -5,6 +5,7 @@ import { api, apiPost } from '@/api'
 interface Param {
   path: string
   mode: string
+  enabled: boolean
 }
 
 const MODES = [
@@ -33,6 +34,7 @@ async function loadChannel() {
   params.value = (data.params || []).map((p: any) => ({
     path: typeof p === 'string' ? p : p.path,
     mode: typeof p === 'string' ? data.default_mode : (p.mode || data.default_mode),
+    enabled: typeof p === 'string' ? true : (p.enabled !== false),
   }))
   defaultMode.value = data.default_mode || 'distance'
   strengthLimit.value = data.strength_limit || 100
@@ -51,7 +53,7 @@ function addParam() {
   const path = newPath.value.trim()
   if (!path) return
   if (!path.startsWith('/')) { showMsg('路径必须以 / 开头', true); return }
-  params.value.push({ path, mode: newMode.value })
+  params.value.push({ path, mode: newMode.value, enabled: true })
   newPath.value = ''
   dirty.value = true
 }
@@ -72,7 +74,7 @@ function confirmEdit() {
   if (editIndex.value === null) return
   const path = editPath.value.trim()
   if (!path || !path.startsWith('/')) { showMsg('路径必须以 / 开头', true); return }
-  params.value[editIndex.value] = { path, mode: editMode.value }
+  params.value[editIndex.value] = { path, mode: editMode.value, enabled: params.value[editIndex.value].enabled }
   editIndex.value = null
   dirty.value = true
 }
@@ -130,25 +132,27 @@ onMounted(loadChannel)
 
     <!-- Param list -->
     <div class="card">
-      <h2>参数列表 ({{ params.length }})</h2>
+      <h2>参数列表 ({{ params.filter(p => p.enabled).length }}/{{ params.length }} 启用)</h2>
       <table>
         <thead>
-          <tr><th>OSC 参数路径</th><th>模式</th><th style="width:100px">操作</th></tr>
+          <tr><th style="width:40px">启用</th><th>OSC 参数路径</th><th>模式</th><th style="width:100px">操作</th></tr>
         </thead>
         <tbody>
-          <tr v-for="(p, i) in params" :key="i" :class="{'editing': editIndex === i}">
+          <tr v-for="(p, i) in params" :key="i" :class="{'editing': editIndex === i, 'disabled-row': !p.enabled}">
             <template v-if="editIndex === i">
+              <td><input type="checkbox" v-model="p.enabled" @change="dirty = true"></td>
               <td><input v-model="editPath" class="edit-input" placeholder="/avatar/parameters/..."></td>
               <td><select v-model="editMode" class="edit-select"><option v-for="m in MODES" :key="m.value" :value="m.value">{{ m.label }}</option></select></td>
               <td class="actions"><button class="act-btn save" @click="confirmEdit">✓</button><button class="act-btn cancel" @click="cancelEdit">✕</button></td>
             </template>
             <template v-else>
-              <td class="path">{{ p.path }}</td>
-              <td><span class="mode-badge" :class="'mode-' + p.mode">{{ modeLabel(p.mode) }}</span></td>
+              <td><input type="checkbox" v-model="p.enabled" @change="dirty = true"></td>
+              <td class="path" :class="{'path-disabled': !p.enabled}">{{ p.path }}</td>
+              <td><span class="mode-badge" :class="[('mode-' + p.mode), {'badge-disabled': !p.enabled}]">{{ modeLabel(p.mode) }}</span></td>
               <td class="actions"><button class="act-btn edit" @click="startEdit(i)">✎</button><button class="act-btn del" @click="removeParam(i)">🗑</button></td>
             </template>
           </tr>
-          <tr v-if="!params.length"><td colspan="3" class="empty">暂无参数，请在下方添加</td></tr>
+          <tr v-if="!params.length"><td colspan="4" class="empty">暂无参数，请在下方添加</td></tr>
         </tbody>
       </table>
     </div>
@@ -202,6 +206,9 @@ td { padding: var(--sp-3); font-size: var(--text-sm); border-bottom: 1px solid v
 .act-btn.save { color: var(--success); }
 .act-btn.cancel { color: var(--danger); }
 .editing { background: rgba(99,102,241,0.04); }
+.disabled-row { opacity: 0.5; }
+.path-disabled { text-decoration: line-through; }
+.badge-disabled { opacity: 0.4; }
 .edit-input, .edit-select { padding: var(--sp-2); border: 1px solid var(--accent); border-radius: var(--radius-sm); background: var(--bg-elevated); color: var(--text); font-family: var(--font-mono); font-size: var(--text-sm); width: 100%; }
 .add-row { margin-top: var(--sp-4); }
 .add-form { display: flex; gap: var(--sp-2); align-items: center; }
