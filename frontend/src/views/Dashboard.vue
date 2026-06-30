@@ -345,7 +345,7 @@ onUnmounted(() => intervals.forEach(clearInterval))
             <div v-if="!profiles.length" class="empty">无预设</div>
           </div>
           <div class="profile-add">
-            <input v-model="profileName" placeholder="新预设名" @keyup.enter="saveProfile">
+            <input type="text" v-model="profileName" placeholder="新预设名" @keyup.enter="saveProfile">
             <button class="btn btn-primary" @click="saveProfile">保存当前</button>
           </div>
           <div v-if="profileMsg" class="profile-msg">{{ profileMsg }}</div>
