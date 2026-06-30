@@ -58,14 +58,28 @@ function addCustomB() {
 }
 
 async function waitForBackend() {
-  // Wait 1.5s for restart to begin, then poll until backend responds
-  await new Promise(r => setTimeout(r, 1500))
+  // 1. Wait for old server to die (will get connection refused)
+  let oldDied = false
+  for (let i = 0; i < 20; i++) {
+    await new Promise(r => setTimeout(r, 300))
+    try {
+      await fetch('/api/v1/status')
+    } catch {
+      oldDied = true
+      break
+    }
+  }
+  if (!oldDied) {
+    // Old server didn't die, maybe restart didn't happen. Just redirect anyway.
+    return
+  }
+  // 2. Wait for new server to come up
   for (let i = 0; i < 30; i++) {
+    await new Promise(r => setTimeout(r, 500))
     try {
       const resp = await fetch('/api/v1/status')
       if (resp.ok) return
     } catch {}
-    await new Promise(r => setTimeout(r, 500))
   }
 }
 
