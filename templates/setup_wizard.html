@@ -12,9 +12,9 @@ h1 { text-align: center; margin-bottom: 8px; color: #fff; font-size: 1.5em; }
 .subtitle { text-align: center; color: #888; margin-bottom: 32px; font-size: 0.9em; }
 .step { display: none; }
 .step.active { display: block; }
-.step-title { font-size: 1.1em; font-weight: 600; margin-bottom: 16px; color: #64b5f6; }
-.form-group { margin-bottom: 20px; }
-label { display: block; margin-bottom: 6px; font-size: 0.9em; color: #aaa; }
+.step-title { font-size: 1.1em; font-weight: 600; margin-bottom: 20px; color: #64b5f6; }
+.form-group { margin-bottom: 24px; }
+label { display: block; margin-bottom: 8px; font-size: 0.9em; color: #aaa; }
 select, input[type="number"], input[type="text"] { width: 100%; padding: 10px 12px; border: 1px solid #333; border-radius: 8px; background: #0f3460; color: #fff; font-size: 0.95em; }
 select:focus, input[type="number"]:focus, input[type="text"]:focus { outline: none; border-color: #64b5f6; }
 .param-list { max-height: 200px; overflow-y: auto; border: 1px solid #333; border-radius: 8px; padding: 8px; background: #0f3460; }
@@ -22,11 +22,11 @@ select:focus, input[type="number"]:focus, input[type="text"]:focus { outline: no
 .param-item:hover { background: #1a4a7a; }
 .param-item input[type="checkbox"] { margin-right: 8px; flex-shrink: 0; }
 .param-item.selected { background: #1a4a7a; }
-.custom-param { margin-top: 8px; }
-.custom-param input { width: calc(100% - 70px); padding: 8px; border: 1px solid #333; border-radius: 6px; background: #0f3460; color: #fff; font-size: 0.85em; font-family: monospace; }
-.custom-param button { width: 60px; padding: 8px; margin-left: 8px; border: none; border-radius: 6px; background: #4caf50; color: #fff; cursor: pointer; font-size: 0.85em; }
-.btn-row { display: flex; justify-content: space-between; margin-top: 28px; }
-.btn { padding: 10px 28px; border: none; border-radius: 8px; font-size: 0.95em; cursor: pointer; transition: background 0.2s; }
+.custom-param { margin-top: 12px; display: flex; gap: 10px; }
+.custom-param input { flex: 1; padding: 8px; border: 1px solid #333; border-radius: 6px; background: #0f3460; color: #fff; font-size: 0.85em; font-family: monospace; }
+.custom-param button { padding: 8px 14px; border: none; border-radius: 6px; background: #4caf50; color: #fff; cursor: pointer; font-size: 0.85em; white-space: nowrap; }
+.btn-row { display: flex; justify-content: space-between; margin-top: 32px; gap: 12px; }
+.btn { padding: 12px 28px; border: none; border-radius: 8px; font-size: 0.95em; cursor: pointer; transition: background 0.2s; }
 .btn-next { background: #64b5f6; color: #000; font-weight: 600; }
 .btn-next:hover { background: #90caf9; }
 .btn-back { background: #333; color: #ccc; }
@@ -38,10 +38,10 @@ select:focus, input[type="number"]:focus, input[type="text"]:focus { outline: no
 .progress .dot { width: 10px; height: 10px; border-radius: 50%; background: #333; transition: background 0.3s; }
 .progress .dot.active { background: #64b5f6; }
 .progress .dot.done { background: #4caf50; }
-.channel-tab { display: flex; gap: 8px; margin-bottom: 16px; }
-.channel-tab button { flex: 1; padding: 8px; border: 1px solid #333; border-radius: 6px; background: #0f3460; color: #aaa; cursor: pointer; }
+.channel-tab { display: flex; gap: 8px; margin-bottom: 20px; }
+.channel-tab button { flex: 1; padding: 10px; border: 1px solid #333; border-radius: 6px; background: #0f3460; color: #aaa; cursor: pointer; }
 .channel-tab button.active { border-color: #64b5f6; color: #64b5f6; background: #1a3a6a; }
-.hint { font-size: 0.8em; color: #666; margin-top: 4px; }
+.hint { font-size: 0.8em; color: #666; margin-top: 8px; }
 .result { background: #0f3460; border-radius: 8px; padding: 16px; font-family: monospace; font-size: 0.82em; white-space: pre-wrap; max-height: 260px; overflow-y: auto; line-height: 1.6; }
 .success-msg { text-align: center; padding: 20px 0; }
 .success-msg h2 { color: #4caf50; margin-bottom: 12px; }
