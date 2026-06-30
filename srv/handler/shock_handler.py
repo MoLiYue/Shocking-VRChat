@@ -277,9 +277,10 @@ class ShockHandler(BaseHandler):
 
     def apply_strength_curve(self, value):
         """Apply custom param-to-strength curve mapping."""
-        if not self._curve_getter:
+        getter = ShockHandler._curve_getter
+        if not getter:
             return value
-        points = self._curve_getter(self.channel)
+        points = getter(self.channel)
         if not points:
             return value
         # Linear interpolation through control points
