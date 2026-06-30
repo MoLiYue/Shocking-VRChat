@@ -14,7 +14,8 @@ const oscEvents = ref<any[]>([])
 const waveA = ref<number[]>([])
 const waveB = ref<number[]>([])
 const canvasARef = ref<HTMLCanvasElement | null>(null)
-const canvasBRef = ref<HTMLCanvasElement | null>(null)const qrContent = ref('')
+const canvasBRef = ref<HTMLCanvasElement | null>(null)
+const qrContent = ref('')
 const logs = ref<{text: string; level: string}[]>([])
 
 // Control
