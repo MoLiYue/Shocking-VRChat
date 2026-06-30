@@ -147,7 +147,10 @@ onUnmounted(() => timers.forEach(clearInterval))
         <div class="actions">
           <button class="btn btn-gray" :disabled="!playActive" @click="stopPlay">⏹ 停止</button>
         </div>
-        <div v-if="playActive" class="progress-bar"><div class="fill" :style="{width: (playTotal > 0 ? playProgress / playTotal * 100 : 0) + '%'}"></div></div>
+        <div v-if="playActive" class="playback-progress">
+          <div class="progress-bar"><div class="fill" :style="{width: (playTotal > 0 ? playProgress / playTotal * 100 : 0) + '%'}"></div></div>
+          <div class="progress-text">{{ playProgress }} / {{ playTotal }} <span class="progress-pct">{{ playTotal > 0 ? Math.round(playProgress / playTotal * 100) : 0 }}%</span></div>
+        </div>
       </section>
 
       <!-- Files -->
@@ -210,8 +213,11 @@ onUnmounted(() => timers.forEach(clearInterval))
 
 .actions { display: flex; gap: var(--sp-2); margin: var(--sp-2) 0; }
 label { display: block; font-size: var(--text-xs); color: var(--text-muted); margin: var(--sp-2) 0 var(--sp-1); }
-.progress-bar { height: 4px; background: rgba(139,92,246,0.1); border-radius: 2px; margin-top: var(--sp-2); overflow: hidden; }
-.fill { height: 100%; background: var(--success); transition: width 0.3s; }
+.playback-progress { margin-top: var(--sp-3); }
+.progress-bar { height: 8px; background: rgba(139,92,246,0.1); border-radius: 4px; overflow: hidden; }
+.fill { height: 100%; background: linear-gradient(90deg, var(--accent), var(--success)); transition: width 0.3s; border-radius: 4px; }
+.progress-text { display: flex; justify-content: space-between; margin-top: var(--sp-1); font-size: var(--text-xs); color: var(--text-muted); font-variant-numeric: tabular-nums; }
+.progress-pct { color: var(--accent); font-weight: 600; }
 
 .file-list { max-height: 200px; overflow-y: auto; }
 .file-item { display: flex; align-items: center; gap: var(--sp-2); padding: var(--sp-2); border-radius: var(--radius-sm); font-size: var(--text-sm); transition: background var(--transition); }
