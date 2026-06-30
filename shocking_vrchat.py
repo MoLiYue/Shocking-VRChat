@@ -598,6 +598,10 @@ def web_dashboard():
 def web_param_map():
     return render_template('param_map.html')
 
+@app.route('/recorder')
+def web_recorder():
+    return render_template('osc_recorder.html')
+
 @app.route('/curve')
 def web_curve_editor():
     return render_template('curve_editor.html')
@@ -788,6 +792,196 @@ def api_v1_profiles_delete(name):
         return jsonify({'success': True})
     return jsonify({'success': False, 'message': 'Not found'}), 404
 
+# --- OSC Recording / Playback ---
+RECORDINGS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)) if not getattr(sys, "frozen", False) else os.path.dirname(sys.executable), 'recordings')
+
+_recording_state = {
+    'active': False,
+    'start_time': 0,
+    'messages': [],
+    'filename': None,
+}
+
+_playback_state = {
+    'active': False,
+    'filename': None,
+    'progress': 0,
+    'total': 0,
+    'speed': 1.0,
+    'loop': False,
+    'stop_flag': False,
+}
+
+def _ensure_recordings_dir():
+    os.makedirs(RECORDINGS_DIR, exist_ok=True)
+
+def _osc_record_hook(address, value, channel, mode):
+    """Called from osc_activity_observer when recording is active."""
+    if _recording_state['active']:
+        elapsed_ms = (time.perf_counter() - _recording_state['start_time']) * 1000.0
+        _recording_state['messages'].append({
+            't': round(elapsed_ms, 3),
+            'addr': address,
+            'args': [value],
+        })
+
+@app.route('/api/v1/recorder/start', methods=['POST'])
+def api_v1_recorder_start():
+    if _recording_state['active']:
+        return jsonify({'success': False, 'message': 'Already recording'})
+    _ensure_recordings_dir()
+    from datetime import datetime
+    _recording_state['active'] = True
+    _recording_state['start_time'] = time.perf_counter()
+    _recording_state['messages'] = []
+    _recording_state['filename'] = f"rec_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+    return jsonify({'success': True, 'filename': _recording_state['filename']})
+
+@app.route('/api/v1/recorder/stop', methods=['POST'])
+def api_v1_recorder_stop():
+    if not _recording_state['active']:
+        return jsonify({'success': False, 'message': 'Not recording'})
+    _recording_state['active'] = False
+    messages = _recording_state['messages']
+    filename = _recording_state['filename']
+    duration_ms = messages[-1]['t'] if messages else 0
+    data = {
+        'version': 1,
+        'recorded_at': time.strftime('%Y-%m-%dT%H:%M:%S'),
+        'duration_ms': round(duration_ms, 3),
+        'message_count': len(messages),
+        'messages': messages,
+    }
+    filepath = os.path.join(RECORDINGS_DIR, filename)
+    with open(filepath, 'w', encoding='utf-8') as f:
+        json.dump(data, f, ensure_ascii=False, separators=(',', ':'))
+    _recording_state['messages'] = []
+    return jsonify({'success': True, 'filename': filename, 'message_count': len(messages), 'duration_ms': duration_ms})
+
+@app.route('/api/v1/recorder/status')
+def api_v1_recorder_status():
+    elapsed_ms = 0
+    if _recording_state['active']:
+        elapsed_ms = (time.perf_counter() - _recording_state['start_time']) * 1000.0
+    return jsonify({
+        'recording': _recording_state['active'],
+        'filename': _recording_state['filename'],
+        'message_count': len(_recording_state['messages']),
+        'elapsed_ms': round(elapsed_ms, 0),
+    })
+
+@app.route('/api/v1/recordings')
+def api_v1_recordings_list():
+    _ensure_recordings_dir()
+    files = []
+    for f in sorted(os.listdir(RECORDINGS_DIR), reverse=True):
+        if f.endswith('.json'):
+            filepath = os.path.join(RECORDINGS_DIR, f)
+            try:
+                size = os.path.getsize(filepath)
+                with open(filepath, 'r', encoding='utf-8') as fp:
+                    header = json.load(fp)
+                files.append({
+                    'name': f,
+                    'size_kb': round(size / 1024, 1),
+                    'duration_ms': header.get('duration_ms', 0),
+                    'message_count': header.get('message_count', 0),
+                    'recorded_at': header.get('recorded_at', ''),
+                })
+            except Exception:
+                files.append({'name': f, 'size_kb': 0, 'duration_ms': 0, 'message_count': 0, 'recorded_at': ''})
+    return jsonify({'recordings': files})
+
+@app.route('/api/v1/recordings/<filename>', methods=['DELETE'])
+def api_v1_recordings_delete(filename):
+    filepath = os.path.join(RECORDINGS_DIR, filename)
+    if os.path.exists(filepath):
+        os.remove(filepath)
+        return jsonify({'success': True})
+    return jsonify({'success': False, 'message': 'Not found'}), 404
+
+@app.route('/api/v1/playback/start', methods=['POST'])
+def api_v1_playback_start():
+    if _playback_state['active']:
+        return jsonify({'success': False, 'message': 'Already playing'})
+    data = request.get_json()
+    filename = data.get('filename')
+    speed = float(data.get('speed', 1.0))
+    loop = bool(data.get('loop', False))
+    filepath = os.path.join(RECORDINGS_DIR, filename)
+    if not os.path.exists(filepath):
+        return jsonify({'success': False, 'message': 'File not found'}), 404
+    _playback_state['stop_flag'] = False
+    _playback_state['filename'] = filename
+    _playback_state['speed'] = speed
+    _playback_state['loop'] = loop
+    _playback_state['progress'] = 0
+    _playback_state['active'] = True
+    # Start playback in background thread
+    th = Thread(target=_playback_worker, args=(filepath, speed, loop), daemon=True)
+    th.start()
+    return jsonify({'success': True, 'filename': filename})
+
+@app.route('/api/v1/playback/stop', methods=['POST'])
+def api_v1_playback_stop():
+    _playback_state['stop_flag'] = True
+    return jsonify({'success': True})
+
+@app.route('/api/v1/playback/status')
+def api_v1_playback_status():
+    return jsonify({
+        'active': _playback_state['active'],
+        'filename': _playback_state['filename'],
+        'progress': _playback_state['progress'],
+        'total': _playback_state['total'],
+        'speed': _playback_state['speed'],
+        'loop': _playback_state['loop'],
+    })
+
+def _playback_worker(filepath, speed, loop):
+    """Background thread: replay OSC messages with original timing."""
+    from pythonosc.udp_client import SimpleUDPClient
+    try:
+        with open(filepath, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        messages = data.get('messages', [])
+        _playback_state['total'] = len(messages)
+        if not messages:
+            return
+
+        # Send to our own OSC port so the main program processes it
+        target_port = SETTINGS['osc']['listen_port']
+        target_host = '127.0.0.1'
+        client = SimpleUDPClient(target_host, target_port)
+
+        while True:
+            start_time = time.perf_counter()
+            for i, msg in enumerate(messages):
+                if _playback_state['stop_flag']:
+                    return
+                target_s = (msg['t'] / speed) / 1000.0
+                while True:
+                    elapsed = time.perf_counter() - start_time
+                    remaining = target_s - elapsed
+                    if remaining <= 0:
+                        break
+                    if remaining > 0.005:
+                        time.sleep(remaining * 0.8)
+                addr = msg['addr']
+                args = msg.get('args', [])
+                try:
+                    client.send_message(addr, args)
+                except Exception:
+                    pass
+                _playback_state['progress'] = i + 1
+
+            if not loop:
+                break
+            time.sleep(0.5)
+    finally:
+        _playback_state['active'] = False
+        _playback_state['progress'] = 0
+
 @app.route('/api/v1/wave_presets')
 def api_v1_wave_presets():
     from srv.wave_preset import WavePresetLibrary
@@ -850,6 +1044,8 @@ def _record_osc_activity(address, value, channel, mode):
         'channel': channel,
         'mode': mode,
     })
+    # Feed to recorder if active
+    _osc_record_hook(address, value, channel, mode)
 
 # Wave history ring buffer for dashboard visualization
 _wave_history = {'A': collections.deque(maxlen=800), 'B': collections.deque(maxlen=800)}

@@ -2,6 +2,7 @@
 settings*.yaml
 profiles/
 curve_config.yaml
+recordings/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
