@@ -44,15 +44,16 @@ jobs:
             shocking_vrchat.py
         shell: pwsh
 
-      - name: Create zip archive
-        run: Compress-Archive -Path dist\shocking_vrchat\* -DestinationPath dist\shocking_vrchat_windows_x64.zip
-        shell: pwsh
-
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: shocking-vrchat-windows
-          path: dist/shocking_vrchat_windows_x64.zip
+          path: dist/shocking_vrchat/
+
+      - name: Create zip for release
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: Compress-Archive -Path dist\shocking_vrchat\* -DestinationPath dist\shocking_vrchat_windows_x64.zip
+        shell: pwsh
 
       - name: Create Release
         if: startsWith(github.ref, 'refs/tags/v')
