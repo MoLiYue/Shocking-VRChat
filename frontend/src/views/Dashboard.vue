@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted } from 'vue'
 import { api, apiPost, apiDelete, apiPut } from '@/api'
+import QrCode from '@/components/QrCode.vue'
 
 // --- State ---
 const connected = ref(false)
@@ -244,7 +245,7 @@ onUnmounted(() => intervals.forEach(clearInterval))
         <!-- QR -->
         <section class="card">
           <h2>连接二维码</h2>
-          <iframe class="qr-frame" src="/qr" scrolling="no"></iframe>
+          <QrCode :content="qrContent" :size="240" />
           <div class="qr-text">{{ qrContent }}</div>
         </section>
 
@@ -361,7 +362,6 @@ onUnmounted(() => intervals.forEach(clearInterval))
 .osc-time { color: var(--text-muted); min-width: 52px; text-align: right; }
 
 /* QR */
-.qr-frame { width: 100%; height: 300px; border: none; border-radius: var(--radius-lg); background: rgba(255,255,255,0.95); overflow: hidden; }
 .qr-text { margin-top: var(--sp-3); font-size: var(--text-xs); font-family: var(--font-mono); color: var(--text-muted); word-break: break-all; padding: var(--sp-2) var(--sp-3); background: rgba(139,92,246,0.05); border-radius: var(--radius-sm); }
 
 /* Controls */
