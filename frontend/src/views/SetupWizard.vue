@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, Ref } from 'vue'
+import { ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { apiPost } from '@/api'
 
@@ -48,10 +48,16 @@ function toggleParam(list: string[], path: string) {
   else list.push(path)
 }
 
-function addCustom(list: string[], custom: Ref<string>) {
-  const v = custom.value.trim()
-  if (v && v.startsWith('/') && !list.includes(v)) { list.push(v) }
-  custom.value = ''
+function addCustomA() {
+  const v = customA.value.trim()
+  if (v && v.startsWith('/') && !paramsA.value.includes(v)) { paramsA.value.push(v) }
+  customA.value = ''
+}
+
+function addCustomB() {
+  const v = customB.value.trim()
+  if (v && v.startsWith('/') && !paramsB.value.includes(v)) { paramsB.value.push(v) }
+  customB.value = ''
 }
 
 async function save() {
@@ -120,8 +126,8 @@ async function save() {
           </div>
         </div>
         <div class="custom-add">
-          <input v-model="customA" placeholder="/avatar/parameters/..." @keyup.enter="addCustom(paramsA, customA)">
-          <button class="btn btn-ghost" @click="addCustom(paramsA, customA)">添加</button>
+          <input v-model="customA" placeholder="/avatar/parameters/..." @keyup.enter="addCustomA()">
+          <button class="btn btn-ghost" @click="addCustomA()">添加</button>
         </div>
 
         <div class="param-tabs" style="margin-top:var(--sp-5)">
@@ -135,8 +141,8 @@ async function save() {
           </div>
         </div>
         <div class="custom-add">
-          <input v-model="customB" placeholder="/avatar/parameters/..." @keyup.enter="addCustom(paramsB, customB)">
-          <button class="btn btn-ghost" @click="addCustom(paramsB, customB)">添加</button>
+          <input v-model="customB" placeholder="/avatar/parameters/..." @keyup.enter="addCustomB()">
+          <button class="btn btn-ghost" @click="addCustomB()">添加</button>
         </div>
       </div>
 
