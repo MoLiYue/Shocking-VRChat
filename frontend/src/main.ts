@@ -13,6 +13,7 @@ const router = createRouter({
     { path: '/params', component: () => import('./views/ParamMap.vue') },
     { path: '/recorder', component: () => import('./views/Recorder.vue') },
     { path: '/setup', component: () => import('./views/SetupWizard.vue') },
+    { path: '/settings', component: () => import('./views/Settings.vue') },
   ],
 })
 

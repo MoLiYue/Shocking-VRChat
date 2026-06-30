@@ -606,6 +606,42 @@ def get_config():
         'advanced': strip_basic_settings(SETTINGS),
     }
 
+@app.route('/api/v1/settings', methods=['POST'])
+def api_v1_settings_update():
+    """Update server settings (osc/ws/web_server). Requires restart for network changes."""
+    data = request.get_json()
+    restart_needed = []
+    if 'osc' in data:
+        osc = data['osc']
+        if 'listen_port' in osc:
+            SETTINGS['osc']['listen_port'] = int(osc['listen_port'])
+            restart_needed.append('osc')
+        if 'listen_host' in osc:
+            SETTINGS['osc']['listen_host'] = osc['listen_host']
+            restart_needed.append('osc')
+    if 'ws' in data:
+        ws = data['ws']
+        if 'listen_port' in ws:
+            SETTINGS['ws']['listen_port'] = int(ws['listen_port'])
+            restart_needed.append('ws')
+    if 'web_server' in data:
+        web = data['web_server']
+        if 'listen_port' in web:
+            SETTINGS['web_server']['listen_port'] = int(web['listen_port'])
+            restart_needed.append('web_server')
+        if 'listen_host' in web:
+            SETTINGS['web_server']['listen_host'] = web['listen_host']
+            restart_needed.append('web_server')
+    if 'log_level' in data:
+        SETTINGS['log_level'] = data['log_level']
+        reset_logger()
+    config_save()
+    return jsonify({
+        'success': True,
+        'restart_needed': list(set(restart_needed)),
+        'message': '已保存。' + ('网络配置变更需重启程序生效。' if restart_needed else ''),
+    })
+
 @app.route('/api/v1/params/<channel>', methods=['GET'])
 def api_v1_params_get(channel):
     """Get avatar_params for a channel."""
@@ -1076,6 +1112,7 @@ async def api_v1_wave_preset(channel, preset_name, duration):
 @app.route('/params')
 @app.route('/recorder')
 @app.route('/setup')
+@app.route('/settings')
 def spa_catch_all():
     return _serve_spa()
 

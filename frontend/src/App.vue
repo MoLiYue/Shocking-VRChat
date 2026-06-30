@@ -11,6 +11,7 @@ const navItems = [
   { path: '/curve', label: '强度曲线', icon: '📈' },
   { path: '/combo', label: 'Combo', icon: '🔀' },
   { path: '/recorder', label: '录制回放', icon: '🎙' },
+  { path: '/settings', label: '设置', icon: '⚙' },
 ]
 </script>
 
