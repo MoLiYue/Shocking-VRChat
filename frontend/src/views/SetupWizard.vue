@@ -1,9 +1,6 @@
 <script setup lang="ts">
 import { ref } from 'vue'
-import { useRouter } from 'vue-router'
 import { apiPost } from '@/api'
-
-const router = useRouter()
 
 const step = ref(0)
 const totalSteps = 4
@@ -60,6 +57,18 @@ function addCustomB() {
   customB.value = ''
 }
 
+async function waitForBackend() {
+  // Wait 1.5s for restart to begin, then poll until backend responds
+  await new Promise(r => setTimeout(r, 1500))
+  for (let i = 0; i < 30; i++) {
+    try {
+      const resp = await fetch('/api/v1/status')
+      if (resp.ok) return
+    } catch {}
+    await new Promise(r => setTimeout(r, 500))
+  }
+}
+
 async function save() {
   saving.value = true; errMsg.value = ''
   try {
@@ -68,7 +77,12 @@ async function save() {
       channel_b: { mode: modeB.value, strength_limit: strengthB.value, avatar_params: paramsB.value },
       osc: { listen_port: oscPort.value, listen_host: oscHost.value },
     })
-    if (data.success) { done.value = true; setTimeout(() => router.push('/dashboard'), 2500) }
+    if (data.success) {
+      done.value = true
+      // Backend will restart, wait for it to come back then redirect
+      await waitForBackend()
+      window.location.href = '/dashboard'
+    }
     else errMsg.value = data.message || '保存失败'
   } catch (e: any) { errMsg.value = e.message }
   finally { saving.value = false }
