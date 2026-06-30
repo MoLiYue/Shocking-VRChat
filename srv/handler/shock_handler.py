@@ -275,12 +275,12 @@ class ShockHandler(BaseHandler):
             out_distance = 1 if out_distance > 1 else out_distance
         return out_distance
 
-    def apply_strength_curve(self, value):
+    def apply_strength_curve(self, value, param_path=None):
         """Apply custom param-to-strength curve mapping."""
         getter = ShockHandler._curve_getter
         if not getter:
             return value
-        points = getter(self.channel)
+        points = getter(param_path or self.channel)
         if not points:
             return value
         # Linear interpolation through control points
@@ -413,7 +413,8 @@ class ShockHandler(BaseHandler):
     async def handler_distance(self, distance, context=None):
         await self.set_clear_after(0.5)
         normalized = self.normalize_distance(distance)
-        normalized = self.apply_strength_curve(normalized)
+        param_path = context.get('address') if context else None
+        normalized = self.apply_strength_curve(normalized, param_path)
         self.bg_wave_current_strength = normalized
         self.log_trigger(context, value=distance, normalized=normalized)
 

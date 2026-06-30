@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { ref, onMounted, watch, nextTick } from 'vue'
-import { api, apiPost } from '@/api'
+import { api, apiPost, apiDelete } from '@/api'
 
-const activeChannel = ref<'a' | 'b'>('a')
+const paramList = ref<string[]>([])
+const activeParam = ref('')
 const points = ref<{x: number; y: number}[]>([])
 const msg = ref('')
 const canvasRef = ref<HTMLCanvasElement | null>(null)
@@ -14,6 +15,50 @@ const PRESETS: Record<string, {x:number;y:number}[]> = {
   quadratic: [{x:0,y:0},{x:0.25,y:0.0625},{x:0.5,y:0.25},{x:0.75,y:0.5625},{x:1,y:1}],
   scurve: [{x:0,y:0},{x:0.25,y:0.06},{x:0.5,y:0.5},{x:0.75,y:0.94},{x:1,y:1}],
   step: [{x:0,y:0},{x:0.29,y:0},{x:0.3,y:0.5},{x:0.69,y:0.5},{x:0.7,y:1},{x:1,y:1}],
+}
+
+async function loadParams() {
+  // Get all registered params from config
+  const data = await api('/api/v1/config')
+  const basic = data.basic?.dglab3 || {}
+  const allParams: string[] = []
+  for (const ch of ['channel_a', 'channel_b']) {
+    const params = basic[ch]?.avatar_params || []
+    for (const p of params) {
+      const path = typeof p === 'string' ? p : p.path
+      if (path && !allParams.includes(path)) allParams.push(path)
+    }
+  }
+  paramList.value = allParams
+  if (allParams.length && !activeParam.value) {
+    activeParam.value = allParams[0]
+  }
+  loadCurve()
+}
+
+async function loadCurve() {
+  if (!activeParam.value) return
+  const data = await api(`/api/v1/curve/${encodeURIComponent(activeParam.value)}`)
+  points.value = data.points || PRESETS.relu
+  sortPoints()
+  await nextTick()
+  draw()
+  msg.value = ''
+}
+
+async function saveCurve() {
+  if (!activeParam.value) return
+  const data = await apiPost(`/api/v1/curve/${encodeURIComponent(activeParam.value)}`, { points: points.value })
+  msg.value = data.success ? '✓ 已保存' : '保存失败'
+  setTimeout(() => msg.value = '', 3000)
+}
+
+async function deleteCurve() {
+  if (!activeParam.value) return
+  await apiDelete(`/api/v1/curve/${encodeURIComponent(activeParam.value)}`)
+  msg.value = '已恢复为默认曲线'
+  loadCurve()
+  setTimeout(() => msg.value = '', 3000)
 }
 
 function interpolate(px: number, pts: {x:number;y:number}[]): number {
@@ -156,32 +201,15 @@ function onMouseMove(e: MouseEvent) {
 
 function onMouseUp() { dragging = null; draw() }
 
-async function loadCurve() {
-  const data = await api(`/api/v1/curve/${activeChannel.value}`)
-  points.value = data.points || PRESETS.relu
-  sortPoints()
-  await nextTick()
-  draw()
-  msg.value = ''
-}
-
-async function saveCurve() {
-  const data = await apiPost(`/api/v1/curve/${activeChannel.value}`, { points: points.value })
-  msg.value = data.success ? '✓ 已保存并生效' : '保存失败'
-  setTimeout(() => msg.value = '', 3000)
-}
-
 function applyPreset(name: string) {
   points.value = JSON.parse(JSON.stringify(PRESETS[name]))
   sortPoints()
   draw()
 }
 
-function switchChannel(ch: 'a' | 'b') { activeChannel.value = ch; loadCurve() }
-
 watch(points, draw, { deep: true })
 onMounted(() => {
-  loadCurve()
+  loadParams()
   window.addEventListener('resize', draw)
 })
 </script>
@@ -189,11 +217,13 @@ onMounted(() => {
 <template>
   <div>
     <h1 class="gradient-text" style="font-size:var(--text-2xl);margin-bottom:var(--sp-2)">强度曲线编辑器</h1>
-    <p class="page-desc">适用于强度曲线模式 · X轴=参数值 · Y轴=输出强度 · 点击添加 · 拖拽移动 · 右键删除</p>
+    <p class="page-desc">为每个 OSC 参数独立配置映射曲线 · 点击添加 · 拖拽移动 · 右键删除</p>
 
-    <div class="tabs">
-      <button :class="{active: activeChannel === 'a'}" @click="switchChannel('a')">Channel A</button>
-      <button :class="{active: activeChannel === 'b'}" @click="switchChannel('b')">Channel B</button>
+    <div class="param-selector">
+      <label>选择参数:</label>
+      <select v-model="activeParam" @change="loadCurve()">
+        <option v-for="p in paramList" :key="p" :value="p">{{ p.replace('/avatar/parameters/', '') }}</option>
+      </select>
     </div>
 
     <div class="editor-grid">
@@ -231,7 +261,7 @@ onMounted(() => {
         <div class="actions">
           <button class="btn btn-primary" @click="saveCurve">保存</button>
           <button class="btn btn-ghost" @click="loadCurve">重载</button>
-          <button class="btn btn-danger" @click="applyPreset('relu')">重置</button>
+          <button class="btn btn-danger" @click="deleteCurve">恢复默认</button>
         </div>
         <div v-if="msg" class="msg-text">{{ msg }}</div>
       </div>
@@ -241,10 +271,9 @@ onMounted(() => {
 
 <style scoped>
 .page-desc { color: var(--text-muted); font-size: var(--text-sm); margin-bottom: var(--sp-5); }
-.tabs { display: flex; gap: var(--sp-2); margin-bottom: var(--sp-4); }
-.tabs button { padding: var(--sp-2) var(--sp-5); border: 1px solid var(--border); border-radius: var(--radius-full); background: transparent; color: var(--text-muted); cursor: pointer; font-size: var(--text-sm); font-weight: 500; transition: all var(--transition); }
-.tabs button.active { border-color: var(--accent); color: var(--accent); background: rgba(139,92,246,0.08); box-shadow: var(--glow-sm); }
-.tabs button:hover { border-color: var(--border-hover); color: var(--text); }
+.param-selector { display: flex; align-items: center; gap: var(--sp-3); margin-bottom: var(--sp-4); }
+.param-selector label { font-size: var(--text-sm); color: var(--text-muted); font-weight: 500; white-space: nowrap; }
+.param-selector select { flex: 1; max-width: 500px; }
 
 .editor-grid { display: grid; grid-template-columns: 1fr 260px; gap: var(--sp-4); }
 .canvas-card { padding: var(--sp-4); }

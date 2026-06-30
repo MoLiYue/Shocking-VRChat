@@ -765,26 +765,39 @@ def api_v1_combo_set(channel):
 
 # --- Curve Mapping ---
 DEFAULT_CURVE_POINTS = [{'x': 0, 'y': 0}, {'x': 0.1, 'y': 0}, {'x': 1, 'y': 1}]  # ReLU
-_curve_config = {'a': None, 'b': None}  # None means use default
+_curve_config = {}  # key: param_path or 'channel_a'/'channel_b', value: points list
+
+def _get_curve_config_path():
+    return os.path.join(os.path.dirname(os.path.abspath(__file__)) if not getattr(sys, "frozen", False) else os.path.dirname(sys.executable), 'curve_config.yaml')
 
 def _load_curve_config():
     global _curve_config
-    path = os.path.join(os.path.dirname(os.path.abspath(__file__)) if not getattr(sys, "frozen", False) else os.path.dirname(sys.executable), 'curve_config.yaml')
+    path = _get_curve_config_path()
     if os.path.exists(path):
         with open(path, 'r', encoding='utf-8') as f:
-            data = yaml.safe_load(f) or {}
-            _curve_config['a'] = data.get('channel_a')
-            _curve_config['b'] = data.get('channel_b')
+            _curve_config = yaml.safe_load(f) or {}
 
 def _save_curve_config():
-    path = os.path.join(os.path.dirname(os.path.abspath(__file__)) if not getattr(sys, "frozen", False) else os.path.dirname(sys.executable), 'curve_config.yaml')
-    data = {'channel_a': _curve_config['a'], 'channel_b': _curve_config['b']}
-    with open(path, 'w', encoding='utf-8') as f:
-        yaml.safe_dump(data, f, allow_unicode=True)
+    path = _get_curve_config_path()
+    tmp = path + '.tmp'
+    with open(tmp, 'w', encoding='utf-8') as f:
+        yaml.safe_dump(_curve_config, f, allow_unicode=True)
+    os.replace(tmp, path)
 
-def get_curve_points(channel):
-    ch = channel.lower()
-    return _curve_config.get(ch) or DEFAULT_CURVE_POINTS
+def get_curve_points(param_path):
+    """Get curve points for a specific param. Falls back to channel default, then global default."""
+    # Try exact param path
+    if param_path and param_path in _curve_config:
+        return _curve_config[param_path]
+    # Fallback: try channel key (legacy compat)
+    if param_path and param_path.upper() in ('A', 'B'):
+        return _curve_config.get(f'channel_{param_path.lower()}') or DEFAULT_CURVE_POINTS
+    # Global default
+    return DEFAULT_CURVE_POINTS
+
+def get_curve_keys():
+    """List all configured curve keys (param paths and channel defaults)."""
+    return list(_curve_config.keys())
 
 def apply_curve(value, points):
     """Linearly interpolate value through control points."""
@@ -802,35 +815,42 @@ def apply_curve(value, points):
     # value beyond last point
     return points[-1]['y'] if points else value
 
-@app.route('/api/v1/curve/<channel>', methods=['GET'])
-def api_v1_curve_get(channel):
-    ch = channel.lower()
-    if ch not in ('a', 'b'):
-        return jsonify({'error': 'invalid channel'}), 400
-    pts = _curve_config.get(ch) or DEFAULT_CURVE_POINTS
-    return jsonify({'channel': ch, 'points': pts})
+@app.route('/api/v1/curve', methods=['GET'])
+def api_v1_curve_list():
+    """List all configured curves."""
+    result = {}
+    for key, pts in _curve_config.items():
+        result[key] = pts
+    return jsonify({'curves': result, 'default': DEFAULT_CURVE_POINTS})
 
-@app.route('/api/v1/curve/<channel>', methods=['POST'])
-def api_v1_curve_set(channel):
-    ch = channel.lower()
-    if ch not in ('a', 'b'):
-        return jsonify({'success': False, 'message': 'invalid channel'}), 400
+@app.route('/api/v1/curve/<path:param_key>', methods=['GET'])
+def api_v1_curve_get(param_key):
+    """Get curve for a param path or channel key."""
+    pts = get_curve_points(param_key)
+    return jsonify({'key': param_key, 'points': pts})
+
+@app.route('/api/v1/curve/<path:param_key>', methods=['POST'])
+def api_v1_curve_set(param_key):
+    """Set curve for a specific param path."""
     data = request.get_json()
     pts = data.get('points', [])
-    # Validate
     validated = []
     for p in pts:
         x = max(0.0, min(1.0, float(p.get('x', 0))))
         y = max(0.0, min(1.0, float(p.get('y', 0))))
         validated.append({'x': round(x, 4), 'y': round(y, 4)})
     validated.sort(key=lambda p: p['x'])
-    _curve_config[ch] = validated
+    _curve_config[param_key] = validated
     _save_curve_config()
-    # Update handlers
-    for handler in handlers:
-        if hasattr(handler, 'refresh_curve'):
-            handler.refresh_curve()
-    return jsonify({'success': True, 'points': validated})
+    return jsonify({'success': True, 'key': param_key, 'points': validated})
+
+@app.route('/api/v1/curve/<path:param_key>', methods=['DELETE'])
+def api_v1_curve_delete(param_key):
+    """Delete curve for a param (reverts to default)."""
+    if param_key in _curve_config:
+        del _curve_config[param_key]
+        _save_curve_config()
+    return jsonify({'success': True})
 
 _load_curve_config()
 
