@@ -13,7 +13,8 @@ const lastTrigger = ref('-')
 const oscEvents = ref<any[]>([])
 const waveA = ref<number[]>([])
 const waveB = ref<number[]>([])
-const qrContent = ref('')
+const canvasARef = ref<HTMLCanvasElement | null>(null)
+const canvasBRef = ref<HTMLCanvasElement | null>(null)const qrContent = ref('')
 const logs = ref<{text: string; level: string}[]>([])
 
 // Control
@@ -69,7 +70,36 @@ async function pollWave() {
     const data = await api('/api/v1/wave_history')
     waveA.value = data.A || []
     waveB.value = data.B || []
+    drawWave(canvasARef.value, waveA.value, '#8b5cf6')
+    drawWave(canvasBRef.value, waveB.value, '#3b82f6')
   } catch {}
+}
+
+function drawWave(canvas: HTMLCanvasElement | null, samples: number[], color: string) {
+  if (!canvas) return
+  const ratio = window.devicePixelRatio || 1
+  const W = canvas.clientWidth
+  const H = canvas.clientHeight
+  canvas.width = W * ratio
+  canvas.height = H * ratio
+  const ctx = canvas.getContext('2d')!
+  ctx.setTransform(ratio, 0, 0, ratio, 0, 0)
+  ctx.clearRect(0, 0, W, H)
+
+  const bars = samples.slice(-60)
+  if (!bars.length) return
+  const gap = 2
+  const barW = Math.max(2, (W - gap * (bars.length - 1)) / bars.length)
+  bars.forEach((sample, i) => {
+    const v = Math.max(0, Math.min(100, sample))
+    const barH = (v / 100) * (H - 4)
+    const x = i * (barW + gap)
+    const y = H - barH
+    ctx.globalAlpha = 0.4 + v / 180
+    ctx.fillStyle = color
+    ctx.fillRect(x, y, barW, barH)
+  })
+  ctx.globalAlpha = 1
 }
 
 // --- Actions ---
@@ -230,6 +260,21 @@ onUnmounted(() => intervals.forEach(clearInterval))
           </div>
         </section>
 
+        <!-- Wave visualization -->
+        <section class="card">
+          <h2>实时波形</h2>
+          <div class="wave-grid">
+            <div class="wave-panel">
+              <div class="wave-label">A</div>
+              <canvas ref="canvasARef" class="wave-canvas"></canvas>
+            </div>
+            <div class="wave-panel">
+              <div class="wave-label">B</div>
+              <canvas ref="canvasBRef" class="wave-canvas"></canvas>
+            </div>
+          </div>
+        </section>
+
         <!-- Logs -->
         <section class="card">
           <h2>日志</h2>
@@ -363,6 +408,12 @@ onUnmounted(() => intervals.forEach(clearInterval))
 
 /* QR */
 .qr-text { margin-top: var(--sp-3); font-size: var(--text-xs); font-family: var(--font-mono); color: var(--text-muted); word-break: break-all; padding: var(--sp-2) var(--sp-3); background: rgba(139,92,246,0.05); border-radius: var(--radius-sm); }
+
+/* Wave */
+.wave-grid { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-3); }
+.wave-panel { position: relative; }
+.wave-label { position: absolute; top: var(--sp-2); left: var(--sp-3); font-size: var(--text-xs); font-weight: 700; color: var(--text-muted); }
+.wave-canvas { width: 100%; height: 80px; border-radius: var(--radius-md); background: rgba(10,8,16,0.5); border: 1px solid var(--border); }
 
 /* Controls */
 .form-field { margin-bottom: var(--sp-4); }

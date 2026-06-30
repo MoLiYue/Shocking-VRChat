@@ -1,6 +1,9 @@
 <script setup lang="ts">
 import { ref } from 'vue'
+import { useRouter } from 'vue-router'
 import { apiPost } from '@/api'
+
+const router = useRouter()
 
 const step = ref(0)
 const totalSteps = 4
@@ -58,7 +61,7 @@ async function save() {
       channel_b: { mode: modeB.value, strength_limit: strengthB.value, avatar_params: paramsB.value },
       osc: { listen_port: oscPort.value, listen_host: oscHost.value },
     })
-    if (data.success) { done.value = true; setTimeout(() => window.location.href = '/dashboard', 2500) }
+    if (data.success) { done.value = true; setTimeout(() => router.push('/dashboard'), 2500) }
     else errMsg.value = data.message || '保存失败'
   } catch (e: any) { errMsg.value = e.message }
   finally { saving.value = false }

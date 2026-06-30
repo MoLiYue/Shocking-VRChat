@@ -1365,12 +1365,13 @@ if __name__ == "__main__":
         while not app.config.get('SETUP_COMPLETE', False):
             _time.sleep(0.5)
 
-        logger.success('Setup wizard completed. Starting main program...')
-        logger.success('配置向导完成，正在启动主程序...')
-        # Reload config and run (don't open browser again, wizard page already redirected)
+        logger.success('Setup wizard completed. Restarting program...')
+        logger.success('配置向导完成，正在重启程序...')
+        # Disable auto-open so restart doesn't open another tab
         SETTINGS['general']['auto_open_qr_web_page'] = False
-        config_init()
-        main()
+        config_save()
+        time.sleep(1)
+        _restart_program()
     except Exception as e:
         logger.error(traceback.format_exc())
         logger.error("Unexpected Error.")
