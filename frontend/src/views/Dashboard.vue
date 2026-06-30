@@ -408,7 +408,7 @@ onUnmounted(() => intervals.forEach(clearInterval))
 .osc-time { color: var(--text-muted); min-width: 52px; text-align: right; }
 
 /* QR */
-.qr-text { margin-top: var(--sp-3); font-size: var(--text-xs); font-family: var(--font-mono); color: var(--text-muted); word-break: break-all; padding: var(--sp-2) var(--sp-3); background: rgba(139,92,246,0.05); border-radius: var(--radius-sm); }
+.qr-text { margin-top: var(--sp-3); font-size: var(--text-xs); font-family: var(--font); color: var(--text-muted); word-break: break-all; padding: var(--sp-2) var(--sp-3); background: rgba(139,92,246,0.05); border-radius: var(--radius-sm); }
 
 /* Wave */
 .wave-grid { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-3); }

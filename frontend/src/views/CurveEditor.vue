@@ -271,7 +271,7 @@ onMounted(() => {
 .preset-btn:hover { border-color: var(--accent); color: var(--text); background: rgba(139,92,246,0.06); }
 
 .point-list { max-height: 180px; overflow-y: auto; }
-.pt-row { display: flex; align-items: center; gap: var(--sp-2); padding: var(--sp-1) 0; font-family: var(--font-mono); font-size: var(--text-xs); }
+.pt-row { display: flex; align-items: center; gap: var(--sp-2); padding: var(--sp-1) 0; font-family: var(--font); font-variant-numeric: tabular-nums; font-size: var(--text-xs); }
 .pt-idx { color: var(--text-muted); width: 16px; }
 .pt-coord { color: var(--text-secondary); flex: 1; }
 .pt-del { border: none; background: transparent; color: var(--text-muted); cursor: pointer; padding: 2px 6px; border-radius: 4px; transition: color var(--transition); }

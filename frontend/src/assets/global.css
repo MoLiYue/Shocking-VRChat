@@ -28,7 +28,7 @@
 
   /* Typography */
   --font: 'Inter', 'Noto Sans SC', -apple-system, BlinkMacSystemFont, sans-serif;
-  --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
+  --font-mono: 'Inter', 'Noto Sans SC', monospace;
   --text-xs: 0.7rem; --text-sm: 0.8rem; --text-base: 0.875rem;
   --text-lg: 1rem; --text-xl: 1.25rem; --text-2xl: 1.75rem; --text-3xl: 2.25rem;
 
