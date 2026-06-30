@@ -381,11 +381,11 @@ onUnmounted(() => intervals.forEach(clearInterval))
 .col { display: flex; flex-direction: column; gap: var(--sp-4); }
 
 /* Channels */
-.ch-row { margin-bottom: var(--sp-4); }
+.ch-row { margin-bottom: var(--sp-2); }
 .ch-row:last-child { margin-bottom: 0; }
-.ch-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: var(--sp-2); }
-.ch-name { font-weight: 800; font-size: var(--text-xl); background: var(--gradient-text); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
-.bar-track { height: 6px; background: rgba(139,92,246,0.1); border-radius: var(--radius-full); overflow: hidden; }
+.ch-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: var(--sp-1); font-size: var(--text-sm); }
+.ch-name { font-weight: 700; font-size: var(--text-base); background: var(--gradient-text); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+.bar-track { height: 5px; background: rgba(139,92,246,0.1); border-radius: var(--radius-full); overflow: hidden; }
 .bar-fill { height: 100%; border-radius: var(--radius-full); transition: width 200ms linear; }
 .bar-a { background: linear-gradient(90deg, #34d399, #6ee7b7); box-shadow: 0 0 8px rgba(52,211,153,0.3); }
 .bar-b { background: linear-gradient(90deg, #60a5fa, #93c5fd); box-shadow: 0 0 8px rgba(96,165,250,0.3); }
@@ -414,7 +414,7 @@ onUnmounted(() => intervals.forEach(clearInterval))
 .wave-grid { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-3); }
 .wave-panel { position: relative; }
 .wave-label { position: absolute; top: var(--sp-2); left: var(--sp-3); font-size: var(--text-xs); font-weight: 700; color: var(--text-muted); }
-.wave-canvas { width: 100%; height: 80px; border-radius: var(--radius-md); background: rgba(10,8,16,0.5); border: 1px solid var(--border); }
+.wave-canvas { width: 100%; height: 120px; border-radius: var(--radius-md); background: rgba(10,8,16,0.5); border: 1px solid var(--border); }
 
 /* Controls */
 .form-field { margin-bottom: var(--sp-4); }
