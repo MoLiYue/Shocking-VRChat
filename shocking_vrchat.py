@@ -652,13 +652,21 @@ def api_v1_settings_update():
     })
 
 def _restart_program():
-    """Restart the current process."""
-    python = sys.executable
+    """Restart the current process. Works on both Windows and Linux."""
+    import subprocess
     if getattr(sys, 'frozen', False):
         # PyInstaller bundled exe
-        os.execv(sys.executable, [sys.executable] + sys.argv[1:])
+        cmd = [sys.executable] + sys.argv[1:]
     else:
-        os.execv(python, [python] + sys.argv)
+        cmd = [sys.executable] + sys.argv
+
+    if sys.platform == 'win32':
+        # Windows: os.execv doesn't replace process, use subprocess + exit
+        subprocess.Popen(cmd, close_fds=True, creationflags=subprocess.CREATE_NEW_PROCESS_GROUP)
+        os._exit(0)
+    else:
+        # Linux/Mac: os.execv replaces current process
+        os.execv(cmd[0], cmd)
 
 @app.route('/api/v1/params/<channel>', methods=['GET'])
 def api_v1_params_get(channel):
