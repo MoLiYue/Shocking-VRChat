@@ -928,10 +928,20 @@ def _ensure_recordings_dir():
     os.makedirs(RECORDINGS_DIR, exist_ok=True)
 
 def _osc_record_hook(address, *args):
-    """Global OSC handler for recording ALL params, not just selected ones."""
+    """Global OSC handler for recording ALL params AND feeding activity display."""
+    # Feed activity display for all OSC messages (not just registered params)
+    val = args[0] if args else 0
+    if isinstance(val, (int, float)):
+        _osc_activity.appendleft({
+            'time': time.time(),
+            'address': address,
+            'value': round(float(val), 4),
+            'channel': '-',
+            'mode': '-',
+        })
+    # Record if active
     if _recording_state['active']:
         elapsed_ms = (time.perf_counter() - _recording_state['start_time']) * 1000.0
-        # Store raw args (may be multiple values)
         _recording_state['messages'].append({
             't': round(elapsed_ms, 3),
             'addr': address,
