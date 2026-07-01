@@ -268,6 +268,12 @@ targets:
 
 - 如果你的模型是刚刚修改过的，有可能是 VRChat 的 OSC 配置文件没有更新，请尝试在 Action Menu 中选择 Options > OSC > Reset Config 重置 OSC 配置。
 
+## 波形文件声明
+
+本仓库 `dg-lab/` 和 `wave_presets/` 目录中包含的 `.pulse` 及 `.json` 波形预设文件仅供学习与技术研究使用。这些波形数据来源于 DG-LAB 社区公开分享，本项目不主张对其内容的任何所有权。
+
+若上述文件侵犯了您的著作权或其他合法权益，请通过 Issue 或其他方式联系我们，我们将在确认后第一时间配合删除相关文件。
+
 ## Credits
 
 感谢 [DG-LAB-OPENSOURCE](https://github.com/DG-LAB-OPENSOURCE/DG-LAB-OPENSOURCE) ，赞美 DG-LAB 的开源精神！

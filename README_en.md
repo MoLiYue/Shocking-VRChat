@@ -230,6 +230,12 @@ Notes:
 
 - If your model has just been modified, it's possible that VRChat's OSC configuration file hasn't been updated. Try resetting the OSC configuration in the Action Menu by selecting Options > OSC > Reset Config.
 
+## Waveform File Disclaimer
+
+The `.pulse` and `.json` waveform preset files contained in the `dg-lab/` and `wave_presets/` directories of this repository are provided solely for learning and technical research purposes. These waveform data originate from publicly shared content within the DG-LAB community, and this project does not claim any ownership over their content.
+
+If any of the above files infringe upon your copyright or other legal rights, please contact us via Issue or other means. We will cooperate to remove the relevant files promptly upon confirmation.
+
 ## Credits
 
 Thanks to [DG-LAB-OPENSOURCE](https://github.com/DG-LAB-OPENSOURCE/DG-LAB-OPENSOURCE). Praise the open-source spirit of DG-LAB!
