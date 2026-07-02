@@ -8,6 +8,7 @@ const navItems = [
   { path: '/params', label: '参数管理', icon: '🎛' },
   { path: '/strength', label: '强度上限', icon: '🔋' },
   { path: '/overlimit-rules', label: '超限规则', icon: '⚡' },
+  { path: '/wave-test', label: '波形测试', icon: '🧪' },
   { path: '/curve', label: '强度曲线', icon: '📈' },
   { path: '/combo', label: 'Combo', icon: '🔀' },
   { path: '/recorder', label: '录制回放', icon: '🎙' },

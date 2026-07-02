@@ -721,6 +721,48 @@ async def api_v1_sendwave(channel, repeat, wavedata):
     await command_queue.put(CommandPriority.API, channel, 'wave', value=wavestr, source_id='api_sendwave')
     return {'result': 'OK'}
 
+# --- Wave Test (manual pulse with strength + wave_scale control) ---
+@app.route('/api/v1/wave_test', methods=['POST'], endpoint='api_v1_wave_test')
+async def api_v1_wave_test():
+    """Send a test pulse with specified strength and wave_scale.
+    Body: {channel, strength, wave_scale, preset?, duration_s?}
+    """
+    from srv.wave_preset import WavePresetLibrary
+    data = request.get_json()
+    channel = data.get('channel', 'A').upper()
+    if channel not in ('A', 'B'):
+        return {'error': 'channel must be A or B'}, 400
+    strength = max(0, min(200, int(data.get('strength', 50))))
+    wave_scale = max(0.0, min(1.0, float(data.get('wave_scale', 1.0))))
+    preset_name = data.get('preset', None)
+    duration_s = max(0.1, min(10.0, float(data.get('duration_s', 1.0))))
+
+    # Build wave string
+    lib = WavePresetLibrary()
+    if preset_name and lib.get(preset_name):
+        wavestrs = lib.build_scaled_wavestrs(preset_name, wave_scale)
+    else:
+        # Use default wave, scaled
+        default_wave = json.dumps([DEFAULT_SHOCK_WAVE.strip('"')] * 10, separators=(',', ':'))
+        wavestrs = [ShockHandler.scale_wavestr(default_wave, wave_scale)]
+
+    # Set strength
+    for conn in srv.WS_CONNECTIONS:
+        await conn.set_strength(channel, mode='2', value=strength, force=True)
+
+    # Send waves for duration
+    repeat_count = max(1, int(duration_s / 0.1))  # each wavestr ~100ms
+    wave_idx = 0
+    sent = 0
+    for _ in range(repeat_count):
+        wavestr = wavestrs[wave_idx % len(wavestrs)] if wavestrs else json.dumps(['0A0A0A0A64646464'] * 10, separators=(',', ':'))
+        await command_queue.put(CommandPriority.API, channel, 'wave', value=wavestr, source_id='api_wave_test')
+        wave_idx += 1
+        sent += 1
+
+    logger.info(f"[wave_test] ch={channel} str={strength} scale={wave_scale} preset={preset_name or 'default'} dur={duration_s}s sent={sent}")
+    return {'result': 'OK', 'strength': strength, 'wave_scale': wave_scale, 'waves_sent': sent}
+
 def strip_basic_settings(settings: dict):
     ret = copy.deepcopy(settings)
     for chann in ['channel_a', 'channel_b']:

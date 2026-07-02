@@ -16,6 +16,7 @@ const router = createRouter({
     { path: '/settings', component: () => import('./views/Settings.vue') },
     { path: '/strength', component: () => import('./views/StrengthLimit.vue') },
     { path: '/overlimit-rules', component: () => import('./views/OverlimitRules.vue') },
+    { path: '/wave-test', component: () => import('./views/WaveTest.vue') },
   ],
 })
 
