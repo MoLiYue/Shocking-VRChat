@@ -29,6 +29,7 @@ class DGWSMessage():
 class DGConnection():
     wave_observer = None
     clear_observer = None
+    _suppress_clear = False
 
     def __init__(self, ws_connection: WebSocketCommonProtocol, client_uuid=None, SETTINGS:dict=None) -> None:
         if SETTINGS is None:
@@ -167,6 +168,8 @@ class DGConnection():
 
     @classmethod
     async def broadcast_clear_wave(cls, channel='A'):
+        if cls._suppress_clear:
+            return
         if cls.clear_observer is not None:
             try:
                 cls.clear_observer(channel)

@@ -803,53 +803,59 @@ async def _wave_test_loop():
     lib = WavePresetLibrary()
     saved_limits = None
     while True:
-        if _wave_test_state['active']:
-            channel = _wave_test_state['channel']
-            strength = _wave_test_state['strength']
-            wave_scale = _wave_test_state['wave_scale']
-            preset_name = _wave_test_state['preset']
+        try:
+            if _wave_test_state['active']:
+                channel = _wave_test_state['channel']
+                strength = _wave_test_state['strength']
+                wave_scale = _wave_test_state['wave_scale']
+                preset_name = _wave_test_state['preset']
 
-            # Temporarily override strength_limit so normal handlers don't fight
-            if saved_limits is None:
-                saved_limits = {
-                    'A': SETTINGS['dglab3']['channel_a']['strength_limit'],
-                    'B': SETTINGS['dglab3']['channel_b']['strength_limit'],
-                }
-            ch_key = f'channel_{channel.lower()}'
-            SETTINGS['dglab3'][ch_key]['strength_limit'] = strength
-            srv.DGConnection.refresh_limits_from_settings(SETTINGS)
-            # Also force-set strength directly (bypasses strength_max check)
-            for conn in srv.WS_CONNECTIONS:
-                await conn.set_strength(channel, mode='2', value=strength, force=True)
-
-            # Build wave using same method as normal distance mode
-            if preset_name and lib.get(preset_name):
-                wavestr = lib.build_resampled_window(
-                    preset_name,
-                    start_position=wave_position,
-                    window_ops=10,
-                    wave_scale=wave_scale,
-                    texture_floor=0.35,
-                    sample_step=1.0,
-                )
-                wave_position += 4.0  # advance like normal mode
-                if not wavestr:
-                    wavestr = DEFAULT_SHOCK_WAVE
-            else:
-                # Default wave: just scale it directly
-                wavestr = ShockHandler.scale_wavestr(DEFAULT_SHOCK_WAVE, wave_scale)
-
-            await command_queue.put(CommandPriority.API, channel, 'wave', value=wavestr, source_id='wave_test_loop')
-            await asyncio.sleep(0.1)  # ~100ms per wavestr
-        else:
-            # Restore original strength_limit when stopped
-            if saved_limits is not None:
-                SETTINGS['dglab3']['channel_a']['strength_limit'] = saved_limits['A']
-                SETTINGS['dglab3']['channel_b']['strength_limit'] = saved_limits['B']
+                # Temporarily override strength_limit so normal handlers don't fight
+                if saved_limits is None:
+                    saved_limits = {
+                        'A': SETTINGS['dglab3']['channel_a']['strength_limit'],
+                        'B': SETTINGS['dglab3']['channel_b']['strength_limit'],
+                    }
+                    srv.DGConnection._suppress_clear = True
+                ch_key = f'channel_{channel.lower()}'
+                SETTINGS['dglab3'][ch_key]['strength_limit'] = strength
                 srv.DGConnection.refresh_limits_from_settings(SETTINGS)
-                saved_limits = None
-            wave_position = 0.0
-            await asyncio.sleep(0.1)
+                # Also force-set strength directly (bypasses strength_max check)
+                for conn in srv.WS_CONNECTIONS:
+                    await conn.set_strength(channel, mode='2', value=strength, force=True)
+
+                # Build wave using same method as normal distance mode
+                wavestr = None
+                if preset_name and lib.get(preset_name):
+                    wavestr = lib.build_resampled_window(
+                        preset_name,
+                        start_position=wave_position,
+                        window_ops=10,
+                        wave_scale=wave_scale,
+                        texture_floor=0.35,
+                        sample_step=1.0,
+                    )
+                    wave_position += 4.0  # advance like normal mode
+
+                if not wavestr:
+                    # Default wave or preset failed: scale the default shock wave
+                    wavestr = ShockHandler.scale_wavestr(DEFAULT_SHOCK_WAVE, wave_scale)
+
+                await command_queue.put(CommandPriority.API, channel, 'wave', value=wavestr, source_id='wave_test_loop')
+                await asyncio.sleep(0.1)
+            else:
+                # Restore original strength_limit when stopped
+                if saved_limits is not None:
+                    SETTINGS['dglab3']['channel_a']['strength_limit'] = saved_limits['A']
+                    SETTINGS['dglab3']['channel_b']['strength_limit'] = saved_limits['B']
+                    srv.DGConnection.refresh_limits_from_settings(SETTINGS)
+                    srv.DGConnection._suppress_clear = False
+                    saved_limits = None
+                wave_position = 0.0
+                await asyncio.sleep(0.1)
+        except Exception as e:
+            logger.error(f"[wave_test_loop] error: {e}")
+            await asyncio.sleep(0.5)
 
 def strip_basic_settings(settings: dict):
     ret = copy.deepcopy(settings)
@@ -1553,7 +1559,9 @@ async def command_queue_processor():
             elif cmd.action == 'wave':
                 await DGConnection.broadcast_wave(channel=cmd.channel, wavestr=cmd.value)
             elif cmd.action == 'clear':
-                await DGConnection.broadcast_clear_wave(cmd.channel)
+                # Skip clear during wave test to prevent it from killing test output
+                if not _wave_test_state['active']:
+                    await DGConnection.broadcast_clear_wave(cmd.channel)
             command_queue.task_done()
         except Exception as e:
             logger.error(f"[command_queue] error: {e}")
