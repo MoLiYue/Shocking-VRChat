@@ -130,20 +130,22 @@ function drawWave() {
     ctx.stroke()
   }
 
-  // Bar chart - no gap between bars when data is continuous (non-zero)
+  // Bar chart - fixed bar width, right-aligned (new data on right, scrolls left)
   const data = waveData.value
   if (!data.length) return
-  const maxBars = 400
-  const startIdx = Math.max(0, data.length - maxBars)
-  const bars = data.slice(startIdx)
-  const barW = w / bars.length
+  const barW = 3  // fixed pixel width per sample
+  const maxBars = Math.floor(w / barW)
+  const bars = data.slice(-maxBars)  // take latest N samples
+
+  // Draw from right: bars[bars.length-1] is rightmost (newest)
+  const offsetX = w - bars.length * barW
 
   ctx.fillStyle = 'rgba(139,92,246,0.85)'
   for (let i = 0; i < bars.length; i++) {
     const v = Math.max(0, Math.min(100, bars[i]))
     if (v <= 0) continue
     const barH = (v / 100) * (h - 4)
-    const x = i * barW
+    const x = offsetX + i * barW
     const y = h - barH
     ctx.fillRect(x, y, barW, barH)
   }
