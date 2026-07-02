@@ -728,13 +728,11 @@ _wave_test_state = {
     'strength': 50,
     'wave_scale': 1.0,
     'preset': None,
-    'wavestrs': [],
 }
 
 @app.route('/api/v1/wave_test/start', methods=['POST'], endpoint='api_v1_wave_test_start')
 async def api_v1_wave_test_start():
     """Start looping wave test. Body: {channel, strength, wave_scale, preset?}"""
-    from srv.wave_preset import WavePresetLibrary
     data = request.get_json()
     channel = data.get('channel', 'A').upper()
     if channel not in ('A', 'B'):
@@ -742,14 +740,6 @@ async def api_v1_wave_test_start():
     strength = max(0, min(200, int(data.get('strength', 50))))
     wave_scale = max(0.0, min(1.0, float(data.get('wave_scale', 1.0))))
     preset_name = data.get('preset', None)
-
-    # Build wave strings
-    lib = WavePresetLibrary()
-    if preset_name and lib.get(preset_name):
-        wavestrs = lib.build_scaled_wavestrs(preset_name, wave_scale)
-    else:
-        # DEFAULT_SHOCK_WAVE is already a valid wavestr JSON array
-        wavestrs = [ShockHandler.scale_wavestr(DEFAULT_SHOCK_WAVE, wave_scale)]
 
     # Set strength
     for conn in srv.WS_CONNECTIONS:
@@ -760,7 +750,6 @@ async def api_v1_wave_test_start():
     _wave_test_state['strength'] = strength
     _wave_test_state['wave_scale'] = wave_scale
     _wave_test_state['preset'] = preset_name
-    _wave_test_state['wavestrs'] = wavestrs
 
     logger.info(f"[wave_test] Started: ch={channel} str={strength} scale={wave_scale} preset={preset_name or 'default'}")
     return {'result': 'OK', 'active': True}
@@ -778,13 +767,11 @@ async def api_v1_wave_test_stop():
 
 @app.route('/api/v1/wave_test/update', methods=['POST'], endpoint='api_v1_wave_test_update')
 async def api_v1_wave_test_update():
-    """Update running wave test params without restart. Body: {strength?, wave_scale?}"""
-    from srv.wave_preset import WavePresetLibrary
+    """Update running wave test params without restart. Body: {strength?, wave_scale?, preset?}"""
     if not _wave_test_state['active']:
         return {'error': 'test not running'}, 400
     data = request.get_json()
     channel = _wave_test_state['channel']
-    changed_wave = False
 
     if 'strength' in data:
         strength = max(0, min(200, int(data['strength'])))
@@ -793,22 +780,10 @@ async def api_v1_wave_test_update():
             await conn.set_strength(channel, mode='2', value=strength, force=True)
 
     if 'wave_scale' in data:
-        wave_scale = max(0.0, min(1.0, float(data['wave_scale'])))
-        _wave_test_state['wave_scale'] = wave_scale
-        changed_wave = True
+        _wave_test_state['wave_scale'] = max(0.0, min(1.0, float(data['wave_scale'])))
 
     if 'preset' in data:
-        _wave_test_state['preset'] = data['preset']
-        changed_wave = True
-
-    if changed_wave:
-        lib = WavePresetLibrary()
-        preset_name = _wave_test_state['preset']
-        wave_scale = _wave_test_state['wave_scale']
-        if preset_name and lib.get(preset_name):
-            _wave_test_state['wavestrs'] = lib.build_scaled_wavestrs(preset_name, wave_scale)
-        else:
-            _wave_test_state['wavestrs'] = [ShockHandler.scale_wavestr(DEFAULT_SHOCK_WAVE, wave_scale)]
+        _wave_test_state['preset'] = data['preset'] or None
 
     return {'result': 'OK', 'state': {
         'active': True,
@@ -830,21 +805,41 @@ async def api_v1_wave_test_status():
 
 async def _wave_test_loop():
     """Background loop that sends waves continuously while test is active."""
-    wave_idx = 0
+    from srv.wave_preset import WavePresetLibrary
+    wave_position = 0.0
+    lib = WavePresetLibrary()
     while True:
-        if _wave_test_state['active'] and _wave_test_state['wavestrs']:
-            wavestrs = _wave_test_state['wavestrs']
+        if _wave_test_state['active']:
             channel = _wave_test_state['channel']
             strength = _wave_test_state['strength']
+            wave_scale = _wave_test_state['wave_scale']
+            preset_name = _wave_test_state['preset']
+
             # Force-set strength every iteration to override normal handler
             for conn in srv.WS_CONNECTIONS:
                 await conn.set_strength(channel, mode='2', value=strength, force=True)
-            wavestr = wavestrs[wave_idx % len(wavestrs)]
+
+            # Build wave using same method as normal distance mode
+            if preset_name and lib.get(preset_name):
+                wavestr = lib.build_resampled_window(
+                    preset_name,
+                    start_position=wave_position,
+                    window_ops=10,
+                    wave_scale=wave_scale,
+                    texture_floor=0.35,
+                    sample_step=1.0,
+                )
+                wave_position += 4.0  # advance like normal mode
+                if not wavestr:
+                    wavestr = DEFAULT_SHOCK_WAVE
+            else:
+                # Default wave: just scale it directly
+                wavestr = ShockHandler.scale_wavestr(DEFAULT_SHOCK_WAVE, wave_scale)
+
             await command_queue.put(CommandPriority.API, channel, 'wave', value=wavestr, source_id='wave_test_loop')
-            wave_idx += 1
             await asyncio.sleep(0.1)  # ~100ms per wavestr
         else:
-            wave_idx = 0
+            wave_position = 0.0
             await asyncio.sleep(0.1)
 
 def strip_basic_settings(settings: dict):
