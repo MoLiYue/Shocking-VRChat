@@ -130,30 +130,23 @@ function drawWave() {
     ctx.stroke()
   }
 
-  // Wave
+  // Bar chart - no gap between bars when data is continuous (non-zero)
   const data = waveData.value
-  if (data.length < 2) return
-  const step = w / Math.min(data.length, 400)
-  const startIdx = Math.max(0, data.length - 400)
+  if (!data.length) return
+  const maxBars = 400
+  const startIdx = Math.max(0, data.length - maxBars)
+  const bars = data.slice(startIdx)
+  const barW = w / bars.length
 
-  ctx.beginPath()
-  ctx.strokeStyle = 'rgba(139,92,246,0.9)'
-  ctx.lineWidth = 1.5
-  for (let i = 0; i < Math.min(data.length - startIdx, 400); i++) {
-    const x = i * step
-    const y = h - (data[startIdx + i] / 100) * h
-    if (i === 0) ctx.moveTo(x, y)
-    else ctx.lineTo(x, y)
+  ctx.fillStyle = 'rgba(139,92,246,0.85)'
+  for (let i = 0; i < bars.length; i++) {
+    const v = Math.max(0, Math.min(100, bars[i]))
+    if (v <= 0) continue
+    const barH = (v / 100) * (h - 4)
+    const x = i * barW
+    const y = h - barH
+    ctx.fillRect(x, y, barW, barH)
   }
-  ctx.stroke()
-
-  // Fill under curve
-  const lastX = (Math.min(data.length - startIdx, 400) - 1) * step
-  ctx.lineTo(lastX, h)
-  ctx.lineTo(0, h)
-  ctx.closePath()
-  ctx.fillStyle = 'rgba(139,92,246,0.08)'
-  ctx.fill()
 
   // Labels
   ctx.fillStyle = 'rgba(255,255,255,0.4)'
