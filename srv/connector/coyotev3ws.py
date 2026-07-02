@@ -84,7 +84,8 @@ class DGConnection():
     def get_upper_strength(self, channel='A'):
         limit = self.strength_limit[channel]
         if self.overlimit_active[channel]:
-            limit = limit + self.overlimit_max[channel]
+            # overlimit_max is an absolute cap set by rules, not additive
+            limit = max(limit, self.overlimit_max[channel])
         return min(self.strength_max[channel], limit)
 
     async def set_strength(self, channel='A', mode='2', value=0, force=False):

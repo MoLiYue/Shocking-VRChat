@@ -78,7 +78,7 @@ onMounted(load)
             <input type="range" v-model.number="overlimitA" min="0" max="200" step="1" @input="onInput">
             <input type="number" v-model.number="overlimitA" min="0" max="200" class="num-input" @input="onInput">
           </div>
-          <p class="hint">触发超限时，最大值变为 {{ limitA }} + {{ overlimitA }} = <strong>{{ Math.min(200, limitA + overlimitA) }}</strong></p>
+          <p class="hint">超限规则触发时，最大值可提升到此额度（绝对值）: <strong>{{ overlimitA }}</strong></p>
         </div>
       </section>
 
@@ -100,7 +100,7 @@ onMounted(load)
             <input type="range" v-model.number="overlimitB" min="0" max="200" step="1" @input="onInput">
             <input type="number" v-model.number="overlimitB" min="0" max="200" class="num-input" @input="onInput">
           </div>
-          <p class="hint">触发超限时，最大值变为 {{ limitB }} + {{ overlimitB }} = <strong>{{ Math.min(200, limitB + overlimitB) }}</strong></p>
+          <p class="hint">超限规则触发时，最大值可提升到此额度（绝对值）: <strong>{{ overlimitB }}</strong></p>
         </div>
       </section>
     </div>
@@ -119,12 +119,12 @@ onMounted(load)
         <li>如果郊狼 APP 内设置的上限低于此值，以 APP 设置为准</li>
         <li>修改后立即生效，无需重启程序或重新连接设备</li>
       </ul>
-      <h3 style="margin-top:var(--sp-4)">超限模式</h3>
+      <h3 style="margin-top:var(--sp-4)">超限规则</h3>
       <ul>
-        <li>将某个 OSC 参数的工作模式设为 <code>overlimit</code>，当该参数触发时，对应通道的强度上限临时提升</li>
-        <li>提升量 = 本页设置的<strong>超限额度</strong>，即上限变为 <code>强度上限 + 超限额度</code>（不超过 200）</li>
-        <li>当触发参数回到阈值以下时，自动恢复正常上限</li>
-        <li>适用场景：特定触碰区域或条件下允许更强的刺激</li>
+        <li>在 <router-link to="/overlimit-rules">超限规则</router-link> 页面中配置条件规则</li>
+        <li>当 OSC 参数满足规则条件时，对应通道的强度上限临时提升到规则设定的值</li>
+        <li>本页的"超限额度"作为默认回退值（当旧的单参数触发超限时使用）</li>
+        <li>推荐使用超限规则页面进行更灵活的多层级配置</li>
       </ul>
     </div>
   </div>

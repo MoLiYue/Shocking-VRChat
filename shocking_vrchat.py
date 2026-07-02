@@ -553,6 +553,115 @@ async def api_v1_strength_limit_set():
         'overlimit_b': SETTINGS_BASIC['dglab3']['channel_b'].get('overlimit_max', 20),
     }
 
+# --- Overlimit Rules Engine (multi-level, condition-based) ---
+OVERLIMIT_RULES_FILE = 'overlimit_rules.yaml'
+_overlimit_rules = []       # list of rule dicts
+_osc_param_state = {}       # {address: latest_value} for rule evaluation
+_overlimit_effective = {'A': 0, 'B': 0}  # current effective overlimit per channel
+
+def _load_overlimit_rules():
+    global _overlimit_rules
+    if os.path.exists(OVERLIMIT_RULES_FILE):
+        with open(OVERLIMIT_RULES_FILE, 'r', encoding='utf-8') as f:
+            data = yaml.safe_load(f) or {}
+        _overlimit_rules = data.get('rules', [])
+    else:
+        _overlimit_rules = []
+
+def _save_overlimit_rules():
+    tmp = OVERLIMIT_RULES_FILE + '.tmp'
+    with open(tmp, 'w', encoding='utf-8') as f:
+        yaml.safe_dump({'rules': _overlimit_rules}, f, allow_unicode=True)
+    os.replace(tmp, OVERLIMIT_RULES_FILE)
+
+def _eval_condition(condition: dict, param_state: dict) -> bool:
+    """Evaluate a single condition against current OSC param state."""
+    param = condition.get('param', '')
+    operator = condition.get('operator', '==')
+    threshold = condition.get('value', 0)
+    current = param_state.get(param)
+    if current is None:
+        return False
+    try:
+        current = float(current)
+        threshold = float(threshold)
+    except (TypeError, ValueError):
+        return False
+    if operator == '==':
+        return abs(current - threshold) < 0.001
+    elif operator == '!=':
+        return abs(current - threshold) >= 0.001
+    elif operator == '>':
+        return current > threshold
+    elif operator == '<':
+        return current < threshold
+    elif operator == '>=':
+        return current >= threshold
+    elif operator == '<=':
+        return current <= threshold
+    return False
+
+def _evaluate_overlimit_rules():
+    """Re-evaluate all rules and update effective overlimit per channel."""
+    global _overlimit_effective
+    max_limit = {'A': 0, 'B': 0}
+    for rule in _overlimit_rules:
+        if not rule.get('enabled', True):
+            continue
+        if _eval_condition(rule.get('condition', {}), _osc_param_state):
+            limit_val = int(rule.get('limit_value', 0))
+            channel = rule.get('channel', 'both')
+            if channel in ('a', 'both'):
+                max_limit['A'] = max(max_limit['A'], limit_val)
+            if channel in ('b', 'both'):
+                max_limit['B'] = max(max_limit['B'], limit_val)
+    # Update connector overlimit
+    changed = False
+    for ch in ['A', 'B']:
+        if max_limit[ch] != _overlimit_effective[ch]:
+            _overlimit_effective[ch] = max_limit[ch]
+            changed = True
+    if changed:
+        for conn in srv.WS_CONNECTIONS:
+            conn.overlimit_active['A'] = max_limit['A'] > 0
+            conn.overlimit_active['B'] = max_limit['B'] > 0
+            conn.overlimit_max['A'] = max_limit['A'] if max_limit['A'] > 0 else SETTINGS['dglab3']['channel_a'].get('overlimit_max', 20)
+            conn.overlimit_max['B'] = max_limit['B'] if max_limit['B'] > 0 else SETTINGS['dglab3']['channel_b'].get('overlimit_max', 20)
+
+def _overlimit_osc_hook(address, *args):
+    """Called on every OSC message to update param state and evaluate rules."""
+    if args:
+        _osc_param_state[address] = args[0]
+    if _overlimit_rules:
+        _evaluate_overlimit_rules()
+
+@app.route('/api/v1/overlimit_rules', methods=['GET'], endpoint='api_v1_overlimit_rules_get')
+async def api_v1_overlimit_rules_get():
+    """Get all overlimit rules."""
+    return jsonify({'rules': _overlimit_rules, 'effective': _overlimit_effective})
+
+@app.route('/api/v1/overlimit_rules', methods=['POST'], endpoint='api_v1_overlimit_rules_set')
+async def api_v1_overlimit_rules_set():
+    """Replace all overlimit rules."""
+    global _overlimit_rules
+    data = request.get_json()
+    _overlimit_rules = data.get('rules', [])
+    _save_overlimit_rules()
+    _evaluate_overlimit_rules()
+    logger.info(f"[overlimit_rules] Saved {len(_overlimit_rules)} rules")
+    return jsonify({'success': True, 'rules': _overlimit_rules})
+
+@app.route('/api/v1/overlimit_rules/<int:index>', methods=['DELETE'], endpoint='api_v1_overlimit_rules_delete')
+async def api_v1_overlimit_rules_delete(index):
+    """Delete a single rule by index."""
+    if 0 <= index < len(_overlimit_rules):
+        removed = _overlimit_rules.pop(index)
+        _save_overlimit_rules()
+        _evaluate_overlimit_rules()
+        logger.info(f"[overlimit_rules] Deleted rule: {removed.get('name', index)}")
+        return jsonify({'success': True, 'rules': _overlimit_rules})
+    return jsonify({'success': False, 'error': 'invalid index'}), 400
+
 @app.route('/api/v1/shock/<channel>/<second>', endpoint='api_v1_shock')
 @allow_vrchat_only
 async def api_v1_shock(channel, second):
@@ -898,6 +1007,7 @@ def api_v1_curve_delete(param_key):
     return jsonify({'success': True})
 
 _load_curve_config()
+_load_overlimit_rules()
 
 # --- Profile Management ---
 PROFILES_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)) if not getattr(sys, "frozen", False) else os.path.dirname(sys.executable), 'profiles')
@@ -994,6 +1104,8 @@ def _ensure_recordings_dir():
 
 def _osc_record_hook(address, *args):
     """Global OSC handler for recording ALL params."""
+    # Evaluate overlimit rules on every OSC message
+    _overlimit_osc_hook(address, *args)
     # Record if active
     if _recording_state['active']:
         elapsed_ms = (time.perf_counter() - _recording_state['start_time']) * 1000.0
