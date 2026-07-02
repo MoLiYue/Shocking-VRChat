@@ -198,6 +198,8 @@ def convert_to_ops(
         dur_ticks = max(0, int(dur_ticks))
         if dur_ticks == 0:
             continue
+        # Each tick in the pulse is one sub-sample (one quarter of an op).
+        # Duration ticks directly gives the number of sub-samples needed.
         repeats = int(math.ceil(dur_ticks / unit_len))
         total = repeats * unit_len
 
@@ -228,10 +230,8 @@ def convert_to_ops(
         freq_samples.extend([10] * rest_ticks)
         strength_samples.extend([0] * rest_ticks)
 
-    speed = max(1, int(speed))
-    if speed > 1:
-        freq_samples = freq_samples[::speed]
-        strength_samples = strength_samples[::speed]
+    # Speed does NOT subsample — ticks represent sub-samples (4 per op).
+    # The DG-LAB device always plays ops at 100ms each (4 sub-ticks of 25ms).
 
     n = min(len(freq_samples), len(strength_samples))
     freq_samples = freq_samples[:n]
