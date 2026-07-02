@@ -543,7 +543,7 @@ async def api_v1_strength_limit_set():
             changed = True
     if changed:
         config_save()
-        srv.DGConnection.refresh_limits_from_settings(SETTINGS)
+        DGConnection.refresh_limits_from_settings(SETTINGS)
         logger.info(f"[strength_limit] Updated: A={SETTINGS_BASIC['dglab3']['channel_a']['strength_limit']}(+{SETTINGS_BASIC['dglab3']['channel_a'].get('overlimit_max',20)}), B={SETTINGS_BASIC['dglab3']['channel_b']['strength_limit']}(+{SETTINGS_BASIC['dglab3']['channel_b'].get('overlimit_max',20)})")
     return {
         'success': True,
@@ -816,10 +816,10 @@ async def _wave_test_loop():
                         'A': SETTINGS['dglab3']['channel_a']['strength_limit'],
                         'B': SETTINGS['dglab3']['channel_b']['strength_limit'],
                     }
-                    srv.DGConnection._suppress_clear = True
+                    DGConnection._suppress_clear = True
                 ch_key = f'channel_{channel.lower()}'
                 SETTINGS['dglab3'][ch_key]['strength_limit'] = strength
-                srv.DGConnection.refresh_limits_from_settings(SETTINGS)
+                DGConnection.refresh_limits_from_settings(SETTINGS)
                 # Also force-set strength directly (bypasses strength_max check)
                 for conn in srv.WS_CONNECTIONS:
                     await conn.set_strength(channel, mode='2', value=strength, force=True)
@@ -848,8 +848,8 @@ async def _wave_test_loop():
                 if saved_limits is not None:
                     SETTINGS['dglab3']['channel_a']['strength_limit'] = saved_limits['A']
                     SETTINGS['dglab3']['channel_b']['strength_limit'] = saved_limits['B']
-                    srv.DGConnection.refresh_limits_from_settings(SETTINGS)
-                    srv.DGConnection._suppress_clear = False
+                    DGConnection.refresh_limits_from_settings(SETTINGS)
+                    DGConnection._suppress_clear = False
                     saved_limits = None
                 wave_position = 0.0
                 await asyncio.sleep(0.1)
@@ -1476,6 +1476,9 @@ async def api_v1_wave_preset(channel, preset_name, duration):
 @app.route('/recorder')
 @app.route('/setup')
 @app.route('/settings')
+@app.route('/strength')
+@app.route('/overlimit-rules')
+@app.route('/wave-test')
 def spa_catch_all():
     return _serve_spa()
 
