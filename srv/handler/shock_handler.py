@@ -38,6 +38,8 @@ class ShockHandler(BaseHandler):
             self._handler = self.handler_combo
         elif self.shock_mode == 'boost':
             self._handler = self.handler_boost
+        elif self.shock_mode == 'overlimit':
+            self._handler = self.handler_overlimit
         else:
             raise ValueError(f"Not supported mode: {self.shock_mode}")
         
@@ -66,6 +68,9 @@ class ShockHandler(BaseHandler):
 
         # Boost mode state
         self.boost_active = False         # currently boosted
+
+        # Overlimit mode state
+        self.overlimit_triggered = False  # currently in overlimit
     
     def start_background_jobs(self):
         # logger.info(f"Channel: {self.channel}, background job started.")
@@ -709,3 +714,18 @@ class ShockHandler(BaseHandler):
                 self.boost_active = False
                 await self.DG_CONN.broadcast_strength_adjust(self.channel, mode='0', value=boost_value)
                 self.log_trigger(context, value=distance, extra=f"boost -{boost_value} (reverted)")
+
+    async def handler_overlimit(self, distance, context=None):
+        """Overlimit mode: param > threshold → enable overlimit, param ≤ threshold → disable."""
+        trigger_bottom = self.mode_config['trigger_range']['bottom']
+
+        if distance > trigger_bottom:
+            if not self.overlimit_triggered:
+                self.overlimit_triggered = True
+                self.DG_CONN.set_overlimit(self.channel, active=True)
+                self.log_trigger(context, value=distance, extra="overlimit ON")
+        else:
+            if self.overlimit_triggered:
+                self.overlimit_triggered = False
+                self.DG_CONN.set_overlimit(self.channel, active=False)
+                self.log_trigger(context, value=distance, extra="overlimit OFF")

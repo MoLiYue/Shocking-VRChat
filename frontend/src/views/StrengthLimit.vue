@@ -4,6 +4,8 @@ import { api, apiPost } from '@/api'
 
 const limitA = ref(5)
 const limitB = ref(5)
+const overlimitA = ref(20)
+const overlimitB = ref(20)
 const msg = ref('')
 const msgType = ref<'ok' | 'err'>('ok')
 
@@ -13,12 +15,16 @@ async function load() {
   const data = await api('/api/v1/strength_limit')
   limitA.value = data.channel_a ?? 5
   limitB.value = data.channel_b ?? 5
+  overlimitA.value = data.overlimit_a ?? 20
+  overlimitB.value = data.overlimit_b ?? 20
 }
 
 async function save() {
   const data = await apiPost('/api/v1/strength_limit', {
     channel_a: limitA.value,
     channel_b: limitB.value,
+    overlimit_a: overlimitA.value,
+    overlimit_b: overlimitB.value,
   })
   if (data.success) {
     msg.value = '✓ 已保存并立即生效'
@@ -32,10 +38,10 @@ async function save() {
 }
 
 function onInput() {
-  // Clamp values
   limitA.value = Math.max(0, Math.min(200, limitA.value))
   limitB.value = Math.max(0, Math.min(200, limitB.value))
-  // Auto-save on change (debounced)
+  overlimitA.value = Math.max(0, Math.min(200, overlimitA.value))
+  overlimitB.value = Math.max(0, Math.min(200, overlimitB.value))
   if (saveTimer) clearTimeout(saveTimer)
   saveTimer = setTimeout(save, 500)
 }
@@ -66,6 +72,14 @@ onMounted(load)
             <div class="bar-fill" :style="{ width: (limitA / 200 * 100) + '%' }"></div>
           </div>
         </div>
+        <div class="field" style="margin-top:var(--sp-4)">
+          <label>超限额度 (0–200)</label>
+          <div class="slider-row">
+            <input type="range" v-model.number="overlimitA" min="0" max="200" step="1" @input="onInput">
+            <input type="number" v-model.number="overlimitA" min="0" max="200" class="num-input" @input="onInput">
+          </div>
+          <p class="hint">触发超限时，最大值变为 {{ limitA }} + {{ overlimitA }} = <strong>{{ Math.min(200, limitA + overlimitA) }}</strong></p>
+        </div>
       </section>
 
       <section class="card">
@@ -79,6 +93,14 @@ onMounted(load)
           <div class="bar-wrap">
             <div class="bar-fill" :style="{ width: (limitB / 200 * 100) + '%' }"></div>
           </div>
+        </div>
+        <div class="field" style="margin-top:var(--sp-4)">
+          <label>超限额度 (0–200)</label>
+          <div class="slider-row">
+            <input type="range" v-model.number="overlimitB" min="0" max="200" step="1" @input="onInput">
+            <input type="number" v-model.number="overlimitB" min="0" max="200" class="num-input" @input="onInput">
+          </div>
+          <p class="hint">触发超限时，最大值变为 {{ limitB }} + {{ overlimitB }} = <strong>{{ Math.min(200, limitB + overlimitB) }}</strong></p>
         </div>
       </section>
     </div>
@@ -97,6 +119,13 @@ onMounted(load)
         <li>如果郊狼 APP 内设置的上限低于此值，以 APP 设置为准</li>
         <li>修改后立即生效，无需重启程序或重新连接设备</li>
       </ul>
+      <h3 style="margin-top:var(--sp-4)">超限模式</h3>
+      <ul>
+        <li>将某个 OSC 参数的工作模式设为 <code>overlimit</code>，当该参数触发时，对应通道的强度上限临时提升</li>
+        <li>提升量 = 本页设置的<strong>超限额度</strong>，即上限变为 <code>强度上限 + 超限额度</code>（不超过 200）</li>
+        <li>当触发参数回到阈值以下时，自动恢复正常上限</li>
+        <li>适用场景：特定触碰区域或条件下允许更强的刺激</li>
+      </ul>
     </div>
   </div>
 </template>
@@ -114,6 +143,8 @@ onMounted(load)
 .num-input { width: 72px; text-align: center; font-variant-numeric: tabular-nums; }
 .bar-wrap { margin-top: var(--sp-2); height: 6px; background: var(--bg-tertiary); border-radius: 3px; overflow: hidden; }
 .bar-fill { height: 100%; background: linear-gradient(90deg, var(--accent), var(--accent-hover)); border-radius: 3px; transition: width 0.15s ease; }
+.hint { font-size: var(--text-xs); color: var(--text-muted); margin-top: var(--sp-1); }
+.hint strong { color: var(--accent); }
 .save-bar { display: flex; align-items: center; gap: var(--sp-3); margin-bottom: var(--sp-5); padding: var(--sp-4); background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius-lg); }
 .msg { font-size: var(--text-sm); color: var(--text-muted); transition: color 0.2s; }
 .msg.ok { color: var(--success); }

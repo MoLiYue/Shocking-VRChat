@@ -58,6 +58,7 @@ SETTINGS_BASIC = {
             ],
             'mode': 'distance',
             'strength_limit': 5,
+            'overlimit_max': 20,
         },
         'channel_b': {
             'avatar_params': [
@@ -80,6 +81,7 @@ SETTINGS_BASIC = {
             ],
             'mode': 'distance',
             'strength_limit': 5,
+            'overlimit_max': 20,
         }
     },
     'version': CONFIG_FILE_VERSION,
@@ -238,6 +240,7 @@ def load_config_files():
         settings['dglab3'][chann]['avatar_params'] = settings_basic['dglab3'][chann]['avatar_params']
         settings['dglab3'][chann]['mode'] = settings_basic['dglab3'][chann]['mode']
         settings['dglab3'][chann]['strength_limit'] = settings_basic['dglab3'][chann]['strength_limit']
+        settings['dglab3'][chann]['overlimit_max'] = settings_basic['dglab3'][chann].get('overlimit_max', 20)
         normalize_avatar_param_entries(settings['dglab3'][chann])
 
     return settings, settings_basic
@@ -422,6 +425,8 @@ async def api_v1_status():
                     'strength': conn.strength,
                     'strength_max': conn.strength_max,
                     'strength_limit': conn.strength_limit,
+                    'overlimit_max': conn.overlimit_max,
+                    'overlimit_active': conn.overlimit_active,
                     'uuid': conn.uuid,
                 }
             } for conn in srv.WS_CONNECTIONS
@@ -515,6 +520,8 @@ async def api_v1_strength_limit_get():
     return {
         'channel_a': SETTINGS_BASIC['dglab3']['channel_a']['strength_limit'],
         'channel_b': SETTINGS_BASIC['dglab3']['channel_b']['strength_limit'],
+        'overlimit_a': SETTINGS_BASIC['dglab3']['channel_a'].get('overlimit_max', 20),
+        'overlimit_b': SETTINGS_BASIC['dglab3']['channel_b'].get('overlimit_max', 20),
     }
 
 @app.route('/api/v1/strength_limit', methods=['POST'], endpoint='api_v1_strength_limit_set')
@@ -528,14 +535,22 @@ async def api_v1_strength_limit_set():
             SETTINGS_BASIC['dglab3'][ch_key]['strength_limit'] = val
             SETTINGS['dglab3'][ch_key]['strength_limit'] = val
             changed = True
+        ol_key = f'overlimit_{ch_key[-1]}'
+        if ol_key in data:
+            val = max(0, min(200, int(data[ol_key])))
+            SETTINGS_BASIC['dglab3'][ch_key]['overlimit_max'] = val
+            SETTINGS['dglab3'][ch_key]['overlimit_max'] = val
+            changed = True
     if changed:
         config_save()
         srv.DGConnection.refresh_limits_from_settings(SETTINGS)
-        logger.info(f"[strength_limit] Updated: A={SETTINGS_BASIC['dglab3']['channel_a']['strength_limit']}, B={SETTINGS_BASIC['dglab3']['channel_b']['strength_limit']}")
+        logger.info(f"[strength_limit] Updated: A={SETTINGS_BASIC['dglab3']['channel_a']['strength_limit']}(+{SETTINGS_BASIC['dglab3']['channel_a'].get('overlimit_max',20)}), B={SETTINGS_BASIC['dglab3']['channel_b']['strength_limit']}(+{SETTINGS_BASIC['dglab3']['channel_b'].get('overlimit_max',20)})")
     return {
         'success': True,
         'channel_a': SETTINGS_BASIC['dglab3']['channel_a']['strength_limit'],
         'channel_b': SETTINGS_BASIC['dglab3']['channel_b']['strength_limit'],
+        'overlimit_a': SETTINGS_BASIC['dglab3']['channel_a'].get('overlimit_max', 20),
+        'overlimit_b': SETTINGS_BASIC['dglab3']['channel_b'].get('overlimit_max', 20),
     }
 
 @app.route('/api/v1/shock/<channel>/<second>', endpoint='api_v1_shock')

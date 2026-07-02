@@ -43,10 +43,14 @@ class DGConnection():
 
         limit_a = SETTINGS['dglab3']['channel_a']['strength_limit']
         limit_b = SETTINGS['dglab3']['channel_b']['strength_limit']
+        overlimit_a = SETTINGS['dglab3']['channel_a'].get('overlimit_max', 20)
+        overlimit_b = SETTINGS['dglab3']['channel_b'].get('overlimit_max', 20)
 
         self.strength       = {'A':0, 'B':0}
         self.strength_max   = {'A':0, 'B':0}
         self.strength_limit = {'A':limit_a, 'B':limit_b}
+        self.overlimit_max  = {'A':overlimit_a, 'B':overlimit_b}
+        self.overlimit_active = {'A': False, 'B': False}
 
         WS_CONNECTIONS.add(self)
         # WS_CONNECTIONS_ID_REVERSE[self.uuid] = self
@@ -78,7 +82,10 @@ class DGConnection():
             logger.debug(f'ID {self.uuid}, RECV HB')
     
     def get_upper_strength(self, channel='A'):
-        return min(self.strength_max[channel], self.strength_limit[channel])
+        limit = self.strength_limit[channel]
+        if self.overlimit_active[channel]:
+            limit = limit + self.overlimit_max[channel]
+        return min(self.strength_max[channel], limit)
 
     async def set_strength(self, channel='A', mode='2', value=0, force=False):
         if not force:
@@ -178,10 +185,14 @@ class DGConnection():
     def refresh_limits_from_settings(cls, settings: dict):
         limit_a = settings['dglab3']['channel_a']['strength_limit']
         limit_b = settings['dglab3']['channel_b']['strength_limit']
+        overlimit_a = settings['dglab3']['channel_a'].get('overlimit_max', 20)
+        overlimit_b = settings['dglab3']['channel_b'].get('overlimit_max', 20)
         for conn in WS_CONNECTIONS:
             conn: cls
             conn.strength_limit['A'] = limit_a
             conn.strength_limit['B'] = limit_b
+            conn.overlimit_max['A'] = overlimit_a
+            conn.overlimit_max['B'] = overlimit_b
 
     @classmethod
     async def broadcast_strength_adjust(cls, channel='A', mode='1', value=0):
@@ -189,3 +200,10 @@ class DGConnection():
         for conn in WS_CONNECTIONS:
             conn: cls
             await conn.set_strength(channel, mode=mode, value=value, force=True)
+
+    @classmethod
+    def set_overlimit(cls, channel='A', active=True):
+        """Enable or disable overlimit for a channel across all connections."""
+        for conn in WS_CONNECTIONS:
+            conn: cls
+            conn.overlimit_active[channel] = active
