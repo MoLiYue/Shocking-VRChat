@@ -721,12 +721,19 @@ async def api_v1_sendwave(channel, repeat, wavedata):
     await command_queue.put(CommandPriority.API, channel, 'wave', value=wavestr, source_id='api_sendwave')
     return {'result': 'OK'}
 
-# --- Wave Test (manual pulse with strength + wave_scale control) ---
-@app.route('/api/v1/wave_test', methods=['POST'], endpoint='api_v1_wave_test')
-async def api_v1_wave_test():
-    """Send a test pulse with specified strength and wave_scale.
-    Body: {channel, strength, wave_scale, preset?, duration_s?}
-    """
+# --- Wave Test (looping test with start/stop control) ---
+_wave_test_state = {
+    'active': False,
+    'channel': 'A',
+    'strength': 50,
+    'wave_scale': 1.0,
+    'preset': None,
+    'wavestrs': [],
+}
+
+@app.route('/api/v1/wave_test/start', methods=['POST'], endpoint='api_v1_wave_test_start')
+async def api_v1_wave_test_start():
+    """Start looping wave test. Body: {channel, strength, wave_scale, preset?}"""
     from srv.wave_preset import WavePresetLibrary
     data = request.get_json()
     channel = data.get('channel', 'A').upper()
@@ -735,14 +742,12 @@ async def api_v1_wave_test():
     strength = max(0, min(200, int(data.get('strength', 50))))
     wave_scale = max(0.0, min(1.0, float(data.get('wave_scale', 1.0))))
     preset_name = data.get('preset', None)
-    duration_s = max(0.1, min(10.0, float(data.get('duration_s', 1.0))))
 
-    # Build wave string
+    # Build wave strings
     lib = WavePresetLibrary()
     if preset_name and lib.get(preset_name):
         wavestrs = lib.build_scaled_wavestrs(preset_name, wave_scale)
     else:
-        # Use default wave, scaled
         default_wave = json.dumps([DEFAULT_SHOCK_WAVE.strip('"')] * 10, separators=(',', ':'))
         wavestrs = [ShockHandler.scale_wavestr(default_wave, wave_scale)]
 
@@ -750,18 +755,94 @@ async def api_v1_wave_test():
     for conn in srv.WS_CONNECTIONS:
         await conn.set_strength(channel, mode='2', value=strength, force=True)
 
-    # Send waves for duration
-    repeat_count = max(1, int(duration_s / 0.1))  # each wavestr ~100ms
-    wave_idx = 0
-    sent = 0
-    for _ in range(repeat_count):
-        wavestr = wavestrs[wave_idx % len(wavestrs)] if wavestrs else json.dumps(['0A0A0A0A64646464'] * 10, separators=(',', ':'))
-        await command_queue.put(CommandPriority.API, channel, 'wave', value=wavestr, source_id='api_wave_test')
-        wave_idx += 1
-        sent += 1
+    _wave_test_state['active'] = True
+    _wave_test_state['channel'] = channel
+    _wave_test_state['strength'] = strength
+    _wave_test_state['wave_scale'] = wave_scale
+    _wave_test_state['preset'] = preset_name
+    _wave_test_state['wavestrs'] = wavestrs
 
-    logger.info(f"[wave_test] ch={channel} str={strength} scale={wave_scale} preset={preset_name or 'default'} dur={duration_s}s sent={sent}")
-    return {'result': 'OK', 'strength': strength, 'wave_scale': wave_scale, 'waves_sent': sent}
+    logger.info(f"[wave_test] Started: ch={channel} str={strength} scale={wave_scale} preset={preset_name or 'default'}")
+    return {'result': 'OK', 'active': True}
+
+@app.route('/api/v1/wave_test/stop', methods=['POST'], endpoint='api_v1_wave_test_stop')
+async def api_v1_wave_test_stop():
+    """Stop looping wave test."""
+    _wave_test_state['active'] = False
+    channel = _wave_test_state['channel']
+    # Clear wave on channel
+    for conn in srv.WS_CONNECTIONS:
+        await conn.clear_wave(channel)
+    logger.info(f"[wave_test] Stopped")
+    return {'result': 'OK', 'active': False}
+
+@app.route('/api/v1/wave_test/update', methods=['POST'], endpoint='api_v1_wave_test_update')
+async def api_v1_wave_test_update():
+    """Update running wave test params without restart. Body: {strength?, wave_scale?}"""
+    from srv.wave_preset import WavePresetLibrary
+    if not _wave_test_state['active']:
+        return {'error': 'test not running'}, 400
+    data = request.get_json()
+    channel = _wave_test_state['channel']
+    changed_wave = False
+
+    if 'strength' in data:
+        strength = max(0, min(200, int(data['strength'])))
+        _wave_test_state['strength'] = strength
+        for conn in srv.WS_CONNECTIONS:
+            await conn.set_strength(channel, mode='2', value=strength, force=True)
+
+    if 'wave_scale' in data:
+        wave_scale = max(0.0, min(1.0, float(data['wave_scale'])))
+        _wave_test_state['wave_scale'] = wave_scale
+        changed_wave = True
+
+    if 'preset' in data:
+        _wave_test_state['preset'] = data['preset']
+        changed_wave = True
+
+    if changed_wave:
+        lib = WavePresetLibrary()
+        preset_name = _wave_test_state['preset']
+        wave_scale = _wave_test_state['wave_scale']
+        if preset_name and lib.get(preset_name):
+            _wave_test_state['wavestrs'] = lib.build_scaled_wavestrs(preset_name, wave_scale)
+        else:
+            default_wave = json.dumps([DEFAULT_SHOCK_WAVE.strip('"')] * 10, separators=(',', ':'))
+            _wave_test_state['wavestrs'] = [ShockHandler.scale_wavestr(default_wave, wave_scale)]
+
+    return {'result': 'OK', 'state': {
+        'active': True,
+        'strength': _wave_test_state['strength'],
+        'wave_scale': _wave_test_state['wave_scale'],
+        'preset': _wave_test_state['preset'],
+    }}
+
+@app.route('/api/v1/wave_test/status', methods=['GET'], endpoint='api_v1_wave_test_status')
+async def api_v1_wave_test_status():
+    """Get wave test state."""
+    return {
+        'active': _wave_test_state['active'],
+        'channel': _wave_test_state['channel'],
+        'strength': _wave_test_state['strength'],
+        'wave_scale': _wave_test_state['wave_scale'],
+        'preset': _wave_test_state['preset'],
+    }
+
+async def _wave_test_loop():
+    """Background loop that sends waves continuously while test is active."""
+    wave_idx = 0
+    while True:
+        if _wave_test_state['active'] and _wave_test_state['wavestrs']:
+            wavestrs = _wave_test_state['wavestrs']
+            channel = _wave_test_state['channel']
+            wavestr = wavestrs[wave_idx % len(wavestrs)]
+            await command_queue.put(CommandPriority.API, channel, 'wave', value=wavestr, source_id='wave_test_loop')
+            wave_idx += 1
+            await asyncio.sleep(0.1)  # ~100ms per wavestr
+        else:
+            wave_idx = 0
+            await asyncio.sleep(0.1)
 
 def strip_basic_settings(settings: dict):
     ret = copy.deepcopy(settings)
@@ -1479,6 +1560,7 @@ async def wshandler(connection):
 async def async_main():
     asyncio.ensure_future(command_queue_processor())
     asyncio.ensure_future(_strength_boost_checker())
+    asyncio.ensure_future(_wave_test_loop())
     for handler in handlers:
         handler.start_background_jobs()
     try: 
