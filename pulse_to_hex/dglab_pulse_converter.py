@@ -191,20 +191,28 @@ def convert_to_ops(
         f0 = slider_to_freq(fs)
         f1 = slider_to_freq(fe)
 
-        unit_vals = fill_autopoints(pts) if pts else [0.0]
+        unit_vals = [v for v, _ in pts] if pts else [0.0]
         unit_strength = [int(round(max(0.0, min(100.0, v)))) for v in unit_vals]
         unit_len = max(1, len(unit_strength))
 
         dur_ticks = max(0, int(dur_ticks))
         if dur_ticks == 0:
             continue
-        # Each tick in the pulse is one sub-sample (one quarter of an op).
-        # Duration ticks directly gives the number of sub-samples needed.
-        repeats = int(math.ceil(dur_ticks / unit_len))
-        total = repeats * unit_len
+        # dur_ticks = number of ops (100ms each), each op has 4 sub-samples
+        total = dur_ticks * 4
 
+        # Resample the unit pattern to fill total sub-samples (linear interpolation)
         for i in range(total):
-            strength_samples.append(unit_strength[i % unit_len])
+            t = i / (total - 1) if total > 1 else 0.0
+            # Map t to position in the unit pattern
+            pos = t * (unit_len - 1)
+            idx = int(pos)
+            frac = pos - idx
+            if idx >= unit_len - 1:
+                strength_samples.append(unit_strength[-1])
+            else:
+                val = unit_strength[idx] * (1 - frac) + unit_strength[idx + 1] * frac
+                strength_samples.append(int(round(val)))
 
         if mode == 1:
             freq_samples.extend([f0] * total)
@@ -218,17 +226,19 @@ def convert_to_ops(
                 t = pos / (unit_len - 1) if unit_len > 1 else 0.0
                 freq_samples.append(int(round(f0 + (f1 - f0) * t)))
         elif mode == 4:
-            num_units = repeats
-            for u in range(num_units):
+            # Freq changes per unit-repetition within the duration
+            num_units = max(1, total // unit_len)
+            for i in range(total):
+                u = i // unit_len
                 t = u / (num_units - 1) if num_units > 1 else 0.0
-                fu = int(round(f0 + (f1 - f0) * t))
-                freq_samples.extend([fu] * unit_len)
+                freq_samples.append(int(round(f0 + (f1 - f0) * t)))
         else:
             freq_samples.extend([f0] * total)
 
     if rest_ticks and rest_ticks > 0:
-        freq_samples.extend([10] * rest_ticks)
-        strength_samples.extend([0] * rest_ticks)
+        rest_samples = rest_ticks * 4
+        freq_samples.extend([10] * rest_samples)
+        strength_samples.extend([0] * rest_samples)
 
     # Speed does NOT subsample — ticks represent sub-samples (4 per op).
     # The DG-LAB device always plays ops at 100ms each (4 sub-ticks of 25ms).
