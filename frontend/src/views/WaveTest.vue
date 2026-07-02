@@ -1,8 +1,10 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, nextTick, watch } from 'vue'
-import { api } from '@/api'
+import { ref, onMounted, onUnmounted, computed, nextTick, watch } from 'vue'
+import { api, apiPost } from '@/api'
 
-const channel = ref<'A' | 'B' | 'all'>('A')
+const channel = ref<'A' | 'B'>('A')
+const strength = ref(50)
+const waveScale = ref(1.0)
 const preset = ref('')
 const presets = ref<string[]>([])
 const playing = ref(false)
@@ -12,76 +14,72 @@ const msg = ref('')
 const canvasRef = ref<HTMLCanvasElement | null>(null)
 const waveData = ref<number[]>([])
 let pollTimer: ReturnType<typeof setInterval> | null = null
-let playTimer: ReturnType<typeof setInterval> | null = null
+let updateTimer: ReturnType<typeof setTimeout> | null = null
 
-// Preview
-const previewInfo = ref('')
 async function loadPresets() {
   const data = await api('/api/v1/wave_presets')
   presets.value = data.presets || []
-  if (presets.value.length && !preset.value) {
-    preset.value = presets.value[0]
-    previewWave()
-  }
 }
 
-async function previewWave() {
-  if (!preset.value) { previewInfo.value = ''; return }
+async function loadStatus() {
   try {
-    const data = await api(`/api/v1/wave_presets/${encodeURIComponent(preset.value)}/preview`)
-    previewInfo.value = `${data.ops_count} ops · ${(data.duration_ms / 1000).toFixed(1)}s 周期`
-  } catch { previewInfo.value = '加载失败' }
-}
-
-function getChannels(): string[] {
-  return channel.value === 'all' ? ['A', 'B'] : [channel.value]
-}
-
-async function sendWaveOnce() {
-  if (!preset.value) return
-  // Send 2 seconds of wave (will be called every ~1.5s to overlap and avoid gaps)
-  for (const ch of getChannels()) {
-    await api(`/api/v1/wave_preset/${ch}/${encodeURIComponent(preset.value)}/2`)
-  }
+    const data = await api('/api/v1/wave_test/status')
+    playing.value = data.active
+    if (data.active) {
+      channel.value = data.channel
+      strength.value = data.strength
+      waveScale.value = data.wave_scale
+      preset.value = data.preset || ''
+    }
+  } catch {}
 }
 
 async function start() {
-  if (!preset.value) {
-    msg.value = '请先选择波形预设'
-    return
-  }
-  playing.value = true
   msg.value = ''
-
-  // Send first wave immediately
-  await sendWaveOnce()
-
-  // Then send every 1.5s to keep continuous playback (2s waves with 0.5s overlap)
-  playTimer = setInterval(async () => {
-    if (!playing.value) return
-    await sendWaveOnce()
-  }, 1500)
-
-  startPolling()
+  try {
+    const data = await apiPost('/api/v1/wave_test/start', {
+      channel: channel.value,
+      strength: strength.value,
+      wave_scale: waveScale.value,
+      preset: preset.value || null,
+    })
+    if (data.result === 'OK') {
+      playing.value = true
+      startPolling()
+    } else {
+      msg.value = data.error || '启动失败'
+    }
+  } catch (e: any) {
+    msg.value = e.message || '请求失败'
+  }
 }
 
-function stop() {
-  playing.value = false
+async function stop() {
+  try {
+    const data = await apiPost('/api/v1/wave_test/stop', {})
+    if (data.result === 'OK') {
+      playing.value = false
+      stopPolling()
+    }
+  } catch {}
   msg.value = ''
-  if (playTimer) {
-    clearInterval(playTimer)
-    playTimer = null
-  }
-  stopPolling()
 }
 
-function quickTest() {
-  if (!preset.value) { msg.value = '请先选择波形预设'; return }
-  for (const ch of getChannels()) {
-    api(`/api/v1/wave_preset/${ch}/${encodeURIComponent(preset.value)}/1`)
-  }
-  msg.value = '已发送 1s 试探'
-  setTimeout(() => { if (msg.value === '已发送 1s 试探') msg.value = '' }, 2000)
+async function updateParams() {
+  if (!playing.value) return
+  try {
+    await apiPost('/api/v1/wave_test/update', {
+      strength: strength.value,
+      wave_scale: waveScale.value,
+      preset: preset.value || null,
+    })
+  } catch {}
+}
+
+function onParamChange() {
+  if (!playing.value) return
+  if (updateTimer) clearTimeout(updateTimer)
+  updateTimer = setTimeout(updateParams, 50)
 }
 
 // Real-time waveform polling
@@ -90,11 +88,11 @@ function startPolling() {
   pollTimer = setInterval(async () => {
     try {
       const data = await api('/api/v1/wave_history')
-      const ch = channel.value === 'all' ? 'A' : channel.value
+      const ch = channel.value
       waveData.value = data[ch] || []
       drawWave()
     } catch {}
-  }, 200)
+  }, 100)
 }
 
 function stopPolling() {
@@ -164,27 +162,35 @@ function drawWave() {
   ctx.fillText('0%', 2, h - 2)
 }
 
-watch(preset, previewWave)
+const effectiveOutput = computed(() => Math.round(strength.value * waveScale.value))
+const equivalentAt100 = computed(() => Math.min(1.0, strength.value * waveScale.value / 100).toFixed(2))
+
+watch([strength, waveScale, preset], onParamChange)
 
 onMounted(async () => {
   await loadPresets()
+  await loadStatus()
+  if (playing.value) {
+    startPolling()
+  }
   await nextTick()
   drawWave()
 })
 
 onUnmounted(() => {
-  stop()
+  stopPolling()
+  if (updateTimer) clearTimeout(updateTimer)
 })
 </script>
 
 <template>
   <div>
     <h1 class="gradient-text" style="font-size:var(--text-2xl);margin-bottom:var(--sp-2)">波形测试</h1>
-    <p class="page-desc">持续循环播放波形到设备，方便体感校准与波形对比。</p>
+    <p class="page-desc">持续循环播放波形到设备，实时调节强度和缩放观察体感差异。</p>
 
     <div class="wave-display">
       <div class="wave-header">
-        <span class="wave-title">实时波形 · 通道 {{ channel === 'all' ? 'A+B' : channel }}</span>
+        <span class="wave-title">实时波形 · 通道 {{ channel }}</span>
         <span class="wave-status" :class="{ active: playing }">{{ playing ? '▶ 播放中' : '⏹ 停止' }}</span>
       </div>
       <canvas ref="canvasRef" class="wave-canvas"></canvas>
@@ -199,43 +205,63 @@ onUnmounted(() => {
           <div class="channel-tabs">
             <button :class="{ active: channel === 'A' }" @click="channel = 'A'" :disabled="playing">A</button>
             <button :class="{ active: channel === 'B' }" @click="channel = 'B'" :disabled="playing">B</button>
-            <button :class="{ active: channel === 'all' }" @click="channel = 'all'" :disabled="playing">全部</button>
           </div>
           <p class="hint" v-if="playing">播放中不可切换通道，请先停止</p>
         </div>
 
         <div class="field">
+          <label>强度 <span class="val">{{ strength }}</span></label>
+          <input type="range" v-model.number="strength" min="0" max="200" step="1">
+          <p class="hint">设备实际输出强度 (0–200)</p>
+        </div>
+
+        <div class="field">
+          <label>波形缩放 (wave_scale) <span class="val">{{ waveScale.toFixed(2) }}</span></label>
+          <input type="range" v-model.number="waveScale" min="0" max="1" step="0.01">
+          <p class="hint">0 = 静音, 1 = 波形原始强度</p>
+        </div>
+
+        <div class="field">
           <label>波形预设</label>
-          <select v-model="preset" :disabled="playing">
+          <select v-model="preset">
+            <option value="">默认电击波</option>
             <option v-for="p in presets" :key="p" :value="p">{{ p.replace(/^pulse-/, '').replace(/-\d+$/, '') }}</option>
           </select>
-          <p class="preview-info" v-if="previewInfo">{{ previewInfo }}</p>
         </div>
 
         <div class="control-bar">
-          <button v-if="!playing" class="btn btn-primary btn-lg" @click="start">▶ 开始循环</button>
+          <button v-if="!playing" class="btn btn-primary btn-lg" @click="start">▶ 开始播放</button>
           <button v-else class="btn btn-danger btn-lg" @click="stop">⏹ 停止</button>
-          <button class="btn btn-success" @click="quickTest" :disabled="playing">试一下(1s)</button>
           <span class="msg" v-if="msg">{{ msg }}</span>
         </div>
       </section>
 
       <section class="card">
-        <h2>使用说明</h2>
+        <h2>等效分析</h2>
+        <div class="equiv-table">
+          <div class="equiv-row">
+            <span class="equiv-label">当前设置</span>
+            <span class="equiv-formula">强度 {{ strength }} × 缩放 {{ waveScale.toFixed(2) }}</span>
+          </div>
+          <div class="equiv-row highlight">
+            <span class="equiv-label">等效输出</span>
+            <span class="equiv-value">≈ {{ effectiveOutput }}</span>
+          </div>
+          <div class="equiv-row">
+            <span class="equiv-label">等效于 强度100 × 缩放</span>
+            <span class="equiv-value">{{ equivalentAt100 }}</span>
+          </div>
+        </div>
+
         <div class="calc-tip">
-          <p>💡 <strong>使用方法：</strong></p>
+          <p>💡 <strong>校准方法：</strong></p>
           <ol>
-            <li>选择通道和波形预设</li>
-            <li>点击 <strong>试一下(1s)</strong> 发送短暂测试波形</li>
-            <li>点击 <strong>开始循环</strong> 持续循环发送当前预设</li>
-            <li>体验波形效果后，点击 <strong>停止</strong></li>
+            <li>开始播放，感受 <code>强度=100, 缩放=1.0</code> 的体感</li>
+            <li>拖动强度到你的目标值（如 200）</li>
+            <li>实时调低缩放直到体感一致</li>
+            <li>记下此缩放值 → 填入配置的 <code>wave_scale</code></li>
           </ol>
-          <p style="margin-top:var(--sp-3)">📌 <strong>说明：</strong></p>
-          <ul>
-            <li>循环播放使用与 Dashboard 相同的波形发送接口</li>
-            <li>强度受设备端 APP 设定的上限控制</li>
-            <li>循环播放时不可切换通道和预设，需先停止</li>
-          </ul>
+          <p style="margin-top:var(--sp-2)">播放期间所有参数实时生效，无需停止重开。</p>
         </div>
       </section>
     </div>
@@ -258,21 +284,24 @@ onUnmounted(() => {
 .field select { width: 100%; }
 .val { color: var(--accent); font-variant-numeric: tabular-nums; font-weight: 600; }
 .hint { font-size: var(--text-xs); color: var(--text-muted); margin-top: var(--sp-1); }
-.preview-info { font-size: var(--text-xs); color: var(--text-secondary); margin-top: var(--sp-2); padding: var(--sp-2) var(--sp-3); background: rgba(139,92,246,0.05); border-radius: var(--radius-sm); }
 .channel-tabs { display: flex; gap: var(--sp-2); }
 .channel-tabs button { padding: var(--sp-2) var(--sp-5); border: 1px solid var(--border); border-radius: var(--radius-full); background: transparent; color: var(--text-muted); cursor: pointer; font-size: var(--text-sm); font-weight: 500; transition: all 0.15s; }
 .channel-tabs button.active { border-color: var(--accent); color: var(--accent); background: rgba(139,92,246,0.08); }
 .channel-tabs button:disabled { opacity: 0.5; cursor: not-allowed; }
-.control-bar { display: flex; align-items: center; gap: var(--sp-3); margin-top: var(--sp-4); flex-wrap: wrap; }
+.control-bar { display: flex; align-items: center; gap: var(--sp-3); margin-top: var(--sp-4); }
 .btn-lg { padding: var(--sp-3) var(--sp-6); font-size: var(--text-base); }
 .btn-danger { background: var(--danger); border-color: var(--danger); color: white; }
 .btn-danger:hover { opacity: 0.9; }
-.btn-success { background: var(--success); border-color: var(--success); color: white; }
-.btn-success:hover { opacity: 0.9; }
 .msg { font-size: var(--text-sm); color: var(--warning); }
+.equiv-table { margin-bottom: var(--sp-4); }
+.equiv-row { display: flex; justify-content: space-between; align-items: center; padding: var(--sp-2) var(--sp-3); border-radius: var(--radius-sm); font-size: var(--text-sm); }
+.equiv-row.highlight { background: rgba(139,92,246,0.08); border: 1px solid rgba(139,92,246,0.2); }
+.equiv-label { color: var(--text-muted); }
+.equiv-formula { color: var(--text-secondary); font-variant-numeric: tabular-nums; }
+.equiv-value { color: var(--accent); font-weight: 700; font-size: var(--text-base); font-variant-numeric: tabular-nums; }
 .calc-tip { padding: var(--sp-3); background: var(--bg-tertiary); border-radius: var(--radius-md); font-size: var(--text-sm); color: var(--text-secondary); }
 .calc-tip p { margin-bottom: var(--sp-2); }
-.calc-tip ol, .calc-tip ul { padding-left: var(--sp-4); }
+.calc-tip ol { padding-left: var(--sp-4); }
 .calc-tip li { margin-bottom: var(--sp-1); line-height: 1.5; }
 .calc-tip code { background: var(--bg-card); padding: 1px 5px; border-radius: var(--radius-sm); font-size: var(--text-xs); }
 @media (max-width: 768px) { .test-grid { grid-template-columns: 1fr; } }
