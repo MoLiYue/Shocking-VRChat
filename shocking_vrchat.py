@@ -818,6 +818,9 @@ async def _wave_test_loop():
             ch_key = f'channel_{channel.lower()}'
             SETTINGS['dglab3'][ch_key]['strength_limit'] = strength
             srv.DGConnection.refresh_limits_from_settings(SETTINGS)
+            # Also force-set strength directly (bypasses strength_max check)
+            for conn in srv.WS_CONNECTIONS:
+                await conn.set_strength(channel, mode='2', value=strength, force=True)
 
             # Build wave using same method as normal distance mode
             if preset_name and lib.get(preset_name):
