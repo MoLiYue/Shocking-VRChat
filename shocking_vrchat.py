@@ -741,10 +741,6 @@ async def api_v1_wave_test_start():
     wave_scale = max(0.0, min(1.0, float(data.get('wave_scale', 1.0))))
     preset_name = data.get('preset', None)
 
-    # Set strength
-    for conn in srv.WS_CONNECTIONS:
-        await conn.set_strength(channel, mode='2', value=strength, force=True)
-
     _wave_test_state['active'] = True
     _wave_test_state['channel'] = channel
     _wave_test_state['strength'] = strength
@@ -774,10 +770,7 @@ async def api_v1_wave_test_update():
     channel = _wave_test_state['channel']
 
     if 'strength' in data:
-        strength = max(0, min(200, int(data['strength'])))
-        _wave_test_state['strength'] = strength
-        for conn in srv.WS_CONNECTIONS:
-            await conn.set_strength(channel, mode='2', value=strength, force=True)
+        _wave_test_state['strength'] = max(0, min(200, int(data['strength'])))
 
     if 'wave_scale' in data:
         _wave_test_state['wave_scale'] = max(0.0, min(1.0, float(data['wave_scale'])))
@@ -808,6 +801,7 @@ async def _wave_test_loop():
     from srv.wave_preset import WavePresetLibrary
     wave_position = 0.0
     lib = WavePresetLibrary()
+    saved_limits = None
     while True:
         if _wave_test_state['active']:
             channel = _wave_test_state['channel']
@@ -815,9 +809,15 @@ async def _wave_test_loop():
             wave_scale = _wave_test_state['wave_scale']
             preset_name = _wave_test_state['preset']
 
-            # Force-set strength every iteration to override normal handler
-            for conn in srv.WS_CONNECTIONS:
-                await conn.set_strength(channel, mode='2', value=strength, force=True)
+            # Temporarily override strength_limit so normal handlers don't fight
+            if saved_limits is None:
+                saved_limits = {
+                    'A': SETTINGS['dglab3']['channel_a']['strength_limit'],
+                    'B': SETTINGS['dglab3']['channel_b']['strength_limit'],
+                }
+            ch_key = f'channel_{channel.lower()}'
+            SETTINGS['dglab3'][ch_key]['strength_limit'] = strength
+            srv.DGConnection.refresh_limits_from_settings(SETTINGS)
 
             # Build wave using same method as normal distance mode
             if preset_name and lib.get(preset_name):
@@ -839,6 +839,12 @@ async def _wave_test_loop():
             await command_queue.put(CommandPriority.API, channel, 'wave', value=wavestr, source_id='wave_test_loop')
             await asyncio.sleep(0.1)  # ~100ms per wavestr
         else:
+            # Restore original strength_limit when stopped
+            if saved_limits is not None:
+                SETTINGS['dglab3']['channel_a']['strength_limit'] = saved_limits['A']
+                SETTINGS['dglab3']['channel_b']['strength_limit'] = saved_limits['B']
+                srv.DGConnection.refresh_limits_from_settings(SETTINGS)
+                saved_limits = None
             wave_position = 0.0
             await asyncio.sleep(0.1)
 
