@@ -748,8 +748,8 @@ async def api_v1_wave_test_start():
     if preset_name and lib.get(preset_name):
         wavestrs = lib.build_scaled_wavestrs(preset_name, wave_scale)
     else:
-        default_wave = json.dumps([DEFAULT_SHOCK_WAVE.strip('"')] * 10, separators=(',', ':'))
-        wavestrs = [ShockHandler.scale_wavestr(default_wave, wave_scale)]
+        # DEFAULT_SHOCK_WAVE is already a valid wavestr JSON array
+        wavestrs = [ShockHandler.scale_wavestr(DEFAULT_SHOCK_WAVE, wave_scale)]
 
     # Set strength
     for conn in srv.WS_CONNECTIONS:
@@ -808,8 +808,7 @@ async def api_v1_wave_test_update():
         if preset_name and lib.get(preset_name):
             _wave_test_state['wavestrs'] = lib.build_scaled_wavestrs(preset_name, wave_scale)
         else:
-            default_wave = json.dumps([DEFAULT_SHOCK_WAVE.strip('"')] * 10, separators=(',', ':'))
-            _wave_test_state['wavestrs'] = [ShockHandler.scale_wavestr(default_wave, wave_scale)]
+            _wave_test_state['wavestrs'] = [ShockHandler.scale_wavestr(DEFAULT_SHOCK_WAVE, wave_scale)]
 
     return {'result': 'OK', 'state': {
         'active': True,
