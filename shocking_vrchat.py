@@ -835,6 +835,10 @@ async def _wave_test_loop():
         if _wave_test_state['active'] and _wave_test_state['wavestrs']:
             wavestrs = _wave_test_state['wavestrs']
             channel = _wave_test_state['channel']
+            strength = _wave_test_state['strength']
+            # Force-set strength every iteration to override normal handler
+            for conn in srv.WS_CONNECTIONS:
+                await conn.set_strength(channel, mode='2', value=strength, force=True)
             wavestr = wavestrs[wave_idx % len(wavestrs)]
             await command_queue.put(CommandPriority.API, channel, 'wave', value=wavestr, source_id='wave_test_loop')
             wave_idx += 1
