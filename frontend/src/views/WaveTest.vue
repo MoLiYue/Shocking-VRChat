@@ -67,7 +67,7 @@ async function updateParams() {
 function onParamChange() {
   if (!playing.value) return
   if (updateTimer) clearTimeout(updateTimer)
-  updateTimer = setTimeout(updateParams, 200)
+  updateTimer = setTimeout(updateParams, 50)
 }
 
 // Real-time waveform polling
@@ -197,13 +197,13 @@ onUnmounted(() => {
 
         <div class="field">
           <label>强度 <span class="val">{{ strength }}</span></label>
-          <input type="range" v-model.number="strength" min="0" max="200" step="1">
+          <input type="range" v-model.number="strength" min="0" max="200" step="1" @input="onParamChange">
           <p class="hint">设备实际输出强度 (0–200)</p>
         </div>
 
         <div class="field">
           <label>波形缩放 (wave_scale) <span class="val">{{ waveScale.toFixed(2) }}</span></label>
-          <input type="range" v-model.number="waveScale" min="0" max="1" step="0.01">
+          <input type="range" v-model.number="waveScale" min="0" max="1" step="0.01" @input="onParamChange">
           <p class="hint">0 = 静音, 1 = 波形原始强度</p>
         </div>
 
