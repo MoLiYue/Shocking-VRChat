@@ -57,7 +57,7 @@ SETTINGS_BASIC = {
                 },
             ],
             'mode': 'distance',
-            'strength_limit': 100,
+            'strength_limit': 5,
         },
         'channel_b': {
             'avatar_params': [
@@ -79,7 +79,7 @@ SETTINGS_BASIC = {
                 },
             ],
             'mode': 'distance',
-            'strength_limit': 100,
+            'strength_limit': 5,
         }
     },
     'version': CONFIG_FILE_VERSION,
@@ -507,6 +507,36 @@ async def _strength_boost_checker():
                 for conn in srv.WS_CONNECTIONS:
                     await conn.set_strength(ch, mode='0', value=boost_val, force=True)
                 logger.debug(f"[boost] channel={ch} reverted -{boost_val}")
+
+# --- Strength Limit (user-adjustable cap, persisted) ---
+@app.route('/api/v1/strength_limit', methods=['GET'], endpoint='api_v1_strength_limit_get')
+async def api_v1_strength_limit_get():
+    """Get current strength limits per channel."""
+    return {
+        'channel_a': SETTINGS_BASIC['dglab3']['channel_a']['strength_limit'],
+        'channel_b': SETTINGS_BASIC['dglab3']['channel_b']['strength_limit'],
+    }
+
+@app.route('/api/v1/strength_limit', methods=['POST'], endpoint='api_v1_strength_limit_set')
+async def api_v1_strength_limit_set():
+    """Set strength limits per channel. Immediately effective, no restart needed."""
+    data = request.get_json()
+    changed = False
+    for ch_key, ch_name in [('channel_a', 'A'), ('channel_b', 'B')]:
+        if ch_key in data:
+            val = max(0, min(200, int(data[ch_key])))
+            SETTINGS_BASIC['dglab3'][ch_key]['strength_limit'] = val
+            SETTINGS['dglab3'][ch_key]['strength_limit'] = val
+            changed = True
+    if changed:
+        config_save()
+        srv.DGConnection.refresh_limits_from_settings(SETTINGS)
+        logger.info(f"[strength_limit] Updated: A={SETTINGS_BASIC['dglab3']['channel_a']['strength_limit']}, B={SETTINGS_BASIC['dglab3']['channel_b']['strength_limit']}")
+    return {
+        'success': True,
+        'channel_a': SETTINGS_BASIC['dglab3']['channel_a']['strength_limit'],
+        'channel_b': SETTINGS_BASIC['dglab3']['channel_b']['strength_limit'],
+    }
 
 @app.route('/api/v1/shock/<channel>/<second>', endpoint='api_v1_shock')
 @allow_vrchat_only

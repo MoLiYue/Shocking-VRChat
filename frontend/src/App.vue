@@ -6,6 +6,7 @@ const sidebarOpen = ref(true)
 const navItems = [
   { path: '/dashboard', label: 'Dashboard', icon: '⚡' },
   { path: '/params', label: '参数管理', icon: '🎛' },
+  { path: '/strength', label: '强度上限', icon: '🔋' },
   { path: '/curve', label: '强度曲线', icon: '📈' },
   { path: '/combo', label: 'Combo', icon: '🔀' },
   { path: '/recorder', label: '录制回放', icon: '🎙' },
