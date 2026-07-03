@@ -130,14 +130,14 @@ function drawWave() {
     ctx.stroke()
   }
 
-  // Bar chart - fixed bar width, right-aligned (new data on right, scrolls left)
+  // Bar chart - right-aligned, adapts to any canvas width
   const data = waveData.value
   if (!data.length) return
-  const barW = 3  // fixed pixel width per sample
-  const maxBars = Math.floor(w / barW)
-  const bars = data.slice(-maxBars)  // take latest N samples
+  const maxBars = 800  // match backend buffer size
+  const bars = data.slice(-maxBars)
+  const barW = w / maxBars  // fixed time scale: full width = full buffer
 
-  // Draw from right: bars[bars.length-1] is rightmost (newest)
+  // Right-aligned: newest data at right edge
   const offsetX = w - bars.length * barW
 
   ctx.fillStyle = 'rgba(139,92,246,0.85)'
