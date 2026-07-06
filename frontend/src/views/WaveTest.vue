@@ -133,19 +133,15 @@ function drawWave() {
   // Bar chart - right-aligned, adapts to any canvas width
   const data = waveData.value
   if (!data.length) return
-  const maxBars = 800  // match backend buffer size
-  const bars = data.slice(-maxBars)
-  const barW = w / maxBars  // fixed time scale: full width = full buffer
-
-  // Right-aligned: newest data at right edge
-  const offsetX = w - bars.length * barW
+  const maxBars = data.length  // backend returns fixed-length snapshot
+  const barW = w / maxBars     // full width = full snapshot window
 
   ctx.fillStyle = 'rgba(139,92,246,0.85)'
-  for (let i = 0; i < bars.length; i++) {
-    const v = Math.max(0, Math.min(100, bars[i]))
+  for (let i = 0; i < data.length; i++) {
+    const v = Math.max(0, Math.min(100, data[i]))
     if (v <= 0) continue
     const barH = (v / 100) * (h - 4)
-    const x = offsetX + i * barW
+    const x = i * barW
     const y = h - barH
     ctx.fillRect(x, y, barW, barH)
   }
