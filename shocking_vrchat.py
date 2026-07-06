@@ -1054,7 +1054,7 @@ def api_v1_combo_set(channel):
     return jsonify({'success': True})
 
 # --- Curve Mapping ---
-DEFAULT_CURVE_POINTS = [{'x': 0, 'y': 0}, {'x': 0.1, 'y': 0}, {'x': 1, 'y': 1}]  # ReLU
+DEFAULT_CURVE_POINTS = [{'x': 0, 'y': 0}, {'x': 1, 'y': 1}]  # linear
 _curve_config = {}  # key: param_path or 'channel_a'/'channel_b', value: points list
 
 def _get_curve_config_path():
