@@ -817,6 +817,10 @@ async def _wave_test_loop():
                         'B': SETTINGS['dglab3']['channel_b']['strength_limit'],
                     }
                     DGConnection._suppress_clear = True
+                    # Suppress OSC-triggered waves to avoid interference
+                    command_queue.set_enabled(CommandPriority.OSC_INTERACTION, False)
+                    command_queue.set_enabled(CommandPriority.OSC_PANEL, False)
+                    command_queue.set_enabled(CommandPriority.GAME, False)
                 ch_key = f'channel_{channel.lower()}'
                 SETTINGS['dglab3'][ch_key]['strength_limit'] = strength
                 DGConnection.refresh_limits_from_settings(SETTINGS)
@@ -850,6 +854,10 @@ async def _wave_test_loop():
                     SETTINGS['dglab3']['channel_b']['strength_limit'] = saved_limits['B']
                     DGConnection.refresh_limits_from_settings(SETTINGS)
                     DGConnection._suppress_clear = False
+                    # Restore OSC-triggered waves
+                    command_queue.set_enabled(CommandPriority.OSC_INTERACTION, True)
+                    command_queue.set_enabled(CommandPriority.OSC_PANEL, True)
+                    command_queue.set_enabled(CommandPriority.GAME, True)
                     saved_limits = None
                 wave_position = 0.0
                 await asyncio.sleep(0.1)
