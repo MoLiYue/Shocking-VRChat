@@ -1,6 +1,17 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, computed, nextTick, watch } from 'vue'
+import { ref, onMounted, onUnmounted, computed, watch } from 'vue'
 import { api, apiPost } from '@/api'
+import { Bar } from 'vue-chartjs'
+import {
+  Chart as ChartJS,
+  BarElement,
+  CategoryScale,
+  LinearScale,
+  Tooltip,
+  Legend,
+} from 'chart.js'
+
+ChartJS.register(BarElement, CategoryScale, LinearScale, Tooltip, Legend)
 
 const channel = ref<'A' | 'B'>('A')
 const strength = ref(50)
@@ -10,11 +21,55 @@ const presets = ref<string[]>([])
 const playing = ref(false)
 const msg = ref('')
 
-// Waveform display
-const canvasRef = ref<HTMLCanvasElement | null>(null)
+// Waveform data
 const waveData = ref<number[]>([])
 let pollTimer: ReturnType<typeof setInterval> | null = null
 let updateTimer: ReturnType<typeof setTimeout> | null = null
+
+// Chart.js config
+const chartData = computed(() => ({
+  labels: waveData.value.map(() => ''),
+  datasets: [{
+    data: waveData.value,
+    backgroundColor: waveData.value.map(v => v > 0 ? 'rgba(139,92,246,0.85)' : 'transparent'),
+    borderWidth: 0,
+    barPercentage: 1.0,
+    categoryPercentage: 1.0,
+  }]
+}))
+
+const chartOptions = {
+  responsive: true,
+  maintainAspectRatio: false,
+  animation: false as const,
+  plugins: {
+    legend: { display: false },
+    tooltip: {
+      callbacks: {
+        label: (ctx: any) => `${ctx.raw}%`,
+      }
+    }
+  },
+  scales: {
+    x: {
+      display: false,
+      grid: { display: false },
+    },
+    y: {
+      min: 0,
+      max: 100,
+      grid: {
+        color: 'rgba(139,92,246,0.1)',
+      },
+      ticks: {
+        color: 'rgba(255,255,255,0.4)',
+        font: { size: 10 },
+        callback: (v: any) => v + '%',
+        stepSize: 25,
+      }
+    }
+  }
+}
 
 async function loadPresets() {
   const data = await api('/api/v1/wave_presets')
@@ -82,7 +137,6 @@ function onParamChange() {
   updateTimer = setTimeout(updateParams, 50)
 }
 
-// Real-time waveform polling
 function startPolling() {
   if (pollTimer) return
   pollTimer = setInterval(async () => {
@@ -90,9 +144,8 @@ function startPolling() {
       const data = await api('/api/v1/wave_history')
       const ch = channel.value
       waveData.value = data[ch] || []
-      drawWave()
     } catch {}
-  }, 100)
+  }, 200)
 }
 
 function stopPolling() {
@@ -100,57 +153,6 @@ function stopPolling() {
     clearInterval(pollTimer)
     pollTimer = null
   }
-}
-
-function drawWave() {
-  const canvas = canvasRef.value
-  if (!canvas) return
-  const ctx = canvas.getContext('2d')
-  if (!ctx) return
-  const dpr = window.devicePixelRatio || 1
-  const rect = canvas.getBoundingClientRect()
-  canvas.width = rect.width * dpr
-  canvas.height = rect.height * dpr
-  ctx.scale(dpr, dpr)
-  const w = rect.width
-  const h = rect.height
-
-  // Clear
-  ctx.fillStyle = 'rgba(15, 15, 30, 0.95)'
-  ctx.fillRect(0, 0, w, h)
-
-  // Grid
-  ctx.strokeStyle = 'rgba(139,92,246,0.1)'
-  ctx.lineWidth = 1
-  for (let y = 0; y <= 100; y += 25) {
-    const py = h - (y / 100) * h
-    ctx.beginPath()
-    ctx.moveTo(0, py)
-    ctx.lineTo(w, py)
-    ctx.stroke()
-  }
-
-  // Bar chart - right-aligned, adapts to any canvas width
-  const data = waveData.value
-  if (!data.length) return
-  const maxBars = data.length  // backend returns fixed-length snapshot
-  const barW = w / maxBars     // full width = full snapshot window
-
-  ctx.fillStyle = 'rgba(139,92,246,0.85)'
-  for (let i = 0; i < data.length; i++) {
-    const v = Math.max(0, Math.min(100, data[i]))
-    if (v <= 0) continue
-    const barH = (v / 100) * (h - 4)
-    const x = i * barW
-    const y = h - barH
-    ctx.fillRect(x, y, barW, barH)
-  }
-
-  // Labels
-  ctx.fillStyle = 'rgba(255,255,255,0.4)'
-  ctx.font = '10px Inter, sans-serif'
-  ctx.fillText('100%', 2, 12)
-  ctx.fillText('0%', 2, h - 2)
 }
 
 const effectiveOutput = computed(() => Math.round(strength.value * waveScale.value))
@@ -164,8 +166,6 @@ onMounted(async () => {
   if (playing.value) {
     startPolling()
   }
-  await nextTick()
-  drawWave()
 })
 
 onUnmounted(() => {
@@ -184,7 +184,9 @@ onUnmounted(() => {
         <span class="wave-title">实时波形 · 通道 {{ channel }}</span>
         <span class="wave-status" :class="{ active: playing }">{{ playing ? '▶ 播放中' : '⏹ 停止' }}</span>
       </div>
-      <canvas ref="canvasRef" class="wave-canvas"></canvas>
+      <div class="chart-container">
+        <Bar :data="chartData" :options="chartOptions" />
+      </div>
     </div>
 
     <div class="test-grid">
@@ -266,7 +268,7 @@ onUnmounted(() => {
 .wave-title { font-size: var(--text-sm); color: var(--text-secondary); font-weight: 500; }
 .wave-status { font-size: var(--text-xs); padding: var(--sp-1) var(--sp-2); border-radius: var(--radius-full); background: var(--bg-tertiary); color: var(--text-muted); }
 .wave-status.active { background: rgba(139,92,246,0.15); color: var(--accent); }
-.wave-canvas { width: 100%; height: 150px; display: block; }
+.chart-container { height: 150px; padding: var(--sp-2) var(--sp-3); }
 .test-grid { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-4); }
 .field { margin-bottom: var(--sp-4); }
 .field:last-child { margin-bottom: 0; }
