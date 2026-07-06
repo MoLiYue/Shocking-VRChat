@@ -835,14 +835,14 @@ async def _wave_test_loop():
                         texture_floor=0.35,
                         sample_step=1.0,
                     )
-                    wave_position += 4.0  # advance like normal mode
+                    wave_position += 40.0  # advance by full window (10 ops × 4 samples)
 
                 if not wavestr:
                     # Default wave or preset failed: scale the default shock wave
                     wavestr = ShockHandler.scale_wavestr(DEFAULT_SHOCK_WAVE, wave_scale)
 
                 await command_queue.put(CommandPriority.API, channel, 'wave', value=wavestr, source_id='wave_test_loop')
-                await asyncio.sleep(0.1)
+                await asyncio.sleep(0.9)  # 10 ops = 1s playback, send next batch 0.1s early
             else:
                 # Restore original strength_limit when stopped
                 if saved_limits is not None:
