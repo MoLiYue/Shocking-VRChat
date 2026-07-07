@@ -1,17 +1,6 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, computed, watch, nextTick } from 'vue'
+import { ref, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { api, apiPost } from '@/api'
-import { Bar } from 'vue-chartjs'
-import {
-  Chart as ChartJS,
-  BarElement,
-  CategoryScale,
-  LinearScale,
-  Tooltip,
-  Legend,
-} from 'chart.js'
-
-ChartJS.register(BarElement, CategoryScale, LinearScale, Tooltip, Legend)
 
 const channel = ref<'A' | 'B'>('A')
 const strength = ref(50)
@@ -22,7 +11,9 @@ const playing = ref(false)
 const msg = ref('')
 
 // Waveform data (real-time)
-const waveData = ref<number[]>([])
+interface WaveSample { s: number; f: number }
+const waveData = ref<WaveSample[]>([])
+const rtCanvasRef = ref<HTMLCanvasElement | null>(null)
 let pollTimer: ReturnType<typeof setInterval> | null = null
 let updateTimer: ReturnType<typeof setTimeout> | null = null
 
@@ -37,49 +28,69 @@ interface SectionData {
 const previewSections = ref<SectionData[]>([])
 const previewSpeed = ref(1)
 
-// Chart.js config (real-time)
-const chartData = computed(() => ({
-  labels: waveData.value.map(() => ''),
-  datasets: [{
-    data: waveData.value,
-    backgroundColor: waveData.value.map(v => v > 0 ? 'rgba(139,92,246,0.85)' : 'transparent'),
-    borderWidth: 0,
-    barPercentage: 1.0,
-    categoryPercentage: 1.0,
-  }]
-}))
+// Real-time waveform canvas drawing
+function drawRealtime() {
+  const canvas = rtCanvasRef.value
+  if (!canvas) return
+  const ctx = canvas.getContext('2d')
+  if (!ctx) return
 
-const chartOptions = {
-  responsive: true,
-  maintainAspectRatio: false,
-  animation: false as const,
-  plugins: {
-    legend: { display: false },
-    tooltip: {
-      callbacks: {
-        label: (ctx: any) => `${ctx.raw}%`,
-      }
-    }
-  },
-  scales: {
-    x: {
-      display: false,
-      grid: { display: false },
-    },
-    y: {
-      min: 0,
-      max: 100,
-      grid: {
-        color: 'rgba(139,92,246,0.1)',
-      },
-      ticks: {
-        color: 'rgba(255,255,255,0.4)',
-        font: { size: 10 },
-        callback: (v: any) => v + '%',
-        stepSize: 25,
-      }
-    }
+  const dpr = window.devicePixelRatio || 1
+  const rect = canvas.getBoundingClientRect()
+  canvas.width = rect.width * dpr
+  canvas.height = rect.height * dpr
+  ctx.scale(dpr, dpr)
+  const w = rect.width
+  const h = rect.height
+
+  // Clear
+  ctx.fillStyle = 'rgba(15, 15, 30, 0.95)'
+  ctx.fillRect(0, 0, w, h)
+
+  // Grid
+  ctx.strokeStyle = 'rgba(139,92,246,0.08)'
+  ctx.lineWidth = 1
+  for (let pct = 25; pct <= 75; pct += 25) {
+    const py = h - (pct / 100) * h
+    ctx.beginPath(); ctx.moveTo(0, py); ctx.lineTo(w, py); ctx.stroke()
   }
+
+  const data = waveData.value
+  if (!data.length) return
+
+  // Calculate total width: sum of all pulse intervals (proportional to freq)
+  // freq_byte 240→10ms(narrow), 10→1000ms(wide)
+  const totalWidth = data.reduce((sum, d) => {
+    const interval = 10 + (240 - d.f) * (1000 - 10) / (240 - 10)
+    return sum + interval
+  }, 0)
+
+  if (totalWidth <= 0) return
+
+  // Draw bars with width proportional to frequency interval
+  let x = 0
+  for (const sample of data) {
+    const interval = 10 + (240 - sample.f) * (1000 - 10) / (240 - 10)
+    const barW = (interval / totalWidth) * w
+    const barH = (sample.s / 100) * h
+
+    if (sample.s > 0) {
+      // Color: high freq = purple, low freq = reddish
+      const freqT = (sample.f - 10) / 230
+      const r = Math.round(139 + (1 - freqT) * 100)
+      const g = Math.round(92 * freqT)
+      const b = Math.round(246 * freqT + 100 * (1 - freqT))
+      ctx.fillStyle = `rgba(${r},${g},${b},0.85)`
+      ctx.fillRect(x, h - barH, Math.max(barW - 0.3, 0.5), barH)
+    }
+    x += barW
+  }
+
+  // Y labels
+  ctx.fillStyle = 'rgba(255,255,255,0.35)'
+  ctx.font = '9px Inter, sans-serif'
+  ctx.fillText('100%', 2, 10)
+  ctx.fillText('0%', 2, h - 2)
 }
 
 async function loadPresets() {
@@ -269,6 +280,7 @@ function startPolling() {
       const data = await api('/api/v1/wave_history')
       const ch = channel.value
       waveData.value = data[ch] || []
+      drawRealtime()
     } catch {}
   }, 200)
 }
@@ -310,8 +322,11 @@ onUnmounted(() => {
         <span class="wave-title">实时波形 · 通道 {{ channel }}</span>
         <span class="wave-status" :class="{ active: playing }">{{ playing ? '▶ 播放中' : '⏹ 停止' }}</span>
       </div>
-      <div class="chart-container">
-        <Bar :data="chartData" :options="chartOptions" />
+      <canvas ref="rtCanvasRef" class="rt-canvas"></canvas>
+      <div class="rt-legend">
+        <span>柱宽=脉冲间隔(占空比)</span>
+        <span><span class="dot purple"></span>高频(柔和)</span>
+        <span><span class="dot red"></span>低频(尖锐)</span>
       </div>
     </div>
 
@@ -379,7 +394,11 @@ onUnmounted(() => {
 .wave-title { font-size: var(--text-sm); color: var(--text-secondary); font-weight: 500; }
 .wave-status { font-size: var(--text-xs); padding: var(--sp-1) var(--sp-2); border-radius: var(--radius-full); background: var(--bg-tertiary); color: var(--text-muted); }
 .wave-status.active { background: rgba(139,92,246,0.15); color: var(--accent); }
-.chart-container { height: 150px; padding: var(--sp-2) var(--sp-3); }
+.rt-canvas { width: 100%; height: 150px; display: block; }
+.rt-legend { display: flex; gap: var(--sp-4); padding: var(--sp-2) var(--sp-4); font-size: var(--text-xs); color: var(--text-muted); border-top: 1px solid var(--border); }
+.rt-legend .dot { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 3px; vertical-align: middle; }
+.rt-legend .dot.purple { background: rgba(139,92,246,0.85); }
+.rt-legend .dot.red { background: rgba(239,92,100,0.85); }
 .test-grid { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-4); }
 .field { margin-bottom: var(--sp-4); }
 .field:last-child { margin-bottom: 0; }

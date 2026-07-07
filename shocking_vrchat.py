@@ -1555,14 +1555,16 @@ _wave_history = {'A': collections.deque(maxlen=800), 'B': collections.deque(maxl
 _wave_history_last_update = {'A': 0.0, 'B': 0.0}
 
 def _record_wave(channel, wavestr):
-    """Parse wavestr and append strength samples to history."""
+    """Parse wavestr and append (strength, freq) samples to history."""
     try:
         channel = channel.upper()
         ops = json.loads(wavestr)
         for op in ops:
-            # Each op is 16 hex chars: 8 freq + 8 strength (4 sub-steps)
-            strengths = [int(op[8+i*2:10+i*2], 16) for i in range(4)]
-            _wave_history[channel].extend(strengths)
+            # Each op is 16 hex chars: 8 freq + 8 strength (4 pulses)
+            for i in range(4):
+                freq = int(op[i*2:i*2+2], 16)
+                strength = int(op[8+i*2:10+i*2], 16)
+                _wave_history[channel].append({'s': strength, 'f': freq})
         _wave_history_last_update[channel] = time.monotonic()
     except Exception:
         pass
@@ -1586,6 +1588,8 @@ def _get_wave_history_snapshot(channel):
         return []
 
     last_update = _wave_history_last_update.get(channel, 0.0)
+    zero_sample = {'s': 0, 'f': 10}
+
     if last_update <= 0.0:
         return history[-200:]
 
@@ -1596,13 +1600,13 @@ def _get_wave_history_snapshot(channel):
     if elapsed_samples <= 0:
         return history[-200:]
     if elapsed_samples >= 200:
-        return [0] * 200
+        return [zero_sample] * 200
 
     # Take the most recent samples and pad trailing zeros for elapsed silence
     tail = history[-200:]
     if elapsed_samples >= len(tail):
-        return [0] * len(tail)
-    return tail[elapsed_samples:] + [0] * elapsed_samples
+        return [zero_sample] * len(tail)
+    return tail[elapsed_samples:] + [zero_sample] * elapsed_samples
 
 
 async def command_queue_processor():
