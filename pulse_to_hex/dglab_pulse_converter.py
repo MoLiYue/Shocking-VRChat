@@ -316,15 +316,13 @@ def convert_to_ops(
             strength_hex = "".join(f"{b:02X}" for b in strength_bytes)
             ops.append(freq_hex + strength_hex)
 
-    # Append rest silence: rest value 0-99 maps to 0-1s, each pulse = 0.1s
+    # Append rest silence: rest_ticks pulses of zero strength
     if header and header.rest_ticks > 0:
-        rest_seconds = header.rest_ticks / 99.0  # 0-99 → 0-1s
-        rest_pulses = round(rest_seconds / 0.1)  # number of 0-strength pulses
-        if rest_pulses > 0:
-            # Pad to multiple of 4 (extra zeros don't matter for silence)
-            padded = rest_pulses + ((-rest_pulses) % 4)
-            for _ in range(padded // 4):
-                ops.append("0A0A0A0A" + "00000000")
+        rest_pulses = header.rest_ticks
+        # Pad to multiple of 4
+        padded = rest_pulses + ((-rest_pulses) % 4)
+        for _ in range(padded // 4):
+            ops.append("0A0A0A0A" + "00000000")
 
     # Build wavestrs (chunked JSON arrays for WS protocol)
     wavestrs: List[str] = []
