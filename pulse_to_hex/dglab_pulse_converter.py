@@ -276,46 +276,42 @@ def convert_to_ops(
         else:
             unit_freqs = [f_low] * n_points
 
-        # Generate ops for all repetitions
-        total_ops = repeats * n_points
-        for op_idx in range(total_ops):
-            unit_idx = op_idx % n_points
-            repeat_idx = op_idx // n_points
-            next_unit_idx = (unit_idx + 1) % n_points
+        # Generate ops: every 4 points pack into 1 op (4 pulses × 0.1s = 0.4s per op)
+        # Build the full sequence of points (all repetitions)
+        all_strengths: List[float] = []
+        all_freqs: List[float] = []
+        total_points = repeats * n_points
 
-            # Strength: interpolate 4 sub-steps between current and next point
-            s_curr = strengths[unit_idx]
-            s_next = strengths[next_unit_idx]
+        for pt_idx in range(total_points):
+            unit_idx = pt_idx % n_points
+            repeat_idx = pt_idx // n_points
 
-            # Frequency: depends on mode
+            # Strength from point list
+            all_strengths.append(strengths[unit_idx])
+
+            # Frequency depends on mode
             if sec.freq_mode == 2:
                 # Linear across entire section
-                t = op_idx / (total_ops - 1) if total_ops > 1 else 0.0
-                t_next = (op_idx + 1) / (total_ops - 1) if total_ops > 1 else 0.0
-                f_curr = f_low + (f_high - f_low) * t
-                f_next_val = f_low + (f_high - f_low) * t_next
+                t = pt_idx / (total_points - 1) if total_points > 1 else 0.0
+                all_freqs.append(f_low + (f_high - f_low) * t)
             elif sec.freq_mode == 4:
                 # Stepped per repetition
                 t = repeat_idx / (repeats - 1) if repeats > 1 else 0.0
-                f_curr = f_low + (f_high - f_low) * t
-                f_next_val = f_curr  # same within a repeat
+                all_freqs.append(f_low + (f_high - f_low) * t)
             elif sec.freq_mode == 3:
-                f_curr = float(unit_freqs[unit_idx])
-                f_next_val = float(unit_freqs[next_unit_idx])
+                all_freqs.append(float(unit_freqs[unit_idx]))
             else:
-                f_curr = float(f_low)
-                f_next_val = float(f_low)
+                all_freqs.append(float(f_low))
 
-            # Build 4 sub-steps with linear interpolation
-            freq_bytes = []
-            strength_bytes = []
-            for sub in range(4):
-                t_sub = sub / 4.0  # 0, 0.25, 0.5, 0.75
-                s_val = s_curr + (s_next - s_curr) * t_sub
-                f_val = f_curr + (f_next_val - f_curr) * t_sub
-                freq_bytes.append(max(10, min(240, int(round(f_val)))))
-                strength_bytes.append(max(0, min(100, int(round(s_val)))))
+        # Pad to multiple of 4 (repeat last value)
+        while len(all_strengths) % 4 != 0:
+            all_strengths.append(all_strengths[-1])
+            all_freqs.append(all_freqs[-1])
 
+        # Pack every 4 points into 1 op
+        for i in range(0, len(all_strengths), 4):
+            freq_bytes = [max(10, min(240, int(round(all_freqs[i + j])))) for j in range(4)]
+            strength_bytes = [max(0, min(100, int(round(all_strengths[i + j])))) for j in range(4)]
             freq_hex = "".join(f"{b:02X}" for b in freq_bytes)
             strength_hex = "".join(f"{b:02X}" for b in strength_bytes)
             ops.append(freq_hex + strength_hex)
