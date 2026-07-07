@@ -281,32 +281,43 @@ def convert_to_ops(
         for op_idx in range(total_ops):
             unit_idx = op_idx % n_points
             repeat_idx = op_idx // n_points
+            next_unit_idx = (unit_idx + 1) % n_points
 
-            # Strength: from the unit pattern
-            strength_pct = strengths[unit_idx]
-            strength_byte = int(round(strength_pct))
+            # Strength: interpolate 4 sub-steps between current and next point
+            s_curr = strengths[unit_idx]
+            s_next = strengths[next_unit_idx]
 
             # Frequency: depends on mode
             if sec.freq_mode == 2:
                 # Linear across entire section
                 t = op_idx / (total_ops - 1) if total_ops > 1 else 0.0
-                freq_byte = int(round(f_low + (f_high - f_low) * t))
+                t_next = (op_idx + 1) / (total_ops - 1) if total_ops > 1 else 0.0
+                f_curr = f_low + (f_high - f_low) * t
+                f_next_val = f_low + (f_high - f_low) * t_next
             elif sec.freq_mode == 4:
                 # Stepped per repetition
                 t = repeat_idx / (repeats - 1) if repeats > 1 else 0.0
-                freq_byte = int(round(f_low + (f_high - f_low) * t))
+                f_curr = f_low + (f_high - f_low) * t
+                f_next_val = f_curr  # same within a repeat
             elif sec.freq_mode == 3:
-                freq_byte = unit_freqs[unit_idx]
+                f_curr = float(unit_freqs[unit_idx])
+                f_next_val = float(unit_freqs[next_unit_idx])
             else:
-                freq_byte = f_low
+                f_curr = float(f_low)
+                f_next_val = float(f_low)
 
-            freq_byte = max(10, min(240, freq_byte))
-            strength_byte = max(0, min(100, strength_byte))
+            # Build 4 sub-steps with linear interpolation
+            freq_bytes = []
+            strength_bytes = []
+            for sub in range(4):
+                t_sub = sub / 4.0  # 0, 0.25, 0.5, 0.75
+                s_val = s_curr + (s_next - s_curr) * t_sub
+                f_val = f_curr + (f_next_val - f_curr) * t_sub
+                freq_bytes.append(max(10, min(240, int(round(f_val)))))
+                strength_bytes.append(max(0, min(100, int(round(s_val)))))
 
-            # Each op has 4 sub-steps (4×25ms = 100ms)
-            # Use the same freq and strength for all 4 sub-steps within one op
-            freq_hex = f"{freq_byte:02X}" * 4
-            strength_hex = f"{strength_byte:02X}" * 4
+            freq_hex = "".join(f"{b:02X}" for b in freq_bytes)
+            strength_hex = "".join(f"{b:02X}" for b in strength_bytes)
             ops.append(freq_hex + strength_hex)
 
     # Append rest silence if header specifies it
