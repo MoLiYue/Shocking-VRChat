@@ -46,8 +46,8 @@ Dungeonlab+pulse:[header=]section0+section+section1+section+section2+section+...
 
 | 位置 | 字段 | 含义 | 取值 |
 |------|------|------|------|
-| [0] | freq_start | 频率起始值（滑块位置） | 0-100 |
-| [1] | freq_end | 频率结束值（滑块位置） | 0-100 |
+| [0] | freq_low | 频率下限（滑块位置）；模式1时为固定频率值 | 0-83 |
+| [1] | freq_high | 频率上限（滑块位置）；模式1时忽略 | 0-83 |
 | [2] | duration | Section 最小时长（tick 数，每 tick=100ms） | 0-99+ |
 | [3] | freq_mode | 频率变化模式 | 1-4 |
 | [4] | enabled | 是否启用 | 0=禁用, 1=启用 |
@@ -107,10 +107,12 @@ Point List 中的每个点代表一个脉冲（1 tick = 100ms = 0.1s）。设 Po
 
 | 值 | 模式 | 描述 |
 |----|------|------|
-| 1 | 固定 | 整个 Section 使用 freq_start |
-| 2 | 线性渐变 | 从 freq_start 到 freq_end 线性过渡 |
-| 3 | 循环渐变 | 每个波形单元内从 freq_start 到 freq_end 循环 |
-| 4 | 分段递进 | 每重复一次波形单元，频率递进一级 |
+| 1 | 固定 | 整个 Section 使用 freq_low 作为固定频率，freq_high 忽略 |
+| 2 | 线性渐变 | 频率从 freq_low 到 freq_high 线性过渡（跨整个 Section 时长） |
+| 3 | 循环渐变 | 每个波形单元内频率从 freq_low 到 freq_high 循环一次 |
+| 4 | 分段递进 | 每重复一次波形单元，频率递进一级（从 freq_low 到 freq_high） |
+
+> 注意：freq_low 不一定小于 freq_high。当 freq_low > freq_high 时，频率变化方向相反（从低频向高频渐变）。
 
 #### enabled 字段
 

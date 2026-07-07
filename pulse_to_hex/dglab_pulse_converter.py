@@ -106,8 +106,8 @@ class PulseHeader:
 
 @dataclass
 class PulseSection:
-    freq_start: int      # frequency slider start (0-83)
-    freq_end: int        # frequency slider end (0-83)
+    freq_low: int        # frequency slider low bound (0-83); used as fixed value in mode 1
+    freq_high: int       # frequency slider high bound (0-83); ignored in mode 1
     duration: int        # minimum duration in ticks
     freq_mode: int       # 1=fixed, 2=linear, 3=cycle, 4=stepped
     enabled: bool        # whether this section is active
@@ -169,8 +169,8 @@ def parse_pulse(pulse_text: str) -> Tuple[Optional[PulseHeader], List[PulseSecti
                 except ValueError:
                     pass
 
-        freq_start = meta[0] if len(meta) > 0 else 0
-        freq_end = meta[1] if len(meta) > 1 else freq_start
+        freq_low = meta[0] if len(meta) > 0 else 0
+        freq_high = meta[1] if len(meta) > 1 else freq_low
         duration = meta[2] if len(meta) > 2 else 0
         freq_mode = meta[3] if len(meta) > 3 else 1
         enabled = bool(meta[4]) if len(meta) > 4 else True
@@ -195,8 +195,8 @@ def parse_pulse(pulse_text: str) -> Tuple[Optional[PulseHeader], List[PulseSecti
                 points.append((val, flag))
 
         sections.append(PulseSection(
-            freq_start=freq_start,
-            freq_end=freq_end,
+            freq_low=freq_low,
+            freq_high=freq_high,
             duration=duration,
             freq_mode=freq_mode,
             enabled=enabled,
@@ -249,30 +249,32 @@ def convert_to_ops(
         # Get strength values (each point = 1 op = 100ms)
         strengths = [max(0.0, min(100.0, v)) for v, _ in sec.points]
 
-        # Calculate freq bytes for each op in one unit
-        f0 = slider_to_freq_byte(sec.freq_start)
-        f1 = slider_to_freq_byte(sec.freq_end)
+        # Calculate freq bytes
+        # Mode 1: fixed, use freq_low only
+        # Mode 2/3/4: freq varies between freq_low and freq_high
+        f_low = slider_to_freq_byte(sec.freq_low)
+        f_high = slider_to_freq_byte(sec.freq_high)
 
         # Build frequency sequence for one unit based on freq_mode
         unit_freqs: List[int] = []
         if sec.freq_mode == 1:
-            # Fixed: all use freq_start
-            unit_freqs = [f0] * n_points
+            # Fixed: all use freq_low
+            unit_freqs = [f_low] * n_points
         elif sec.freq_mode == 2:
-            # Linear: interpolate from f0 to f1 across the full section duration
+            # Linear: interpolate from f_low to f_high across the full section duration
             total_ops = repeats * n_points
             # We'll handle this below per-op instead
             unit_freqs = []  # placeholder
         elif sec.freq_mode == 3:
-            # Cycle: interpolate f0→f1 within each unit
+            # Cycle: interpolate f_low→f_high within each unit
             for i in range(n_points):
                 t = i / (n_points - 1) if n_points > 1 else 0.0
-                unit_freqs.append(int(round(f0 + (f1 - f0) * t)))
+                unit_freqs.append(int(round(f_low + (f_high - f_low) * t)))
         elif sec.freq_mode == 4:
             # Stepped: frequency changes per repetition
-            unit_freqs = [f0] * n_points  # placeholder, will be overridden per-repeat
+            unit_freqs = [f_low] * n_points  # placeholder, will be overridden per-repeat
         else:
-            unit_freqs = [f0] * n_points
+            unit_freqs = [f_low] * n_points
 
         # Generate ops for all repetitions
         total_ops = repeats * n_points
@@ -288,15 +290,15 @@ def convert_to_ops(
             if sec.freq_mode == 2:
                 # Linear across entire section
                 t = op_idx / (total_ops - 1) if total_ops > 1 else 0.0
-                freq_byte = int(round(f0 + (f1 - f0) * t))
+                freq_byte = int(round(f_low + (f_high - f_low) * t))
             elif sec.freq_mode == 4:
                 # Stepped per repetition
                 t = repeat_idx / (repeats - 1) if repeats > 1 else 0.0
-                freq_byte = int(round(f0 + (f1 - f0) * t))
+                freq_byte = int(round(f_low + (f_high - f_low) * t))
             elif sec.freq_mode == 3:
                 freq_byte = unit_freqs[unit_idx]
             else:
-                freq_byte = f0
+                freq_byte = f_low
 
             freq_byte = max(10, min(240, freq_byte))
             strength_byte = max(0, min(100, strength_byte))
