@@ -220,6 +220,37 @@ async function loadStatus() {
   } catch {}
 }
 
+
+const importMsg = ref('')
+
+function triggerImport() {
+  const input = document.createElement('input')
+  input.type = 'file'
+  input.accept = '.pulse,.json'
+  input.onchange = async (e: Event) => {
+    const file = (e.target as HTMLInputElement).files?.[0]
+    if (!file) return
+    const formData = new FormData()
+    formData.append('file', file)
+    try {
+      const resp = await fetch('/api/v1/wave_presets/import', { method: 'POST', body: formData })
+      const data = await resp.json()
+      if (data.result === 'OK') {
+        importMsg.value = `✓ 导入成功: ${data.name} (${data.ops} ops)`
+        await loadPresets()
+        preset.value = data.name
+        await loadPreview()
+      } else {
+        importMsg.value = `✗ ${data.error || '导入失败'}`
+      }
+    } catch (err: any) {
+      importMsg.value = `✗ ${err.message || '请求失败'}`
+    }
+    setTimeout(() => { importMsg.value = '' }, 5000)
+  }
+  input.click()
+}
+
 async function start() {
   msg.value = ''
   try {
@@ -352,10 +383,14 @@ onUnmounted(() => {
 
         <div class="field">
           <label>波形预设</label>
-          <select v-model="preset">
-            <option value="">默认电击波</option>
-            <option v-for="p in presets" :key="p" :value="p">{{ p.replace(/^pulse-/, '').replace(/-\d+$/, '') }}</option>
-          </select>
+          <div class="preset-row">
+            <select v-model="preset">
+              <option value="">默认电击波</option>
+              <option v-for="p in presets" :key="p" :value="p">{{ p.replace(/^pulse-/, '').replace(/-\d+$/, '') }}</option>
+            </select>
+            <button class="btn btn-sm" @click="triggerImport">📁 导入</button>
+          </div>
+          <p class="import-msg" v-if="importMsg">{{ importMsg }}</p>
         </div>
 
         <div class="control-bar">
@@ -402,6 +437,11 @@ onUnmounted(() => {
 .field select { width: 100%; }
 .val { color: var(--accent); font-variant-numeric: tabular-nums; font-weight: 600; }
 .hint { font-size: var(--text-xs); color: var(--text-muted); margin-top: var(--sp-1); }
+.preset-row { display: flex; gap: var(--sp-2); align-items: center; }
+.preset-row select { flex: 1; }
+.btn-sm { padding: var(--sp-1) var(--sp-3); font-size: var(--text-xs); border: 1px solid var(--border); border-radius: var(--radius-sm); background: transparent; color: var(--text-secondary); cursor: pointer; white-space: nowrap; transition: all 0.15s; }
+.btn-sm:hover { border-color: var(--accent); color: var(--accent); }
+.import-msg { font-size: var(--text-xs); margin-top: var(--sp-1); color: var(--text-secondary); }
 .channel-tabs { display: flex; gap: var(--sp-2); }
 .channel-tabs button { padding: var(--sp-2) var(--sp-5); border: 1px solid var(--border); border-radius: var(--radius-full); background: transparent; color: var(--text-muted); cursor: pointer; font-size: var(--text-sm); font-weight: 500; transition: all 0.15s; }
 .channel-tabs button.active { border-color: var(--accent); color: var(--accent); background: rgba(139,92,246,0.08); }

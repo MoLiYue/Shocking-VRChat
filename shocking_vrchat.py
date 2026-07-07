@@ -1501,6 +1501,87 @@ def api_v1_wave_preset_preview(preset_name):
         'sections': result_sections,
     }
 
+@app.route('/api/v1/wave_presets/import', methods=['POST'])
+def api_v1_wave_presets_import():
+    """Import a wave preset from uploaded .pulse or .json file."""
+    from pulse_to_hex.dglab_pulse_converter import convert_to_ops
+    from srv.wave_preset import WavePresetLibrary, PRESET_DIR
+
+    if 'file' not in request.files:
+        return {'error': 'no file uploaded'}, 400
+    file = request.files['file']
+    if not file.filename:
+        return {'error': 'empty filename'}, 400
+
+    filename = file.filename
+    content = file.read().decode('utf-8', errors='replace').strip()
+
+    if filename.endswith('.pulse'):
+        # Convert .pulse to JSON preset
+        try:
+            ops, wavestrs, header, sections = convert_to_ops(content)
+        except Exception as e:
+            return {'error': f'pulse parse failed: {e}'}, 400
+
+        if not ops:
+            return {'error': 'no valid wave data in file'}, 400
+
+        # Build preset name from filename
+        preset_name = filename.rsplit('.', 1)[0]
+        # Save as JSON
+        preset_data = {
+            'name': preset_name,
+            'source_file': filename,
+            'num_ops': len(ops),
+            'header': header.__dict__ if header else None,
+            'wavestrs': wavestrs,
+        }
+        out_path = PRESET_DIR / f'{preset_name}.json'
+        with open(out_path, 'w', encoding='utf-8') as f:
+            json.dump(preset_data, f, ensure_ascii=False, indent=2)
+
+        # Also save the .pulse source to dg-lab dir
+        dg_lab_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'dg-lab')
+        os.makedirs(dg_lab_dir, exist_ok=True)
+        pulse_path = os.path.join(dg_lab_dir, filename)
+        with open(pulse_path, 'w', encoding='utf-8') as f:
+            f.write(content)
+
+        # Reload library
+        lib = WavePresetLibrary()
+        lib.reload()
+
+        return {'result': 'OK', 'name': preset_name, 'ops': len(ops)}
+
+    elif filename.endswith('.json'):
+        # Direct JSON preset import
+        try:
+            preset_data = json.loads(content)
+        except json.JSONDecodeError as e:
+            return {'error': f'invalid JSON: {e}'}, 400
+
+        # Validate: must have 'wavestrs' or 'ops'
+        if 'wavestrs' not in preset_data and 'ops' not in preset_data:
+            return {'error': 'JSON must contain "wavestrs" or "ops"'}, 400
+
+        preset_name = preset_data.get('name') or filename.rsplit('.', 1)[0]
+        preset_data['name'] = preset_name
+
+        # Save to wave_presets dir
+        out_path = PRESET_DIR / f'{preset_name}.json'
+        with open(out_path, 'w', encoding='utf-8') as f:
+            json.dump(preset_data, f, ensure_ascii=False, indent=2)
+
+        # Reload library
+        lib = WavePresetLibrary()
+        lib.reload()
+
+        num_ops = preset_data.get('num_ops', 0)
+        return {'result': 'OK', 'name': preset_name, 'ops': num_ops}
+
+    else:
+        return {'error': 'unsupported format, use .pulse or .json'}, 400
+
 @app.route('/api/v1/wave_preset/<channel>/<preset_name>/<int:duration>')
 async def api_v1_wave_preset(channel, preset_name, duration):
     from srv.wave_preset import WavePresetLibrary
