@@ -18,10 +18,10 @@ const PRESETS: Record<string, {x:number;y:number}[]> = {
 }
 
 async function loadParams() {
-  // Get all registered params from config
+  // Get all registered params from config + special channel/global keys
   const data = await api('/api/v1/config')
   const basic = data.basic?.dglab3 || {}
-  const allParams: string[] = []
+  const allParams: string[] = ['channel_a', 'channel_b']
   for (const ch of ['channel_a', 'channel_b']) {
     const params = basic[ch]?.avatar_params || []
     for (const p of params) {
@@ -33,7 +33,28 @@ async function loadParams() {
   if (allParams.length && !activeParam.value) {
     activeParam.value = allParams[0]
   }
+  // Load list of configured curves to show status
+  await loadCurveList()
   loadCurve()
+}
+
+const configuredCurves = ref<Record<string, any>>({})
+
+async function loadCurveList() {
+  try {
+    const data = await api('/api/v1/curve')
+    configuredCurves.value = data.curves || {}
+  } catch {}
+}
+
+function hasCurve(key: string): boolean {
+  return key in configuredCurves.value
+}
+
+function paramLabel(key: string): string {
+  if (key === 'channel_a') return '通道 A 默认'
+  if (key === 'channel_b') return '通道 B 默认'
+  return key.replace('/avatar/parameters/', '')
 }
 
 async function loadCurve() {
@@ -50,6 +71,7 @@ async function saveCurve() {
   if (!activeParam.value) return
   const data = await apiPost(`/api/v1/curve/${encodeURIComponent(activeParam.value)}`, { points: points.value })
   msg.value = data.success ? '✓ 已保存' : '保存失败'
+  await loadCurveList()
   setTimeout(() => msg.value = '', 3000)
 }
 
@@ -57,6 +79,7 @@ async function deleteCurve() {
   if (!activeParam.value) return
   await apiDelete(`/api/v1/curve/${encodeURIComponent(activeParam.value)}`)
   msg.value = '已恢复为默认曲线'
+  await loadCurveList()
   loadCurve()
   setTimeout(() => msg.value = '', 3000)
 }
@@ -222,8 +245,13 @@ onMounted(() => {
     <div class="param-selector">
       <label>选择参数:</label>
       <select v-model="activeParam" @change="loadCurve()">
-        <option v-for="p in paramList" :key="p" :value="p">{{ p.replace('/avatar/parameters/', '') }}</option>
+        <option v-for="p in paramList" :key="p" :value="p">
+          {{ paramLabel(p) }}{{ hasCurve(p) ? ' ●' : '' }}
+        </option>
       </select>
+      <span class="curve-status" v-if="activeParam">
+        {{ hasCurve(activeParam) ? '自定义曲线' : '使用默认' }}
+      </span>
     </div>
 
     <div class="editor-grid">
@@ -274,6 +302,7 @@ onMounted(() => {
 .param-selector { display: flex; align-items: center; gap: var(--sp-3); margin-bottom: var(--sp-4); }
 .param-selector label { font-size: var(--text-sm); color: var(--text-muted); font-weight: 500; white-space: nowrap; }
 .param-selector select { flex: 1; max-width: 500px; }
+.curve-status { font-size: var(--text-xs); color: var(--accent); white-space: nowrap; }
 
 .editor-grid { display: grid; grid-template-columns: 1fr 260px; gap: var(--sp-4); }
 .canvas-card { padding: var(--sp-4); }
