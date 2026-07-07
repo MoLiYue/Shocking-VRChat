@@ -1445,28 +1445,31 @@ def api_v1_wave_preset_preview(preset_name):
     speed = header.get('speed', 1) or 1
     pulse_base_ms = 100.0 / speed  # base pulse duration: 100ms/speed
 
-    # Each op = 4 pulses. Extract per-pulse data with time width.
+    # Each op = 4 pulses. Extract per-pulse data.
+    # Width = freq_byte mapped back to interval (represents pulse period/duty cycle)
+    # freq_byte: 240→10ms(high freq, narrow), 10→1000ms(low freq, wide)
     ops = preset.get('ops', [])
     pulses = []  # list of {strength, freq_byte, width_ms}
     for op in ops:
         for i in range(4):
             freq_byte = int(op[i * 2:i * 2 + 2], 16)
             strength = int(op[8 + i * 2:8 + i * 2 + 2], 16)
-            # Width = pulse_base_ms (time occupied by this pulse in real time)
-            # The freq_byte determines the electrical pulse interval within that time slot
+            # Map freq_byte back to interval: byte 240→10ms, byte 10→1000ms (inverse linear)
+            interval_ms = 10 + (240 - freq_byte) * (1000 - 10) / (240 - 10)
             pulses.append({
                 'strength': strength,
                 'freq_byte': freq_byte,
-                'width_ms': pulse_base_ms,
+                'width_ms': round(interval_ms, 1),
             })
 
-    # Calculate total duration
-    total_ms = len(pulses) * pulse_base_ms
+    # Calculate total duration (sum of all pulse intervals)
+    total_ms = sum(p['width_ms'] for p in pulses)
 
     # Downsample if too many pulses (keep max 400 for rendering)
     if len(pulses) > 400:
         step = len(pulses) / 400
         pulses = [pulses[int(i * step)] for i in range(400)]
+        total_ms = sum(p['width_ms'] for p in pulses)
 
     return {
         'name': preset_name,
