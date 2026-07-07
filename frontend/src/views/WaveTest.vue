@@ -58,32 +58,27 @@ function drawRealtime() {
   const data = waveData.value
   if (!data.length) return
 
-  // Calculate total width: sum of all pulse intervals (proportional to freq)
-  // freq_byte 240→10ms(narrow), 10→1000ms(wide)
-  const totalWidth = data.reduce((sum, d) => {
-    const interval = 10 + (240 - d.f) * (1000 - 10) / (240 - 10)
-    return sum + interval
-  }, 0)
+  // Each pulse gets an equal-width slot
+  const slotW = w / data.length
 
-  if (totalWidth <= 0) return
+  for (let i = 0; i < data.length; i++) {
+    const sample = data[i]
+    if (sample.s <= 0) continue
 
-  // Draw bars with width proportional to frequency interval
-  let x = 0
-  for (const sample of data) {
-    const interval = 10 + (240 - sample.f) * (1000 - 10) / (240 - 10)
-    const barW = (interval / totalWidth) * w
+    // Duty cycle: freq_byte 240→100% fill, freq_byte 10→~1% fill
+    // Higher freq_byte = shorter interval = higher duty cycle
+    const dutyCycle = Math.max(0.05, (sample.f - 10) / (240 - 10))
+    const barW = slotW * dutyCycle
     const barH = (sample.s / 100) * h
+    const x = i * slotW + (slotW - barW) / 2  // center within slot
 
-    if (sample.s > 0) {
-      // Color: high freq = purple, low freq = reddish
-      const freqT = (sample.f - 10) / 230
-      const r = Math.round(139 + (1 - freqT) * 100)
-      const g = Math.round(92 * freqT)
-      const b = Math.round(246 * freqT + 100 * (1 - freqT))
-      ctx.fillStyle = `rgba(${r},${g},${b},0.85)`
-      ctx.fillRect(x, h - barH, Math.max(barW - 0.3, 0.5), barH)
-    }
-    x += barW
+    // Color: high freq = purple, low freq = reddish
+    const freqT = (sample.f - 10) / 230
+    const r = Math.round(139 + (1 - freqT) * 100)
+    const g = Math.round(92 * freqT)
+    const b = Math.round(246 * freqT + 100 * (1 - freqT))
+    ctx.fillStyle = `rgba(${r},${g},${b},0.85)`
+    ctx.fillRect(x, h - barH, Math.max(barW, 0.5), barH)
   }
 
   // Y labels
