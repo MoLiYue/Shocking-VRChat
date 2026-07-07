@@ -93,6 +93,7 @@ class WavePresetLibrary:
                 self.presets[name] = {
                     "ops": ops,
                     "wavestrs": _ops_to_wavestrs(ops),
+                    "header": raw.get("header"),
                     **_decode_ops_to_samples(ops),
                 }
                 logger.info(f"Loaded wave preset `{name}` with {len(ops)} ops.")

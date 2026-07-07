@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, computed, watch } from 'vue'
+import { ref, onMounted, onUnmounted, computed, watch, nextTick } from 'vue'
 import { api, apiPost } from '@/api'
 import { Bar } from 'vue-chartjs'
 import {
@@ -21,12 +21,20 @@ const presets = ref<string[]>([])
 const playing = ref(false)
 const msg = ref('')
 
-// Waveform data
+// Waveform data (real-time)
 const waveData = ref<number[]>([])
 let pollTimer: ReturnType<typeof setInterval> | null = null
 let updateTimer: ReturnType<typeof setTimeout> | null = null
 
-// Chart.js config
+// Preset preview
+const previewCanvasRef = ref<HTMLCanvasElement | null>(null)
+const previewInfo = ref('')
+interface PulseData { strength: number; freq_byte: number; width_ms: number }
+const previewPulses = ref<PulseData[]>([])
+const previewSpeed = ref(1)
+const previewDuration = ref(0)
+
+// Chart.js config (real-time)
 const chartData = computed(() => ({
   labels: waveData.value.map(() => ''),
   datasets: [{
@@ -74,6 +82,101 @@ const chartOptions = {
 async function loadPresets() {
   const data = await api('/api/v1/wave_presets')
   presets.value = data.presets || []
+}
+
+async function loadPreview() {
+  if (!preset.value) {
+    previewPulses.value = []
+    previewInfo.value = ''
+    return
+  }
+  try {
+    const data = await api(`/api/v1/wave_presets/${encodeURIComponent(preset.value)}/preview`)
+    previewPulses.value = data.pulses || []
+    previewSpeed.value = data.speed || 1
+    previewDuration.value = data.total_duration_ms || 0
+    previewInfo.value = `${data.ops_count} ops · ${data.total_pulses} 脉冲 · ${(data.total_duration_ms / 1000).toFixed(1)}s · ${data.speed}x`
+    await nextTick()
+    drawPreview()
+  } catch {
+    previewInfo.value = '加载失败'
+  }
+}
+
+function drawPreview() {
+  const canvas = previewCanvasRef.value
+  if (!canvas) return
+  const ctx = canvas.getContext('2d')
+  if (!ctx) return
+
+  const dpr = window.devicePixelRatio || 1
+  const rect = canvas.getBoundingClientRect()
+  canvas.width = rect.width * dpr
+  canvas.height = rect.height * dpr
+  ctx.scale(dpr, dpr)
+  const w = rect.width
+  const h = rect.height
+
+  // Clear
+  ctx.fillStyle = 'rgba(15, 15, 30, 0.95)'
+  ctx.fillRect(0, 0, w, h)
+
+  // Grid
+  ctx.strokeStyle = 'rgba(139,92,246,0.1)'
+  ctx.lineWidth = 1
+  for (let y = 0; y <= 100; y += 25) {
+    const py = h - (y / 100) * (h - 4)
+    ctx.beginPath()
+    ctx.moveTo(0, py)
+    ctx.lineTo(w, py)
+    ctx.stroke()
+  }
+
+  const pulses = previewPulses.value
+  if (!pulses.length) return
+
+  // Calculate total time in ms
+  const totalMs = pulses.reduce((sum, p) => sum + p.width_ms, 0)
+  if (totalMs <= 0) return
+
+  // Draw bars: width proportional to pulse width_ms, height = strength
+  let x = 0
+  for (const pulse of pulses) {
+    const barW = (pulse.width_ms / totalMs) * w
+    const barH = (pulse.strength / 100) * (h - 4)
+
+    if (pulse.strength > 0) {
+      // Color intensity based on freq_byte: high freq (240) = purple, low freq (10) = red
+      const freqT = (pulse.freq_byte - 10) / 230  // 0=low freq, 1=high freq
+      const r = Math.round(139 + (1 - freqT) * 100)
+      const g = Math.round(92 * freqT)
+      const b = Math.round(246 * freqT + 100 * (1 - freqT))
+      ctx.fillStyle = `rgba(${r},${g},${b},0.85)`
+      ctx.fillRect(x, h - barH, barW, barH)
+    }
+    x += barW
+  }
+
+  // Y-axis labels
+  ctx.fillStyle = 'rgba(255,255,255,0.4)'
+  ctx.font = '10px Inter, sans-serif'
+  ctx.fillText('100%', 2, 12)
+  ctx.fillText('0%', 2, h - 2)
+
+  // Time axis
+  const totalSec = totalMs / 1000
+  const step = totalSec > 10 ? 5 : totalSec > 5 ? 2 : 1
+  ctx.fillStyle = 'rgba(255,255,255,0.3)'
+  ctx.font = '9px Inter, sans-serif'
+  for (let t = step; t < totalSec; t += step) {
+    const tx = (t / totalSec) * w
+    ctx.fillText(`${t}s`, tx, h - 2)
+    ctx.strokeStyle = 'rgba(255,255,255,0.05)'
+    ctx.beginPath()
+    ctx.moveTo(tx, 0)
+    ctx.lineTo(tx, h)
+    ctx.stroke()
+  }
 }
 
 async function loadStatus() {
@@ -155,16 +258,17 @@ function stopPolling() {
   }
 }
 
-const effectiveOutput = computed(() => Math.round(strength.value * waveScale.value))
-const equivalentAt100 = computed(() => Math.min(1.0, strength.value * waveScale.value / 100).toFixed(2))
-
-watch([strength, waveScale, preset], onParamChange)
+watch([strength, waveScale], onParamChange)
+watch(preset, () => { loadPreview(); onParamChange() })
 
 onMounted(async () => {
   await loadPresets()
   await loadStatus()
   if (playing.value) {
     startPolling()
+  }
+  if (preset.value) {
+    await loadPreview()
   }
 })
 
@@ -230,32 +334,17 @@ onUnmounted(() => {
       </section>
 
       <section class="card">
-        <h2>等效分析</h2>
-        <div class="equiv-table">
-          <div class="equiv-row">
-            <span class="equiv-label">当前设置</span>
-            <span class="equiv-formula">强度 {{ strength }} × 缩放 {{ waveScale.toFixed(2) }}</span>
-          </div>
-          <div class="equiv-row highlight">
-            <span class="equiv-label">等效输出</span>
-            <span class="equiv-value">≈ {{ effectiveOutput }}</span>
-          </div>
-          <div class="equiv-row">
-            <span class="equiv-label">等效于 强度100 × 缩放</span>
-            <span class="equiv-value">{{ equivalentAt100 }}</span>
+        <h2>预设预览</h2>
+        <div class="preview-container" v-if="preset">
+          <div class="preview-info">{{ previewInfo }}</div>
+          <canvas ref="previewCanvasRef" class="preview-canvas"></canvas>
+          <div class="preview-legend">
+            <span class="legend-item"><span class="legend-dot purple"></span>高频(柔和)</span>
+            <span class="legend-item"><span class="legend-dot red"></span>低频(尖锐)</span>
+            <span class="legend-item">柱宽 = 脉冲时长</span>
           </div>
         </div>
-
-        <div class="calc-tip">
-          <p>💡 <strong>校准方法：</strong></p>
-          <ol>
-            <li>开始播放，感受 <code>强度=100, 缩放=1.0</code> 的体感</li>
-            <li>拖动强度到你的目标值（如 200）</li>
-            <li>实时调低缩放直到体感一致</li>
-            <li>记下此缩放值 → 填入配置的 <code>wave_scale</code></li>
-          </ol>
-          <p style="margin-top:var(--sp-2)">播放期间所有参数实时生效，无需停止重开。</p>
-        </div>
+        <div v-else class="empty-preview">选择预设查看波形预览</div>
       </section>
     </div>
   </div>
@@ -286,6 +375,15 @@ onUnmounted(() => {
 .btn-danger { background: var(--danger); border-color: var(--danger); color: white; }
 .btn-danger:hover { opacity: 0.9; }
 .msg { font-size: var(--text-sm); color: var(--warning); }
+.preview-container { display: flex; flex-direction: column; gap: var(--sp-2); }
+.preview-info { font-size: var(--text-xs); color: var(--text-secondary); padding: var(--sp-2) var(--sp-3); background: rgba(139,92,246,0.05); border-radius: var(--radius-sm); }
+.preview-canvas { width: 100%; height: 150px; border-radius: var(--radius-md); display: block; }
+.preview-legend { display: flex; gap: var(--sp-4); font-size: var(--text-xs); color: var(--text-muted); padding-top: var(--sp-1); }
+.legend-item { display: flex; align-items: center; gap: var(--sp-1); }
+.legend-dot { width: 10px; height: 10px; border-radius: 2px; }
+.legend-dot.purple { background: rgba(139,92,246,0.85); }
+.legend-dot.red { background: rgba(239,92,100,0.85); }
+.empty-preview { padding: var(--sp-6); text-align: center; color: var(--text-muted); font-size: var(--text-sm); }
 .equiv-table { margin-bottom: var(--sp-4); }
 .equiv-row { display: flex; justify-content: space-between; align-items: center; padding: var(--sp-2) var(--sp-3); border-radius: var(--radius-sm); font-size: var(--text-sm); }
 .equiv-row.highlight { background: rgba(139,92,246,0.08); border: 1px solid rgba(139,92,246,0.2); }

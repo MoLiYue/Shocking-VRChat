@@ -1440,19 +1440,42 @@ def api_v1_wave_preset_preview(preset_name):
     preset = lib.get(preset_name)
     if not preset:
         return {'error': 'preset not found'}, 404
-    # Return downsampled data for visualization (max 200 points)
-    samples = preset.get('strength_samples', [])
-    freq = preset.get('freq_samples', [])
-    if len(samples) > 200:
-        step = len(samples) / 200
-        samples = [samples[int(i * step)] for i in range(200)]
-        freq = [freq[int(i * step)] for i in range(200)]
+
+    header = preset.get('header') or {}
+    speed = header.get('speed', 1) or 1
+    pulse_base_ms = 100.0 / speed  # base pulse duration: 100ms/speed
+
+    # Each op = 4 pulses. Extract per-pulse data with time width.
+    ops = preset.get('ops', [])
+    pulses = []  # list of {strength, freq_byte, width_ms}
+    for op in ops:
+        for i in range(4):
+            freq_byte = int(op[i * 2:i * 2 + 2], 16)
+            strength = int(op[8 + i * 2:8 + i * 2 + 2], 16)
+            # Width = pulse_base_ms (time occupied by this pulse in real time)
+            # The freq_byte determines the electrical pulse interval within that time slot
+            pulses.append({
+                'strength': strength,
+                'freq_byte': freq_byte,
+                'width_ms': pulse_base_ms,
+            })
+
+    # Calculate total duration
+    total_ms = len(pulses) * pulse_base_ms
+
+    # Downsample if too many pulses (keep max 400 for rendering)
+    if len(pulses) > 400:
+        step = len(pulses) / 400
+        pulses = [pulses[int(i * step)] for i in range(400)]
+
     return {
         'name': preset_name,
-        'ops_count': len(preset.get('ops', [])),
-        'duration_ms': len(preset.get('ops', [])) * 100,
-        'strength_samples': [round(s, 3) for s in samples],
-        'freq_samples': [round(f, 1) for f in freq],
+        'ops_count': len(ops),
+        'total_pulses': len(preset.get('ops', [])) * 4,
+        'speed': speed,
+        'pulse_base_ms': pulse_base_ms,
+        'total_duration_ms': total_ms,
+        'pulses': pulses,
     }
 
 @app.route('/api/v1/wave_preset/<channel>/<preset_name>/<int:duration>')
