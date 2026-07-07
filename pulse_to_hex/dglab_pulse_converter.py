@@ -316,10 +316,8 @@ def convert_to_ops(
             strength_hex = "".join(f"{b:02X}" for b in strength_bytes)
             ops.append(freq_hex + strength_hex)
 
-    # Append rest silence if header specifies it
-    if header and header.rest_ticks > 0:
-        silence_op = "0A0A0A0A" + "00000000"
-        ops.extend([silence_op] * header.rest_ticks)
+    # Note: header rest_ticks not appended as silence ops.
+    # The caller handles looping/rest at playback level.
 
     # Build wavestrs (chunked JSON arrays for WS protocol)
     wavestrs: List[str] = []
