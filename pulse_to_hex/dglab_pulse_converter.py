@@ -1,293 +1,357 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-DG-LAB .pulse (Dungeonlab+pulse:...) -> DG websocket "pulse-A:[...]" converter (best-effort).
+DG-LAB .pulse → hex op JSON converter.
 
-What you send over WS:
-  {"type":"msg","clientId":"...","targetId":"...","message":"pulse-A:<wavestr>"}
+Converts Dungeonlab+pulse export format to DG-LAB WebSocket protocol wave data.
 
-Where <wavestr> is a JSON array string like:
-  ["F0F0F0F000326445","..."]
+Each output op is a 16-char hex string: 8 chars freq (4 bytes) + 8 chars strength (4 bytes).
+Each op = 100ms playback (4 × 25ms sub-steps).
 
-This converter:
-  - parses Dungeonlab+pulse exports (with or without header '=')
-  - rebuilds a 0.1s time-grid from each section's point list
-  - repeats the pulse unit to cover section duration
-  - maps frequency sliders to bytes [10..240] (inverted linear)
-  - packs 4 samples (0.4s) per operation: 4 freq bytes + 4 strength bytes => 8 bytes => hex
-
-⚠️ IMPORTANT
-DG-LAB's export format is a *high-level* description (sections + point list).
-The actual app/device may use a different internal mapping for frequency/speed.
-So this is a practical starting point; validate by listening/feeling/oscilloscope and adjust mapping if needed.
+See doc/pulse_format.md for format specification.
 """
 
 import json
 import math
-import re
 from dataclasses import dataclass
-from typing import List, Tuple, Optional, Dict
+from typing import List, Tuple, Optional
+
 
 PULSE_PREFIX = "Dungeonlab+pulse:"
 
-def _parse_float(s: str) -> float:
-    try:
-        return float(s)
-    except Exception:
-        return float(re.sub(r"[^\d\.\-]", "", s) or 0.0)
+# --- Frequency slider → interval (ms) lookup table ---
+# Built according to the non-linear stepped mapping (84 positions, 0-83)
+_FREQ_TABLE: List[int] = []
+
+def _build_freq_table():
+    """Build the slider → interval(ms) lookup table."""
+    table = []
+    # [10, 50) step=1: 40 positions
+    for ms in range(10, 50):
+        table.append(ms)
+    # [50, 80) step=2: 15 positions
+    ms = 50
+    while ms < 80:
+        table.append(ms)
+        ms += 2
+    # [80, 100) step=5: 4 positions
+    ms = 80
+    while ms < 100:
+        table.append(ms)
+        ms += 5
+    # [100, 200) step=10: 10 positions
+    ms = 100
+    while ms < 200:
+        table.append(ms)
+        ms += 10
+    # [200, 400] step=33,33,34 cycle: 7 positions
+    ms = 200
+    steps = [33, 33, 34]
+    i = 0
+    while ms <= 400:
+        table.append(ms)
+        if ms == 400:
+            break
+        ms += steps[i % 3]
+        i += 1
+    # (400, 600) step=50: 3 positions (450, 500, 550)
+    ms = 450
+    while ms < 600:
+        table.append(ms)
+        ms += 50
+    # [600, 1000] step=100: 5 positions
+    ms = 600
+    while ms <= 1000:
+        table.append(ms)
+        ms += 100
+    return table
+
+_FREQ_TABLE = _build_freq_table()
+assert len(_FREQ_TABLE) == 84, f"Expected 84 positions, got {len(_FREQ_TABLE)}"
+assert _FREQ_TABLE[0] == 10
+assert _FREQ_TABLE[83] == 1000
+
+
+def slider_to_interval_ms(slider: int) -> int:
+    """Convert frequency slider position (0-83) to pulse interval in ms."""
+    slider = max(0, min(83, int(slider)))
+    return _FREQ_TABLE[slider]
+
+
+def slider_to_freq_byte(slider: int) -> int:
+    """
+    Convert frequency slider position (0-83) to the freq byte used in hex ops.
+
+    The device protocol uses a byte where:
+    - Lower value = longer interval (lower frequency)
+    - Higher value = shorter interval (higher frequency)
+
+    Mapping: interval_ms → byte value via inverse linear scale within [10, 240].
+    10ms (slider=0) → byte 240, 1000ms (slider=83) → byte 10.
+    """
+    interval = slider_to_interval_ms(slider)
+    # Linear map: 10ms→240, 1000ms→10
+    byte_val = 240 - (interval - 10) * (240 - 10) / (1000 - 10)
+    return max(10, min(240, int(round(byte_val))))
+
+
+# --- Data classes ---
 
 @dataclass
 class PulseHeader:
-    rest_ticks: int          # best-effort: ticks of 0.1s
-    speed: int               # best-effort: 1/2/4
-    balance: Optional[int]   # optional
-    raw_header: str
+    rest_ticks: int      # silence at end (ticks, each 100ms)
+    speed: int           # playback speed multiplier (1, 2, 4)
+    param3: Optional[int]  # unknown third parameter
+    raw: str
 
 @dataclass
 class PulseSection:
-    meta: List[int]                      # comma-separated ints before "/"
-    points: List[Tuple[float, int]]      # (value, anchor_flag) after "/"
+    freq_start: int      # frequency slider start (0-83)
+    freq_end: int        # frequency slider end (0-83)
+    duration: int        # minimum duration in ticks
+    freq_mode: int       # 1=fixed, 2=linear, 3=cycle, 4=stepped
+    enabled: bool        # whether this section is active
+    points: List[Tuple[float, int]]  # (strength_percent, anchor_flag)
     raw: str
 
-def parse_dungeonlab_pulse_text(pulse_text: str) -> Tuple[Optional[PulseHeader], List[PulseSection]]:
+
+# --- Parser ---
+
+def _parse_float(s: str) -> float:
+    """Safely parse a float from potentially messy input."""
+    try:
+        return float(s)
+    except ValueError:
+        import re
+        cleaned = re.sub(r"[^\d.\-]", "", s)
+        return float(cleaned) if cleaned else 0.0
+
+
+def parse_pulse(pulse_text: str) -> Tuple[Optional[PulseHeader], List[PulseSection]]:
+    """Parse a .pulse file into header and sections."""
     pulse_text = pulse_text.strip()
     if pulse_text.startswith(PULSE_PREFIX):
         body = pulse_text[len(PULSE_PREFIX):]
     else:
         body = pulse_text
 
+    # Parse optional header
     header = None
     if "=" in body:
         header_str, sections_str = body.split("=", 1)
-        header_nums = [x.strip() for x in header_str.split(",") if x.strip() != ""]
-        rest_ticks = int(float(header_nums[0])) if len(header_nums) > 0 else 0
-        speed_raw = header_nums[1] if len(header_nums) > 1 else "1"
-        try:
-            speed = int(speed_raw) if str(speed_raw).isdigit() else 1
-        except Exception:
-            speed = 1
-        balance = int(float(header_nums[2])) if len(header_nums) > 2 else None
-        header = PulseHeader(rest_ticks=rest_ticks, speed=speed, balance=balance, raw_header=header_str)
+        parts = [x.strip() for x in header_str.split(",") if x.strip()]
+        rest_ticks = int(float(parts[0])) if len(parts) > 0 else 0
+        speed = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else 1
+        param3 = int(float(parts[2])) if len(parts) > 2 else None
+        header = PulseHeader(rest_ticks=rest_ticks, speed=speed, param3=param3, raw=header_str)
     else:
         sections_str = body
 
+    # Parse sections
     sections: List[PulseSection] = []
     for raw in sections_str.split("+section+"):
         raw = raw.strip()
         if not raw:
             continue
+
         if "/" in raw:
-            left, right = raw.split("/", 1)
+            meta_str, points_str = raw.split("/", 1)
         else:
-            left, right = raw, ""
+            meta_str, points_str = raw, ""
 
-        meta: List[int] = []
-        for tok in left.split(","):
+        # Parse meta
+        meta = []
+        for tok in meta_str.split(","):
             tok = tok.strip()
-            if tok == "":
-                continue
-            try:
-                meta.append(int(float(tok)))
-            except Exception:
-                pass
+            if tok:
+                try:
+                    meta.append(int(float(tok)))
+                except ValueError:
+                    pass
 
+        freq_start = meta[0] if len(meta) > 0 else 0
+        freq_end = meta[1] if len(meta) > 1 else freq_start
+        duration = meta[2] if len(meta) > 2 else 0
+        freq_mode = meta[3] if len(meta) > 3 else 1
+        enabled = bool(meta[4]) if len(meta) > 4 else True
+
+        # Parse points
         points: List[Tuple[float, int]] = []
-        if right.strip():
-            for p in right.split(","):
+        if points_str.strip():
+            for p in points_str.split(","):
                 p = p.strip()
                 if not p:
                     continue
                 if "-" in p:
-                    v, fl = p.rsplit("-", 1)
-                    val = _parse_float(v)
+                    val_str, flag_str = p.rsplit("-", 1)
+                    val = _parse_float(val_str)
                     try:
-                        flag = int(float(fl))
-                    except Exception:
+                        flag = int(float(flag_str))
+                    except ValueError:
                         flag = 0
                 else:
                     val = _parse_float(p)
                     flag = 0
                 points.append((val, flag))
 
-        sections.append(PulseSection(meta=meta, points=points, raw=raw))
+        sections.append(PulseSection(
+            freq_start=freq_start,
+            freq_end=freq_end,
+            duration=duration,
+            freq_mode=freq_mode,
+            enabled=enabled,
+            points=points,
+            raw=raw,
+        ))
+
     return header, sections
 
-def slider_to_freq(slider: float) -> int:
-    """Map slider 0..100 to freq byte 240..10 (inverted linear)."""
-    slider = max(0.0, min(100.0, float(slider)))
-    f = 240.0 - (slider * (240.0 - 10.0) / 100.0)
-    return int(round(max(10.0, min(240.0, f))))
 
-def fill_autopoints(values_flags: List[Tuple[float, int]]) -> List[float]:
-    """
-    Fill non-anchor points (flag==0) by linear interpolation between anchors (flag==1).
-    If no anchors exist, return values as-is.
-    """
-    if not values_flags:
-        return []
-    vals = [v for v, _ in values_flags]
-    anchors = [i for i, (_, fl) in enumerate(values_flags) if fl == 1]
-    if len(anchors) == 0:
-        return vals
-
-    # Ensure edges are anchors for stable interpolation
-    if 0 not in anchors:
-        values_flags[0] = (values_flags[0][0], 1)
-    if (len(values_flags) - 1) not in anchors:
-        values_flags[-1] = (values_flags[-1][0], 1)
-
-    vals = [v for v, _ in values_flags]
-    anchors = [i for i, (_, fl) in enumerate(values_flags) if fl == 1]
-    out = vals[:]
-    for a, b in zip(anchors, anchors[1:]):
-        va, vb = vals[a], vals[b]
-        span = b - a
-        if span <= 1:
-            continue
-        for k in range(a + 1, b):
-            t = (k - a) / span
-            out[k] = va + (vb - va) * t
-    return out
+# --- Converter ---
 
 def convert_to_ops(
     pulse_text: str,
     *,
-    default_rest_ticks: int = 0,
-    default_speed: int = 1,
-    max_ops_per_msg: int = 86
+    max_ops_per_msg: int = 86,
 ) -> Tuple[List[str], List[str], Optional[PulseHeader], List[PulseSection]]:
     """
+    Convert .pulse text to hex ops.
+
     Returns:
-      ops: list of 8-byte hex strings (uppercase)
-      wavestrs: list of JSON array strings (each <= max_ops_per_msg entries), ready for "pulse-A:<wavestr>"
-      header, sections: parsed metadata for debugging
+        ops: list of 16-char hex strings (uppercase)
+        wavestrs: list of JSON array strings (chunked for WS protocol)
+        header: parsed header (or None)
+        sections: parsed sections
     """
-    header, sections = parse_dungeonlab_pulse_text(pulse_text)
-
-    rest_ticks = default_rest_ticks
-    speed = default_speed
-    if header:
-        rest_ticks = header.rest_ticks
-        speed = header.speed or default_speed
-
-    freq_samples: List[int] = []
-    strength_samples: List[int] = []
-
-    for sec in sections:
-        meta = sec.meta
-        pts = sec.points
-
-        # Skip empty placeholders
-        if not meta and not pts:
-            continue
-
-        # Best-effort meta layout:
-        # meta[0]=freq_start_slider, meta[1]=freq_end_slider, meta[2]=section_duration_ticks, meta[3]=freq_mode (1..4)
-        fs = meta[0] if len(meta) > 0 else 50
-        fe = meta[1] if len(meta) > 1 else fs
-        dur_ticks = meta[2] if len(meta) > 2 else len(pts)
-        mode = meta[3] if len(meta) > 3 else 1
-
-        f0 = slider_to_freq(fs)
-        f1 = slider_to_freq(fe)
-
-        unit_vals = [v for v, _ in pts] if pts else [0.0]
-        unit_strength = [int(round(max(0.0, min(100.0, v)))) for v in unit_vals]
-        unit_len = max(1, len(unit_strength))
-
-        dur_ticks = max(0, int(dur_ticks))
-        if dur_ticks == 0:
-            continue
-        # dur_ticks = number of ops (100ms each), each op has 4 sub-samples
-        total = dur_ticks * 4
-
-        # Resample the unit pattern to fill total sub-samples (linear interpolation)
-        for i in range(total):
-            t = i / (total - 1) if total > 1 else 0.0
-            # Map t to position in the unit pattern
-            pos = t * (unit_len - 1)
-            idx = int(pos)
-            frac = pos - idx
-            if idx >= unit_len - 1:
-                strength_samples.append(unit_strength[-1])
-            else:
-                val = unit_strength[idx] * (1 - frac) + unit_strength[idx + 1] * frac
-                strength_samples.append(int(round(val)))
-
-        if mode == 1:
-            freq_samples.extend([f0] * total)
-        elif mode == 2:
-            for i in range(total):
-                t = i / (total - 1) if total > 1 else 0.0
-                freq_samples.append(int(round(f0 + (f1 - f0) * t)))
-        elif mode == 3:
-            for i in range(total):
-                pos = i % unit_len
-                t = pos / (unit_len - 1) if unit_len > 1 else 0.0
-                freq_samples.append(int(round(f0 + (f1 - f0) * t)))
-        elif mode == 4:
-            # Freq changes per unit-repetition within the duration
-            num_units = max(1, total // unit_len)
-            for i in range(total):
-                u = i // unit_len
-                t = u / (num_units - 1) if num_units > 1 else 0.0
-                freq_samples.append(int(round(f0 + (f1 - f0) * t)))
-        else:
-            freq_samples.extend([f0] * total)
-
-    if rest_ticks and rest_ticks > 0:
-        rest_samples = rest_ticks * 4
-        freq_samples.extend([10] * rest_samples)
-        strength_samples.extend([0] * rest_samples)
-
-    # Speed does NOT subsample — ticks represent sub-samples (4 per op).
-    # The DG-LAB device always plays ops at 100ms each (4 sub-ticks of 25ms).
-
-    n = min(len(freq_samples), len(strength_samples))
-    freq_samples = freq_samples[:n]
-    strength_samples = strength_samples[:n]
-
-    pad = (-n) % 4
-    if pad:
-        freq_samples.extend([10] * pad)
-        strength_samples.extend([0] * pad)
-        n += pad
+    header, sections = parse_pulse(pulse_text)
 
     ops: List[str] = []
-    for i in range(0, n, 4):
-        fb = bytes([int(max(10, min(240, x))) for x in freq_samples[i:i+4]])
-        sb = bytes([int(max(0, min(100, x))) for x in strength_samples[i:i+4]])
-        ops.append((fb + sb).hex().upper())
 
+    for sec in sections:
+        # Skip disabled sections
+        if not sec.enabled:
+            continue
+
+        # Skip sections with no points
+        if not sec.points:
+            continue
+
+        n_points = len(sec.points)
+        duration = max(0, sec.duration)
+
+        # Calculate number of complete repetitions
+        # Wave unit must play completely; repeat ceil(D/N) times, at least 1
+        if duration <= 0 or n_points >= duration:
+            repeats = 1
+        else:
+            repeats = math.ceil(duration / n_points)
+
+        # Get strength values (each point = 1 op = 100ms)
+        strengths = [max(0.0, min(100.0, v)) for v, _ in sec.points]
+
+        # Calculate freq bytes for each op in one unit
+        f0 = slider_to_freq_byte(sec.freq_start)
+        f1 = slider_to_freq_byte(sec.freq_end)
+
+        # Build frequency sequence for one unit based on freq_mode
+        unit_freqs: List[int] = []
+        if sec.freq_mode == 1:
+            # Fixed: all use freq_start
+            unit_freqs = [f0] * n_points
+        elif sec.freq_mode == 2:
+            # Linear: interpolate from f0 to f1 across the full section duration
+            total_ops = repeats * n_points
+            # We'll handle this below per-op instead
+            unit_freqs = []  # placeholder
+        elif sec.freq_mode == 3:
+            # Cycle: interpolate f0→f1 within each unit
+            for i in range(n_points):
+                t = i / (n_points - 1) if n_points > 1 else 0.0
+                unit_freqs.append(int(round(f0 + (f1 - f0) * t)))
+        elif sec.freq_mode == 4:
+            # Stepped: frequency changes per repetition
+            unit_freqs = [f0] * n_points  # placeholder, will be overridden per-repeat
+        else:
+            unit_freqs = [f0] * n_points
+
+        # Generate ops for all repetitions
+        total_ops = repeats * n_points
+        for op_idx in range(total_ops):
+            unit_idx = op_idx % n_points
+            repeat_idx = op_idx // n_points
+
+            # Strength: from the unit pattern
+            strength_pct = strengths[unit_idx]
+            strength_byte = int(round(strength_pct))
+
+            # Frequency: depends on mode
+            if sec.freq_mode == 2:
+                # Linear across entire section
+                t = op_idx / (total_ops - 1) if total_ops > 1 else 0.0
+                freq_byte = int(round(f0 + (f1 - f0) * t))
+            elif sec.freq_mode == 4:
+                # Stepped per repetition
+                t = repeat_idx / (repeats - 1) if repeats > 1 else 0.0
+                freq_byte = int(round(f0 + (f1 - f0) * t))
+            elif sec.freq_mode == 3:
+                freq_byte = unit_freqs[unit_idx]
+            else:
+                freq_byte = f0
+
+            freq_byte = max(10, min(240, freq_byte))
+            strength_byte = max(0, min(100, strength_byte))
+
+            # Each op has 4 sub-steps (4×25ms = 100ms)
+            # Use the same freq and strength for all 4 sub-steps within one op
+            freq_hex = f"{freq_byte:02X}" * 4
+            strength_hex = f"{strength_byte:02X}" * 4
+            ops.append(freq_hex + strength_hex)
+
+    # Append rest silence if header specifies it
+    if header and header.rest_ticks > 0:
+        silence_op = "0A0A0A0A" + "00000000"
+        ops.extend([silence_op] * header.rest_ticks)
+
+    # Build wavestrs (chunked JSON arrays for WS protocol)
     wavestrs: List[str] = []
     for i in range(0, len(ops), max_ops_per_msg):
-        wavestrs.append(json.dumps(ops[i:i+max_ops_per_msg], ensure_ascii=False))
+        chunk = ops[i:i + max_ops_per_msg]
+        wavestrs.append(json.dumps(chunk, separators=(",", ":")))
 
     return ops, wavestrs, header, sections
 
+
+# --- CLI ---
+
 def main():
     import argparse
-    ap = argparse.ArgumentParser(description="Convert Dungeonlab .pulse export to DG websocket pulse-A wavestr JSON.")
-    ap.add_argument("pulse_file", help="Path to .pulse file (text starting with Dungeonlab+pulse:...)")
-    ap.add_argument("--out", default="", help="Output file path for wavestr JSON. Default: <pulse_file>.wavestr.json")
-    ap.add_argument("--max-ops", type=int, default=86, help="Max ops per websocket message (default 86).")
+    ap = argparse.ArgumentParser(
+        description="Convert DG-LAB .pulse file to hex op JSON for WebSocket protocol."
+    )
+    ap.add_argument("pulse_file", help="Path to .pulse file")
+    ap.add_argument("--out", default="", help="Output JSON path (default: <input>.wavestr.json)")
+    ap.add_argument("--max-ops", type=int, default=86, help="Max ops per WS message chunk")
     args = ap.parse_args()
 
     with open(args.pulse_file, "r", encoding="utf-8", errors="replace") as f:
         txt = f.read().strip()
 
     ops, wavestrs, header, sections = convert_to_ops(txt, max_ops_per_msg=args.max_ops)
+    enabled_sections = [s for s in sections if s.enabled]
 
     out_path = args.out or (args.pulse_file + ".wavestr.json")
     with open(out_path, "w", encoding="utf-8") as f:
-        json.dump({"wavestrs": wavestrs, "num_ops": len(ops), "header": (header.__dict__ if header else None)}, f, ensure_ascii=False, indent=2)
+        json.dump({
+            "wavestrs": wavestrs,
+            "num_ops": len(ops),
+            "header": header.__dict__ if header else None,
+        }, f, ensure_ascii=False, indent=2)
 
-    print(f"Parsed sections: {len(sections)}")
-    print(f"Total ops: {len(ops)}")
-    print(f"WS messages needed: {len(wavestrs)}")
-    print(f"Wrote: {out_path}")
-    print("Example message payload (first chunk):")
-    print(f"pulse-A:{wavestrs[0][:180]}{' ...' if len(wavestrs[0])>180 else ''}")
+    print(f"Sections: {len(sections)} total, {len(enabled_sections)} enabled")
+    print(f"Total ops: {len(ops)} ({len(ops) * 0.1:.1f}s)")
+    print(f"WS message chunks: {len(wavestrs)}")
+    print(f"Output: {out_path}")
+
 
 if __name__ == "__main__":
     main()
