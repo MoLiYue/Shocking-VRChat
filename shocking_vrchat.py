@@ -1436,49 +1436,69 @@ def api_v1_wave_presets():
 @app.route('/api/v1/wave_presets/<preset_name>/preview')
 def api_v1_wave_preset_preview(preset_name):
     from srv.wave_preset import WavePresetLibrary
+    from pulse_to_hex.dglab_pulse_converter import parse_pulse
+    import os
+
     lib = WavePresetLibrary()
     preset = lib.get(preset_name)
     if not preset:
         return {'error': 'preset not found'}, 404
 
-    header = preset.get('header') or {}
-    speed = header.get('speed', 1) or 1
-    pulse_base_ms = 100.0 / speed  # base pulse duration: 100ms/speed
+    # Try to load source .pulse file for section-level view
+    pulse_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'dg-lab')
+    pulse_file = os.path.join(pulse_dir, preset_name + '.pulse')
+    if not os.path.exists(pulse_file):
+        # Fallback: just return flat ops data
+        ops = preset.get('ops', [])
+        strengths = []
+        for op in ops:
+            for i in range(4):
+                strengths.append(int(op[8 + i * 2:8 + i * 2 + 2], 16))
+        return {
+            'name': preset_name,
+            'sections': [{'points': [{'strength': s} for s in strengths]}],
+        }
 
-    # Each op = 4 pulses. Extract per-pulse data.
-    # Width = freq_byte mapped back to interval (represents pulse period/duty cycle)
-    # freq_byte: 240→10ms(high freq, narrow), 10→1000ms(low freq, wide)
-    ops = preset.get('ops', [])
-    pulses = []  # list of {strength, freq_byte, width_ms}
-    for op in ops:
-        for i in range(4):
-            freq_byte = int(op[i * 2:i * 2 + 2], 16)
-            strength = int(op[8 + i * 2:8 + i * 2 + 2], 16)
-            # Map freq_byte back to interval: byte 240→10ms, byte 10→1000ms (inverse linear)
-            interval_ms = 10 + (240 - freq_byte) * (1000 - 10) / (240 - 10)
-            pulses.append({
-                'strength': strength,
-                'freq_byte': freq_byte,
-                'width_ms': round(interval_ms, 1),
+    with open(pulse_file, 'r', encoding='utf-8') as f:
+        pulse_text = f.read().strip()
+
+    header, sections = parse_pulse(pulse_text)
+    speed = header.speed if header else 1
+
+    # Build section-level preview: each enabled section with its point list
+    result_sections = []
+    for sec in sections:
+        if not sec.enabled:
+            continue
+        if not sec.points:
+            continue
+        import math
+        n_points = len(sec.points)
+        duration = max(0, sec.duration)
+        repeats = max(1, math.ceil(duration / n_points)) if duration > 0 else 1
+
+        points = []
+        for val, flag in sec.points:
+            points.append({
+                'strength': round(max(0, min(100, val))),
+                'anchor': flag == 1,
             })
 
-    # Calculate total duration (sum of all pulse intervals)
-    total_ms = sum(p['width_ms'] for p in pulses)
-
-    # Downsample if too many pulses (keep max 400 for rendering)
-    if len(pulses) > 400:
-        step = len(pulses) / 400
-        pulses = [pulses[int(i * step)] for i in range(400)]
-        total_ms = sum(p['width_ms'] for p in pulses)
+        result_sections.append({
+            'freq_low': sec.freq_low,
+            'freq_high': sec.freq_high,
+            'freq_mode': sec.freq_mode,
+            'duration': duration,
+            'n_points': n_points,
+            'repeats': repeats,
+            'points': points,
+        })
 
     return {
         'name': preset_name,
-        'ops_count': len(ops),
-        'total_pulses': len(preset.get('ops', [])) * 4,
         'speed': speed,
-        'pulse_base_ms': pulse_base_ms,
-        'total_duration_ms': total_ms,
-        'pulses': pulses,
+        'rest_ticks': header.rest_ticks if header else 0,
+        'sections': result_sections,
     }
 
 @app.route('/api/v1/wave_preset/<channel>/<preset_name>/<int:duration>')

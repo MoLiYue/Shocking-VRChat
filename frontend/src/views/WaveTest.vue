@@ -29,10 +29,13 @@ let updateTimer: ReturnType<typeof setTimeout> | null = null
 // Preset preview
 const previewCanvasRef = ref<HTMLCanvasElement | null>(null)
 const previewInfo = ref('')
-interface PulseData { strength: number; freq_byte: number; width_ms: number }
-const previewPulses = ref<PulseData[]>([])
+interface SectionData {
+  freq_low: number; freq_high: number; freq_mode: number
+  duration: number; n_points: number; repeats: number
+  points: { strength: number; anchor: boolean }[]
+}
+const previewSections = ref<SectionData[]>([])
 const previewSpeed = ref(1)
-const previewDuration = ref(0)
 
 // Chart.js config (real-time)
 const chartData = computed(() => ({
@@ -86,16 +89,16 @@ async function loadPresets() {
 
 async function loadPreview() {
   if (!preset.value) {
-    previewPulses.value = []
+    previewSections.value = []
     previewInfo.value = ''
     return
   }
   try {
     const data = await api(`/api/v1/wave_presets/${encodeURIComponent(preset.value)}/preview`)
-    previewPulses.value = data.pulses || []
+    previewSections.value = data.sections || []
     previewSpeed.value = data.speed || 1
-    previewDuration.value = data.total_duration_ms || 0
-    previewInfo.value = `${data.ops_count} ops · ${data.total_pulses} 脉冲 · ${(data.total_duration_ms / 1000).toFixed(1)}s · ${data.speed}x`
+    const totalPulses = previewSections.value.reduce((sum: number, s: SectionData) => sum + s.n_points * s.repeats, 0)
+    previewInfo.value = `${previewSections.value.length} 小节 · ${totalPulses} 脉冲 · ${data.speed || 1}x`
     await nextTick()
     drawPreview()
   } catch {
@@ -121,61 +124,80 @@ function drawPreview() {
   ctx.fillStyle = 'rgba(15, 15, 30, 0.95)'
   ctx.fillRect(0, 0, w, h)
 
-  // Grid
-  ctx.strokeStyle = 'rgba(139,92,246,0.1)'
-  ctx.lineWidth = 1
-  for (let y = 0; y <= 100; y += 25) {
-    const py = h - (y / 100) * (h - 4)
-    ctx.beginPath()
-    ctx.moveTo(0, py)
-    ctx.lineTo(w, py)
-    ctx.stroke()
-  }
+  const sections = previewSections.value
+  if (!sections.length) return
 
-  const pulses = previewPulses.value
-  if (!pulses.length) return
+  // Total pulses across all sections (with repeats)
+  const totalPulses = sections.reduce((sum, s) => sum + s.n_points * s.repeats, 0)
+  if (totalPulses <= 0) return
 
-  // Calculate total time in ms
-  const totalMs = pulses.reduce((sum, p) => sum + p.width_ms, 0)
-  if (totalMs <= 0) return
-
-  // Draw bars: width proportional to pulse width_ms, height = strength
+  const barW = w / totalPulses
   let x = 0
-  for (const pulse of pulses) {
-    const barW = (pulse.width_ms / totalMs) * w
-    const barH = (pulse.strength / 100) * (h - 4)
+  const colors = [
+    'rgba(139,92,246,', // purple
+    'rgba(59,130,246,', // blue
+    'rgba(52,211,153,', // green
+    'rgba(251,191,36,', // amber
+    'rgba(248,113,113,', // red
+    'rgba(168,85,247,', // violet
+  ]
 
-    if (pulse.strength > 0) {
-      // Color intensity based on freq_byte: high freq (240) = purple, low freq (10) = red
-      const freqT = (pulse.freq_byte - 10) / 230  // 0=low freq, 1=high freq
-      const r = Math.round(139 + (1 - freqT) * 100)
-      const g = Math.round(92 * freqT)
-      const b = Math.round(246 * freqT + 100 * (1 - freqT))
-      ctx.fillStyle = `rgba(${r},${g},${b},0.85)`
-      ctx.fillRect(x, h - barH, barW, barH)
+  for (let si = 0; si < sections.length; si++) {
+    const sec = sections[si]
+    const baseColor = colors[si % colors.length]
+
+    for (let rep = 0; rep < sec.repeats; rep++) {
+      const alpha = rep === 0 ? '0.85)' : '0.45)'
+      for (let pi = 0; pi < sec.n_points; pi++) {
+        const pt = sec.points[pi]
+        const barH = (pt.strength / 100) * (h - 18)
+
+        if (pt.strength > 0) {
+          ctx.fillStyle = baseColor + alpha
+          ctx.fillRect(x, h - 16 - barH, Math.max(barW - 0.3, 0.5), barH)
+        }
+        x += barW
+      }
     }
-    x += barW
+
+    // Section divider
+    if (si < sections.length - 1) {
+      ctx.strokeStyle = 'rgba(255,255,255,0.2)'
+      ctx.lineWidth = 1
+      ctx.setLineDash([2, 2])
+      ctx.beginPath()
+      ctx.moveTo(x, 0)
+      ctx.lineTo(x, h - 16)
+      ctx.stroke()
+      ctx.setLineDash([])
+    }
   }
 
-  // Y-axis labels
-  ctx.fillStyle = 'rgba(255,255,255,0.4)'
-  ctx.font = '10px Inter, sans-serif'
-  ctx.fillText('100%', 2, 12)
-  ctx.fillText('0%', 2, h - 2)
-
-  // Time axis
-  const totalSec = totalMs / 1000
-  const step = totalSec > 10 ? 5 : totalSec > 5 ? 2 : 1
-  ctx.fillStyle = 'rgba(255,255,255,0.3)'
+  // Y labels
+  ctx.fillStyle = 'rgba(255,255,255,0.35)'
   ctx.font = '9px Inter, sans-serif'
-  for (let t = step; t < totalSec; t += step) {
-    const tx = (t / totalSec) * w
-    ctx.fillText(`${t}s`, tx, h - 2)
-    ctx.strokeStyle = 'rgba(255,255,255,0.05)'
-    ctx.beginPath()
-    ctx.moveTo(tx, 0)
-    ctx.lineTo(tx, h)
-    ctx.stroke()
+  ctx.fillText('100%', 2, 10)
+  ctx.fillText('0%', 2, h - 18)
+
+  // Section labels
+  x = 0
+  for (let si = 0; si < sections.length; si++) {
+    const sec = sections[si]
+    const secW = sec.n_points * sec.repeats * barW
+    const label = `${sec.n_points}×${sec.repeats}`
+    ctx.fillStyle = colors[si % colors.length] + '0.9)'
+    ctx.font = '9px Inter, sans-serif'
+    const tx = x + secW / 2 - ctx.measureText(label).width / 2
+    ctx.fillText(label, Math.max(tx, x + 1), h - 4)
+    x += secW
+  }
+
+  // Grid
+  ctx.strokeStyle = 'rgba(139,92,246,0.06)'
+  ctx.lineWidth = 1
+  for (let pct = 25; pct <= 75; pct += 25) {
+    const py = h - 16 - (pct / 100) * (h - 18)
+    ctx.beginPath(); ctx.moveTo(0, py); ctx.lineTo(w, py); ctx.stroke()
   }
 }
 
@@ -339,9 +361,9 @@ onUnmounted(() => {
           <div class="preview-info">{{ previewInfo }}</div>
           <canvas ref="previewCanvasRef" class="preview-canvas"></canvas>
           <div class="preview-legend">
-            <span class="legend-item"><span class="legend-dot purple"></span>高频(柔和)</span>
-            <span class="legend-item"><span class="legend-dot red"></span>低频(尖锐)</span>
-            <span class="legend-item">柱宽 = 脉冲时长</span>
+            <span class="legend-item">每柱=1脉冲</span>
+            <span class="legend-item">浅色=循环重复</span>
+            <span class="legend-item">虚线=小节分界</span>
           </div>
         </div>
         <div v-else class="empty-preview">选择预设查看波形预览</div>
@@ -380,9 +402,6 @@ onUnmounted(() => {
 .preview-canvas { width: 100%; height: 150px; border-radius: var(--radius-md); display: block; }
 .preview-legend { display: flex; gap: var(--sp-4); font-size: var(--text-xs); color: var(--text-muted); padding-top: var(--sp-1); }
 .legend-item { display: flex; align-items: center; gap: var(--sp-1); }
-.legend-dot { width: 10px; height: 10px; border-radius: 2px; }
-.legend-dot.purple { background: rgba(139,92,246,0.85); }
-.legend-dot.red { background: rgba(239,92,100,0.85); }
 .empty-preview { padding: var(--sp-6); text-align: center; color: var(--text-muted); font-size: var(--text-sm); }
 .equiv-table { margin-bottom: var(--sp-4); }
 .equiv-row { display: flex; justify-content: space-between; align-items: center; padding: var(--sp-2) var(--sp-3); border-radius: var(--radius-sm); font-size: var(--text-sm); }
