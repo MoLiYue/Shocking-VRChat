@@ -16,6 +16,7 @@ const waveData = ref<WaveSample[]>([])
 const rtCanvasRef = ref<HTMLCanvasElement | null>(null)
 let pollTimer: ReturnType<typeof setInterval> | null = null
 let updateTimer: ReturnType<typeof setTimeout> | null = null
+let resizeObserver: ResizeObserver | null = null
 
 // Preset preview
 const previewCanvasRef = ref<HTMLCanvasElement | null>(null)
@@ -37,6 +38,7 @@ function drawRealtime() {
 
   const dpr = window.devicePixelRatio || 1
   const rect = canvas.getBoundingClientRect()
+  if (rect.width < 1 || rect.height < 1) return  // not laid out yet
   canvas.width = rect.width * dpr
   canvas.height = rect.height * dpr
   ctx.scale(dpr, dpr)
@@ -106,7 +108,8 @@ async function loadPreview() {
     const totalPulses = previewSections.value.reduce((sum: number, s: SectionData) => sum + s.n_points * s.repeats, 0)
     previewInfo.value = `${previewSections.value.length} 小节 · ${totalPulses} 脉冲 · ${data.speed || 1}x`
     await nextTick()
-    drawPreview()
+    // Use rAF to ensure browser has laid out the element after v-if flip
+    requestAnimationFrame(() => { drawPreview() })
   } catch {
     previewInfo.value = '加载失败'
   }
@@ -120,6 +123,7 @@ function drawPreview() {
 
   const dpr = window.devicePixelRatio || 1
   const rect = canvas.getBoundingClientRect()
+  if (rect.width < 1 || rect.height < 1) return  // not laid out yet
   canvas.width = rect.width * dpr
   canvas.height = rect.height * dpr
   ctx.scale(dpr, dpr)
@@ -330,11 +334,22 @@ onMounted(async () => {
   if (preset.value) {
     await loadPreview()
   }
+  // Observe canvas resize to redraw
+  resizeObserver = new ResizeObserver(() => {
+    drawRealtime()
+    if (previewSections.value.length) drawPreview()
+  })
+  if (rtCanvasRef.value) resizeObserver.observe(rtCanvasRef.value)
+  // previewCanvasRef may not exist yet (v-if), watch for it
+  watch(previewCanvasRef, (el) => {
+    if (el && resizeObserver) resizeObserver.observe(el)
+  }, { immediate: true })
 })
 
 onUnmounted(() => {
   stopPolling()
   if (updateTimer) clearTimeout(updateTimer)
+  if (resizeObserver) { resizeObserver.disconnect(); resizeObserver = null }
 })
 </script>
 
