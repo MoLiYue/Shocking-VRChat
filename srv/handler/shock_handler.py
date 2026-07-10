@@ -333,7 +333,7 @@ class ShockHandler(BaseHandler):
         return mode_conf.get('wave_envelope_curve', 'smoothstep')
 
     def get_texture_floor(self, mode_name):
-        return max(0.0, min(1.0, float(self.get_mode_conf(mode_name).get('texture_floor', 0.35))))
+        return max(0.0, min(1.0, float(self.get_mode_conf(mode_name).get('texture_floor', 0.0))))
 
     def build_dynamic_wave(self, mode_name, from_strength, to_strength, *, preset_name=None, wave_scale=None):
         mode_conf = self.get_mode_conf(mode_name)

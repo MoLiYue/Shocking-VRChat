@@ -736,7 +736,7 @@ async def _wave_test_loop(stop_event: asyncio.Event):
                     wavestr = lib.build_resampled_window(
                         preset_name, start_position=wave_position,
                         window_ops=10, wave_scale=wave_scale,
-                        texture_floor=0.35, sample_step=1.0,
+                        texture_floor=0.0, sample_step=1.0,
                     )
                     wave_position += 40.0
                 if not wavestr:
