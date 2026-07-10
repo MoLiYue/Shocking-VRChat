@@ -116,11 +116,12 @@ Point List 中的每个点代表一个脉冲（1 tick = 100ms = 0.1s）。设 Po
 | 值 | 模式 | 描述 |
 |----|------|------|
 | 1 | 固定 | 整个 Section 使用 freq_low 作为固定频率，freq_high 忽略 |
-| 2 | 线性渐变 | 频率从 freq_low 到 freq_high 线性过渡（跨整个 Section 时长） |
-| 3 | 循环渐变 | 每个波形单元内频率从 freq_low 到 freq_high 循环一次 |
-| 4 | 分段递进 | 每重复一次波形单元，频率递进一级（从 freq_low 到 freq_high） |
+| 2 | 节内渐变 | 频率从 freq_low 到 freq_high 线性过渡（跨整个 Section 全部脉冲） |
+| 3 | 元内渐变 | 每个波形单元内频率从 freq_low 到 freq_high 循环渐变一次 |
+| 4 | 元间渐变 | 每个波形单元内部频率固定，但从第一个单元到最后一个单元，频率从 freq_low 线性渐变到 freq_high |
 
-> 注意：freq_low 不一定小于 freq_high。当 freq_low > freq_high 时，频率变化方向相反（从低频向高频渐变）。
+> 频率分配精度为**每个脉冲**（每个 point），不是每个 op。一个 op 内的 4 个脉冲可以有不同频率。
+> freq_low 不一定小于 freq_high。当 freq_low > freq_high 时，频率变化方向相反。
 
 #### enabled 字段
 

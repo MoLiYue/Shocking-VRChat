@@ -246,62 +246,44 @@ def convert_to_ops(
         else:
             repeats = math.ceil(duration / n_points)
 
-        # Get strength values (each point = 1 op = 100ms)
+        # Get strength values (each point = 1 pulse)
         strengths = [max(0.0, min(100.0, v)) for v, _ in sec.points]
 
-        # Calculate freq bytes
-        # Mode 1: fixed, use freq_low only
-        # Mode 2/3/4: freq varies between freq_low and freq_high
+        # Calculate freq bytes for interpolation endpoints
         f_low = slider_to_freq_byte(sec.freq_low)
         f_high = slider_to_freq_byte(sec.freq_high)
 
-        # Build frequency sequence for one unit based on freq_mode
-        unit_freqs: List[int] = []
-        if sec.freq_mode == 1:
-            # Fixed: all use freq_low
-            unit_freqs = [f_low] * n_points
-        elif sec.freq_mode == 2:
-            # Linear: interpolate from f_low to f_high across the full section duration
-            total_ops = repeats * n_points
-            # We'll handle this below per-op instead
-            unit_freqs = []  # placeholder
-        elif sec.freq_mode == 3:
-            # Cycle: interpolate f_low→f_high within each unit
-            for i in range(n_points):
-                t = i / (n_points - 1) if n_points > 1 else 0.0
-                unit_freqs.append(int(round(f_low + (f_high - f_low) * t)))
-        elif sec.freq_mode == 4:
-            # Stepped: frequency changes per repetition
-            unit_freqs = [f_low] * n_points  # placeholder, will be overridden per-repeat
-        else:
-            unit_freqs = [f_low] * n_points
-
-        # Generate ops: every 4 points pack into 1 op (4 pulses × 0.1s = 0.4s per op)
         # Build the full sequence of points (all repetitions)
+        # Each point = 1 pulse (one 25ms sub-step in the device protocol)
         all_strengths: List[float] = []
-        all_freqs: List[float] = []
-        total_points = repeats * n_points
+        all_freqs: List[int] = []
+        total_pulses = repeats * n_points
 
-        for pt_idx in range(total_points):
-            unit_idx = pt_idx % n_points
-            repeat_idx = pt_idx // n_points
+        for pulse_idx in range(total_pulses):
+            unit_idx = pulse_idx % n_points      # position within current wave unit
+            repeat_idx = pulse_idx // n_points   # which repetition we're in
 
-            # Strength from point list
+            # Strength from point list (cyclic)
             all_strengths.append(strengths[unit_idx])
 
             # Frequency depends on mode
-            if sec.freq_mode == 2:
-                # Linear across entire section
-                t = pt_idx / (total_points - 1) if total_points > 1 else 0.0
-                all_freqs.append(f_low + (f_high - f_low) * t)
-            elif sec.freq_mode == 4:
-                # Stepped per repetition
-                t = repeat_idx / (repeats - 1) if repeats > 1 else 0.0
-                all_freqs.append(f_low + (f_high - f_low) * t)
+            if sec.freq_mode == 1:
+                # Fixed: all pulses use freq_low
+                all_freqs.append(f_low)
+            elif sec.freq_mode == 2:
+                # 节内渐变: linear from f_low to f_high across entire section
+                t = pulse_idx / (total_pulses - 1) if total_pulses > 1 else 0.0
+                all_freqs.append(int(round(f_low + (f_high - f_low) * t)))
             elif sec.freq_mode == 3:
-                all_freqs.append(float(unit_freqs[unit_idx]))
+                # 元内渐变: linear from f_low to f_high within each wave unit
+                t = unit_idx / (n_points - 1) if n_points > 1 else 0.0
+                all_freqs.append(int(round(f_low + (f_high - f_low) * t)))
+            elif sec.freq_mode == 4:
+                # 元间渐变: fixed within each unit, changes between units
+                t = repeat_idx / (repeats - 1) if repeats > 1 else 0.0
+                all_freqs.append(int(round(f_low + (f_high - f_low) * t)))
             else:
-                all_freqs.append(float(f_low))
+                all_freqs.append(f_low)
 
         # Pad to multiple of 4 (repeat last value)
         while len(all_strengths) % 4 != 0:
