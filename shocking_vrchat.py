@@ -437,6 +437,19 @@ async def api_v1_status():
 def api_v1_wave_history():
     return {'A': _get_wave_history_snapshot('A'), 'B': _get_wave_history_snapshot('B')}
 
+@app.route('/api/v1/wave_history/stream')
+def api_v1_wave_history_stream():
+    """Incremental wave history: return only samples after 'since' seq number."""
+    channel = request.args.get('channel', 'A').upper()
+    since = int(request.args.get('since', 0))
+    history = _wave_history.get(channel, collections.deque())
+    # Filter samples with seq > since
+    new_samples = [s for s in history if s.get('seq', 0) > since]
+    # Return samples without the seq field to save bandwidth, but include latest seq
+    latest_seq = _wave_history_seq.get(channel, 0)
+    samples = [{'s': s['s'], 'f': s['f']} for s in new_samples]
+    return {'samples': samples, 'seq': latest_seq, 'sample_ms': WAVE_HISTORY_SAMPLE_MS}
+
 @app.route('/api/v1/osc_activity')
 def api_v1_osc_activity():
     return {'events': list(_osc_activity)}
@@ -1634,6 +1647,7 @@ def _record_osc_activity(address, value, channel, mode):
 # Wave history ring buffer for dashboard visualization
 _wave_history = {'A': collections.deque(maxlen=800), 'B': collections.deque(maxlen=800)}
 _wave_history_last_update = {'A': 0.0, 'B': 0.0}
+_wave_history_seq = {'A': 0, 'B': 0}
 
 def _record_wave(channel, wavestr):
     """Parse wavestr and append (strength, freq) samples to history."""
@@ -1645,7 +1659,8 @@ def _record_wave(channel, wavestr):
             for i in range(4):
                 freq = int(op[i*2:i*2+2], 16)
                 strength = int(op[8+i*2:10+i*2], 16)
-                _wave_history[channel].append({'s': strength, 'f': freq})
+                _wave_history_seq[channel] += 1
+                _wave_history[channel].append({'s': strength, 'f': freq, 'seq': _wave_history_seq[channel]})
         _wave_history_last_update[channel] = time.monotonic()
     except Exception:
         pass

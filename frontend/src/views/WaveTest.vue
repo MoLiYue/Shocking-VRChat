@@ -10,13 +10,23 @@ const presets = ref<string[]>([])
 const playing = ref(false)
 const msg = ref('')
 
-// Waveform data (real-time)
+// Waveform data (real-time scrolling)
 interface WaveSample { s: number; f: number }
-const waveData = ref<WaveSample[]>([])
 const rtCanvasRef = ref<HTMLCanvasElement | null>(null)
-let pollTimer: ReturnType<typeof setInterval> | null = null
 let updateTimer: ReturnType<typeof setTimeout> | null = null
 let resizeObserver: ResizeObserver | null = null
+
+// Scrolling waveform state
+const DISPLAY_SLOTS = 200         // Number of pulse slots visible on screen
+const SLOT_MS = 25                // Each slot = 25ms (matches backend WAVE_HISTORY_SAMPLE_MS)
+const POLL_MS = 150               // How often to fetch new data from server
+let rtBuffer: WaveSample[] = []   // Samples currently on display
+let pendingQueue: WaveSample[] = []  // Samples received but not yet released to display
+let lastSeq = 0                   // Last sequence number received from server
+let animFrameId = 0               // requestAnimationFrame ID
+let lastFrameTime = 0             // For metering samples into display
+let sampleDebt = 0                // Fractional samples owed to display
+let pollTimer: ReturnType<typeof setInterval> | null = null
 
 // Preset preview
 const previewCanvasRef = ref<HTMLCanvasElement | null>(null)
@@ -29,7 +39,7 @@ interface SectionData {
 const previewSections = ref<SectionData[]>([])
 const previewSpeed = ref(1)
 
-// Real-time waveform canvas drawing
+// Real-time waveform canvas drawing (smooth scrolling)
 function drawRealtime() {
   const canvas = rtCanvasRef.value
   if (!canvas) return
@@ -38,7 +48,7 @@ function drawRealtime() {
 
   const dpr = window.devicePixelRatio || 1
   const rect = canvas.getBoundingClientRect()
-  if (rect.width < 1 || rect.height < 1) return  // not laid out yet
+  if (rect.width < 1 || rect.height < 1) return
   canvas.width = rect.width * dpr
   canvas.height = rect.height * dpr
   ctx.scale(dpr, dpr)
@@ -57,22 +67,30 @@ function drawRealtime() {
     ctx.beginPath(); ctx.moveTo(0, py); ctx.lineTo(w, py); ctx.stroke()
   }
 
-  const data = waveData.value
-  if (!data.length) return
+  if (!rtBuffer.length) {
+    ctx.fillStyle = 'rgba(255,255,255,0.2)'
+    ctx.font = '12px Inter, sans-serif'
+    ctx.textAlign = 'center'
+    ctx.fillText('等待波形数据...', w / 2, h / 2)
+    ctx.textAlign = 'start'
+    return
+  }
 
-  // Each pulse gets an equal-width slot
-  const slotW = w / data.length
+  // Draw the last DISPLAY_SLOTS samples right-justified
+  const slotW = w / DISPLAY_SLOTS
+  const startIdx = Math.max(0, rtBuffer.length - DISPLAY_SLOTS)
+  const visibleCount = rtBuffer.length - startIdx
+  // Right-justify: first visible sample starts at (DISPLAY_SLOTS - visibleCount) * slotW
+  const xBase = (DISPLAY_SLOTS - visibleCount) * slotW
 
-  for (let i = 0; i < data.length; i++) {
-    const sample = data[i]
+  for (let i = 0; i < visibleCount; i++) {
+    const sample = rtBuffer[startIdx + i]
     if (sample.s <= 0) continue
 
-    // Duty cycle: freq_byte 240→100% fill, freq_byte 10→~1% fill
-    // Higher freq_byte = shorter interval = higher duty cycle
     const dutyCycle = Math.max(0.05, (sample.f - 10) / (240 - 10))
     const barW = slotW * dutyCycle
     const barH = (sample.s / 100) * h
-    const x = i * slotW + (slotW - barW) / 2  // center within slot
+    const x = xBase + i * slotW + (slotW - barW) / 2
 
     // Color: high freq = purple, low freq = reddish
     const freqT = (sample.f - 10) / 230
@@ -88,6 +106,11 @@ function drawRealtime() {
   ctx.font = '9px Inter, sans-serif'
   ctx.fillText('100%', 2, 10)
   ctx.fillText('0%', 2, h - 2)
+
+  // Time scale label
+  const totalSeconds = (DISPLAY_SLOTS * SLOT_MS / 1000).toFixed(1)
+  ctx.fillStyle = 'rgba(255,255,255,0.25)'
+  ctx.fillText(`${totalSeconds}s`, w - 25, h - 2)
 }
 
 async function loadPresets() {
@@ -305,14 +328,63 @@ function onParamChange() {
 
 function startPolling() {
   if (pollTimer) return
-  pollTimer = setInterval(async () => {
-    try {
-      const data = await api('/api/v1/wave_history')
-      const ch = channel.value
-      waveData.value = data[ch] || []
-      drawRealtime()
-    } catch {}
-  }, 200)
+  // Reset state
+  lastSeq = 0
+  rtBuffer = []
+  pendingQueue = []
+  sampleDebt = 0
+  lastFrameTime = 0
+
+  // Periodic data fetch (incremental)
+  pollTimer = setInterval(fetchNewSamples, POLL_MS)
+  fetchNewSamples()  // immediate first fetch
+
+  // Start animation loop
+  animFrameId = requestAnimationFrame(animLoop)
+}
+
+async function fetchNewSamples() {
+  try {
+    const data = await api(`/api/v1/wave_history/stream?channel=${channel.value}&since=${lastSeq}`)
+    if (data.samples && data.samples.length > 0) {
+      pendingQueue.push(...data.samples)
+    }
+    if (data.seq !== undefined) lastSeq = data.seq
+  } catch {}
+}
+
+function animLoop(now: number) {
+  if (!playing.value) {
+    animFrameId = 0
+    return
+  }
+
+  // Meter samples from pendingQueue into rtBuffer at real-time speed
+  if (lastFrameTime > 0 && pendingQueue.length > 0) {
+    const dt = now - lastFrameTime
+    // How many samples worth of time has elapsed
+    sampleDebt += dt / SLOT_MS
+    const toRelease = Math.min(Math.floor(sampleDebt), pendingQueue.length)
+    if (toRelease > 0) {
+      rtBuffer.push(...pendingQueue.splice(0, toRelease))
+      sampleDebt -= toRelease
+      // Trim buffer
+      if (rtBuffer.length > DISPLAY_SLOTS * 2) {
+        rtBuffer = rtBuffer.slice(rtBuffer.length - DISPLAY_SLOTS * 2)
+      }
+    }
+  } else if (pendingQueue.length > 0 && lastFrameTime === 0) {
+    // First frame: dump initial batch immediately for instant feedback
+    rtBuffer.push(...pendingQueue.splice(0))
+    if (rtBuffer.length > DISPLAY_SLOTS * 2) {
+      rtBuffer = rtBuffer.slice(rtBuffer.length - DISPLAY_SLOTS * 2)
+    }
+    sampleDebt = 0
+  }
+  lastFrameTime = now
+
+  drawRealtime()
+  animFrameId = requestAnimationFrame(animLoop)
 }
 
 function stopPolling() {
@@ -320,6 +392,13 @@ function stopPolling() {
     clearInterval(pollTimer)
     pollTimer = null
   }
+  if (animFrameId) {
+    cancelAnimationFrame(animFrameId)
+    animFrameId = 0
+  }
+  lastFrameTime = 0
+  // Draw final state
+  drawRealtime()
 }
 
 watch([strength, waveScale], onParamChange)
@@ -336,7 +415,7 @@ onMounted(async () => {
   }
   // Observe canvas resize to redraw
   resizeObserver = new ResizeObserver(() => {
-    drawRealtime()
+    if (!playing.value) drawRealtime()  // When playing, animLoop handles it
     if (previewSections.value.length) drawPreview()
   })
   if (rtCanvasRef.value) resizeObserver.observe(rtCanvasRef.value)
