@@ -11,8 +11,6 @@ const limit = ref({ A: 100, B: 100 })
 const oscStatus = ref('')
 const lastTrigger = ref('-')
 const oscEvents = ref<any[]>([])
-const waveA = ref<{s: number; f: number}[]>([])
-const waveB = ref<{s: number; f: number}[]>([])
 const canvasARef = ref<HTMLCanvasElement | null>(null)
 const canvasBRef = ref<HTMLCanvasElement | null>(null)
 const qrContent = ref('')
@@ -25,6 +23,18 @@ const profileMsg = ref('')
 
 let intervals: number[] = []
 let dashWs: WebSocket | null = null
+
+// Wave animation state (same approach as WaveTest: pending queue + rAF metering)
+const DISPLAY_SLOTS = 200
+const SLOT_MS = 25
+let pendingA: {s: number; f: number}[] = []
+let pendingB: {s: number; f: number}[] = []
+let bufferA: {s: number; f: number}[] = []
+let bufferB: {s: number; f: number}[] = []
+let debtA = 0
+let debtB = 0
+let animId = 0
+let lastFrame = 0
 
 // --- WebSocket-based real-time data ---
 function connectLiveWs() {
@@ -39,13 +49,9 @@ function connectLiveWs() {
     try {
       const msg = JSON.parse(ev.data)
       if (msg.topic === 'wave_A' && msg.samples) {
-        waveA.value.push(...msg.samples)
-        if (waveA.value.length > 200) waveA.value = waveA.value.slice(-200)
-        drawWave(canvasARef.value, waveA.value)
+        pendingA.push(...msg.samples)
       } else if (msg.topic === 'wave_B' && msg.samples) {
-        waveB.value.push(...msg.samples)
-        if (waveB.value.length > 200) waveB.value = waveB.value.slice(-200)
-        drawWave(canvasBRef.value, waveB.value)
+        pendingB.push(...msg.samples)
       } else if (msg.topic === 'osc' && msg.event) {
         oscEvents.value.unshift(msg.event)
         if (oscEvents.value.length > 20) oscEvents.value = oscEvents.value.slice(0, 20)
@@ -99,7 +105,7 @@ async function pollStatus() {
   } catch { connected.value = false }
 }
 
-function drawWave(canvas: HTMLCanvasElement | null, samples: {s: number; f: number}[]) {
+function drawWaveCanvas(canvas: HTMLCanvasElement | null, buffer: {s: number; f: number}[]) {
   if (!canvas) return
   const dpr = window.devicePixelRatio || 1
   const W = canvas.clientWidth
@@ -110,11 +116,9 @@ function drawWave(canvas: HTMLCanvasElement | null, samples: {s: number; f: numb
   const ctx = canvas.getContext('2d')!
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
 
-  // Clear
   ctx.fillStyle = 'rgba(10, 8, 16, 0.95)'
   ctx.fillRect(0, 0, W, H)
 
-  // Grid
   ctx.strokeStyle = 'rgba(139,92,246,0.08)'
   ctx.lineWidth = 1
   for (let pct = 25; pct <= 75; pct += 25) {
@@ -122,24 +126,22 @@ function drawWave(canvas: HTMLCanvasElement | null, samples: {s: number; f: numb
     ctx.beginPath(); ctx.moveTo(0, py); ctx.lineTo(W, py); ctx.stroke()
   }
 
-  const DISPLAY = 200
-  const data = samples.slice(-DISPLAY)
-  if (!data.length) return
+  if (!buffer.length) return
 
-  const slotW = W / DISPLAY
-  const xBase = (DISPLAY - data.length) * slotW
+  const slotW = W / DISPLAY_SLOTS
+  const startIdx = Math.max(0, buffer.length - DISPLAY_SLOTS)
+  const visibleCount = buffer.length - startIdx
+  const xBase = (DISPLAY_SLOTS - visibleCount) * slotW
 
-  for (let i = 0; i < data.length; i++) {
-    const sample = data[i]
+  for (let i = 0; i < visibleCount; i++) {
+    const sample = buffer[startIdx + i]
     if (sample.s <= 0) continue
 
-    // Duty cycle: f=10 (densest) → widest, f=240 (sparsest) → narrowest
     const dutyCycle = Math.max(0.05, 1 - (sample.f - 10) / (240 - 10))
     const barW = slotW * dutyCycle
     const barH = (sample.s / 100) * H
     const x = xBase + i * slotW + (slotW - barW) / 2
 
-    // Color: high freq (f=10) = purple, low freq (f=240) = reddish
     const freqT = 1 - (sample.f - 10) / 230
     const r = Math.round(139 + (1 - freqT) * 100)
     const g = Math.round(92 * freqT)
@@ -147,6 +149,45 @@ function drawWave(canvas: HTMLCanvasElement | null, samples: {s: number; f: numb
     ctx.fillStyle = `rgba(${r},${g},${b},0.85)`
     ctx.fillRect(x, H - barH, Math.max(barW, 0.5), barH)
   }
+}
+
+function meterAndDraw(now: number) {
+  if (lastFrame > 0) {
+    const dt = now - lastFrame
+    const samplesOwed = dt / SLOT_MS
+    // Channel A
+    if (pendingA.length > 0) {
+      debtA += samplesOwed
+      const n = Math.min(Math.floor(debtA), pendingA.length)
+      if (n > 0) { bufferA.push(...pendingA.splice(0, n)); debtA -= n }
+      if (bufferA.length > DISPLAY_SLOTS * 2) bufferA = bufferA.slice(-DISPLAY_SLOTS * 2)
+    }
+    // Channel B
+    if (pendingB.length > 0) {
+      debtB += samplesOwed
+      const n = Math.min(Math.floor(debtB), pendingB.length)
+      if (n > 0) { bufferB.push(...pendingB.splice(0, n)); debtB -= n }
+      if (bufferB.length > DISPLAY_SLOTS * 2) bufferB = bufferB.slice(-DISPLAY_SLOTS * 2)
+    }
+  } else {
+    // First frame: dump all
+    if (pendingA.length) { bufferA.push(...pendingA.splice(0)); debtA = 0 }
+    if (pendingB.length) { bufferB.push(...pendingB.splice(0)); debtB = 0 }
+    if (bufferA.length > DISPLAY_SLOTS * 2) bufferA = bufferA.slice(-DISPLAY_SLOTS * 2)
+    if (bufferB.length > DISPLAY_SLOTS * 2) bufferB = bufferB.slice(-DISPLAY_SLOTS * 2)
+  }
+  lastFrame = now
+  drawWaveCanvas(canvasARef.value, bufferA)
+  drawWaveCanvas(canvasBRef.value, bufferB)
+  animId = requestAnimationFrame(meterAndDraw)
+}
+
+function startWaveAnim() {
+  if (!animId) animId = requestAnimationFrame(meterAndDraw)
+}
+function stopWaveAnim() {
+  if (animId) { cancelAnimationFrame(animId); animId = 0 }
+  lastFrame = 0
 }
 
 // Profiles
@@ -198,12 +239,13 @@ function timeStr(ts: number) { return new Date(ts * 1000).toLocaleTimeString([],
 onMounted(() => {
   pollStatus(); loadProfiles(); loadQr()
   connectLiveWs()
-  // Reduced polling: only status every 5s as fallback (WS handles real-time)
+  startWaveAnim()
   intervals.push(window.setInterval(pollStatus, 5000))
 })
 onUnmounted(() => {
   intervals.forEach(clearInterval)
   disconnectLiveWs()
+  stopWaveAnim()
 })
 </script>
 
@@ -258,13 +300,13 @@ onUnmounted(() => {
         <!-- Wave visualization -->
         <section class="card">
           <h2>实时波形</h2>
-          <div class="wave-grid">
-            <div class="wave-panel">
-              <div class="wave-label">A</div>
+          <div class="wave-dual">
+            <div class="wave-channel">
+              <div class="wave-ch-label">A</div>
               <canvas ref="canvasARef" class="wave-canvas"></canvas>
             </div>
-            <div class="wave-panel">
-              <div class="wave-label">B</div>
+            <div class="wave-channel">
+              <div class="wave-ch-label">B</div>
               <canvas ref="canvasBRef" class="wave-canvas"></canvas>
             </div>
           </div>
@@ -367,10 +409,10 @@ onUnmounted(() => {
 .qr-text { margin-top: var(--sp-3); font-size: var(--text-xs); font-family: var(--font); color: var(--text-muted); word-break: break-all; padding: var(--sp-2) var(--sp-3); background: rgba(139,92,246,0.05); border-radius: var(--radius-sm); }
 
 /* Wave */
-.wave-grid { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-3); }
-.wave-panel { position: relative; }
-.wave-label { position: absolute; top: var(--sp-2); left: var(--sp-3); font-size: var(--text-xs); font-weight: 700; color: var(--text-muted); }
-.wave-canvas { width: 100%; height: 120px; border-radius: var(--radius-md); background: rgba(10,8,16,0.5); border: 1px solid var(--border); }
+.wave-dual { display: flex; flex-direction: column; gap: var(--sp-2); }
+.wave-channel { display: flex; align-items: stretch; gap: var(--sp-2); }
+.wave-ch-label { display: flex; align-items: center; justify-content: center; width: 24px; font-size: var(--text-xs); font-weight: 600; color: var(--accent); opacity: 0.7; }
+.wave-canvas { width: 100%; height: 80px; border-radius: var(--radius-md); display: block; }
 
 /* Controls */
 .form-field { margin-bottom: var(--sp-4); }
