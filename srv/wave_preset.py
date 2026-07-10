@@ -9,6 +9,15 @@ from loguru import logger
 
 
 def get_runtime_base_dir() -> Path:
+    """Get the directory where the main script/exe lives (for external data files)."""
+    if getattr(sys, "frozen", False):
+        # PyInstaller/Nuitka: exe directory (where wave_presets/ lives alongside)
+        return Path(sys.executable).resolve().parent
+    return Path(__file__).resolve().parent.parent
+
+
+def get_bundled_base_dir() -> Path:
+    """Get the bundled resources dir (for static/templates that ARE packed inside)."""
     if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
         return Path(sys._MEIPASS)
     return Path(__file__).resolve().parent.parent

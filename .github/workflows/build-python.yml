@@ -57,6 +57,10 @@ jobs:
         run: pyinstaller --clean -y shocking_vrchat.spec
         shell: pwsh
 
+      - name: Copy wave_presets alongside binary
+        run: Copy-Item -Recurse wave_presets dist\shocking_vrchat\wave_presets
+        shell: pwsh
+
       - name: Show output size
         run: |
           $size = (Get-ChildItem -Recurse dist\shocking_vrchat | Measure-Object -Property Length -Sum).Sum / 1MB
@@ -102,7 +106,6 @@ jobs:
             --windows-console-mode=attach `
             --include-data-dir=static=static `
             --include-data-dir=templates=templates `
-            --include-data-dir=wave_presets=wave_presets `
             --include-package=srv `
             --include-package=pulse_to_hex `
             --include-module=uvicorn.logging `
@@ -130,6 +133,10 @@ jobs:
             shocking_vrchat.py
         shell: pwsh
 
+      - name: Copy wave_presets alongside binary
+        run: Copy-Item -Recurse wave_presets dist_nuitka\wave_presets
+        shell: pwsh
+
       - name: Show output size
         run: |
           $size = (Get-Item dist_nuitka\shocking_vrchat.exe).Length / 1MB
@@ -139,7 +146,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: shocking-vrchat-nuitka
-          path: dist_nuitka/shocking_vrchat.exe
+          path: dist_nuitka/
 
   release:
     needs: [build-pyinstaller, build-nuitka]

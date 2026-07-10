@@ -21,8 +21,15 @@ from pythonosc.dispatcher import Dispatcher
 
 
 def get_runtime_base_dir():
+    """Bundled resources dir (static, templates - packed inside binary)."""
     if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
         return sys._MEIPASS
+    return os.path.dirname(os.path.abspath(__file__))
+
+def get_exe_dir():
+    """Directory where the exe/script lives (for external files: wave_presets, dg-lab, configs)."""
+    if getattr(sys, "frozen", False):
+        return os.path.dirname(sys.executable)
     return os.path.dirname(os.path.abspath(__file__))
 
 
@@ -960,7 +967,7 @@ DEFAULT_CURVE_POINTS = [{'x': 0, 'y': 0}, {'x': 1, 'y': 1}]
 _curve_config = {}
 
 def _get_curve_config_path():
-    return os.path.join(os.path.dirname(os.path.abspath(__file__)) if not getattr(sys, "frozen", False) else os.path.dirname(sys.executable), 'curve_config.yaml')
+    return os.path.join(get_exe_dir(), 'curve_config.yaml')
 
 def _load_curve_config():
     global _curve_config
@@ -1037,7 +1044,7 @@ _load_curve_config()
 _load_overlimit_rules()
 
 # --- Profile Management ---
-PROFILES_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)) if not getattr(sys, "frozen", False) else os.path.dirname(sys.executable), 'profiles')
+PROFILES_DIR = os.path.join(get_exe_dir(), 'profiles')
 
 def _ensure_profiles_dir():
     os.makedirs(PROFILES_DIR, exist_ok=True)
@@ -1105,7 +1112,7 @@ async def api_v1_profiles_delete(name: str):
 
 
 # --- OSC Recording / Playback ---
-RECORDINGS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)) if not getattr(sys, "frozen", False) else os.path.dirname(sys.executable), 'recordings')
+RECORDINGS_DIR = os.path.join(get_exe_dir(), 'recordings')
 
 _recording_state = {
     'active': False,
@@ -1317,7 +1324,7 @@ async def api_v1_wave_preset_preview(preset_name: str):
     if not preset:
         raise HTTPException(404, 'preset not found')
 
-    pulse_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'dg-lab')
+    pulse_dir = os.path.join(get_exe_dir(), 'dg-lab')
     pulse_file = os.path.join(pulse_dir, preset_name + '.pulse')
     if not os.path.exists(pulse_file):
         ops = preset.get('ops', [])
@@ -1399,7 +1406,7 @@ async def api_v1_wave_presets_import(file: UploadFile = File(...)):
         out_path = PRESET_DIR / f'{preset_name}.json'
         with open(out_path, 'w', encoding='utf-8') as f:
             json.dump(preset_data, f, ensure_ascii=False, indent=2)
-        dg_lab_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'dg-lab')
+        dg_lab_dir = os.path.join(get_exe_dir(), 'dg-lab')
         os.makedirs(dg_lab_dir, exist_ok=True)
         pulse_path = os.path.join(dg_lab_dir, filename)
         with open(pulse_path, 'w', encoding='utf-8') as f:

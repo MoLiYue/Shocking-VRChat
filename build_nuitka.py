@@ -18,10 +18,9 @@ def build():
         "--windows-console-mode=attach",
         "--windows-icon-from-ico=",  # No icon (remove this line or provide .ico)
 
-        # Include data files
+        # Include data files (wave_presets excluded - kept external for easy editing)
         "--include-data-dir=static=static",
         "--include-data-dir=templates=templates",
-        "--include-data-dir=wave_presets=wave_presets",
 
         # Include our package modules
         "--include-package=srv",

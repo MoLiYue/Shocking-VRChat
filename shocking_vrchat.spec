@@ -14,7 +14,7 @@ a = Analysis(
     datas=[
         ('static', 'static'),
         ('templates', 'templates'),
-        ('wave_presets', 'wave_presets'),
+        # wave_presets NOT bundled: kept as external files next to exe for easy editing
     ],
     hiddenimports=[
         # FastAPI / Starlette / Uvicorn
