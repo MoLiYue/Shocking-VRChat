@@ -83,11 +83,6 @@ class CommandQueue:
         return self._queue.empty()
 
     def clear(self):
-        """Discard all pending commands."""
-        while not self._queue.empty():
-            try:
-                self._queue.get_nowait()
-                self._queue.task_done()
-            except asyncio.QueueEmpty:
-                break
+        """Discard all pending commands and recreate queue for new event loop."""
+        self._queue = asyncio.PriorityQueue()
         self._source_last_time.clear()

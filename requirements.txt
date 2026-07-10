@@ -1,5 +1,6 @@
-flask
-flask[async]
+fastapi
+uvicorn[standard]
+python-multipart
 loguru
 websockets
 python-osc

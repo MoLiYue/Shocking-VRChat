@@ -5,7 +5,10 @@ from threading import Thread
 from loguru import logger
 import copy
 
-from flask import Flask, render_template, redirect, request, jsonify
+from fastapi import FastAPI, Request, WebSocket, UploadFile, File, HTTPException
+from fastapi.responses import JSONResponse, HTMLResponse, FileResponse, RedirectResponse
+from fastapi.staticfiles import StaticFiles
+
 from websockets.server import serve as wsserve
 
 import srv
@@ -25,10 +28,10 @@ def get_runtime_base_dir():
 
 RUNTIME_BASE_DIR = get_runtime_base_dir()
 STATIC_DIR = os.path.join(RUNTIME_BASE_DIR, "static")
-app = Flask(__name__,
-            template_folder=os.path.join(RUNTIME_BASE_DIR, "templates"),
-            static_folder=STATIC_DIR,
-            static_url_path='')
+TEMPLATES_DIR = os.path.join(RUNTIME_BASE_DIR, "templates")
+
+app = FastAPI(docs_url=None, redoc_url=None)
+
 WAVE_HISTORY_SAMPLE_MS = 25
 
 CONFIG_FILE_VERSION  = 'v0.2'
@@ -39,22 +42,10 @@ SETTINGS_BASIC = {
     'dglab3':{
         'channel_a': {
             'avatar_params': [
-                {
-                    'path': '/avatar/parameters/pcs/contact/enterPass',
-                    'mode': 'distance',
-                },
-                {
-                    'path': '/avatar/parameters/Shock/TouchAreaA',
-                    'mode': 'distance',
-                },
-                {
-                    'path': '/avatar/parameters/Shock/TouchAreaC',
-                    'mode': 'distance',
-                },
-                {
-                    'path': '/avatar/parameters/Shock/wildcard/*',
-                    'mode': 'distance',
-                },
+                {'path': '/avatar/parameters/pcs/contact/enterPass', 'mode': 'distance'},
+                {'path': '/avatar/parameters/Shock/TouchAreaA', 'mode': 'distance'},
+                {'path': '/avatar/parameters/Shock/TouchAreaC', 'mode': 'distance'},
+                {'path': '/avatar/parameters/Shock/wildcard/*', 'mode': 'distance'},
             ],
             'mode': 'distance',
             'strength_limit': 5,
@@ -62,22 +53,10 @@ SETTINGS_BASIC = {
         },
         'channel_b': {
             'avatar_params': [
-                {
-                    'path': '/avatar/parameters/pcs/contact/enterPass',
-                    'mode': 'distance',
-                },
-                {
-                    'path': '/avatar/parameters/lms-penis-proximityA*',
-                    'mode': 'distance',
-                },
-                {
-                    'path': '/avatar/parameters/Shock/TouchAreaB',
-                    'mode': 'distance',
-                },
-                {
-                    'path': '/avatar/parameters/Shock/TouchAreaC',
-                    'mode': 'distance',
-                },
+                {'path': '/avatar/parameters/pcs/contact/enterPass', 'mode': 'distance'},
+                {'path': '/avatar/parameters/lms-penis-proximityA*', 'mode': 'distance'},
+                {'path': '/avatar/parameters/Shock/TouchAreaB', 'mode': 'distance'},
+                {'path': '/avatar/parameters/Shock/TouchAreaC', 'mode': 'distance'},
             ],
             'mode': 'distance',
             'strength_limit': 5,
@@ -101,47 +80,20 @@ def _default_mode_config():
             'freq_ms': 10,
             'wave_preset': None,
             'wave_scale': 1.0,
-            'base_strength': 0.18,
-            'dynamic_range': 0.30,
-            'texture_floor': 0.35,
-            'wave_window_ops': 4,
-            'wave_sample_step': 1.0,
-            'wave_advance_samples': 4.0,
-            'wave_envelope_curve': 'smoothstep',
+        },
+        'touch': {
+            'wave_preset': None,
+            'wave_scale': 1.0,
+            'n_derivative': 1,
+        },
+        'combo': {
+            'enabled': False,
+            'shock_threshold': 0.9,
+            'shock_hold_ms': 200,
         },
         'trigger_range': {
             'bottom': 0.0,
-            'top': 1.0,
-        },
-        'touch': {
-            'freq_ms': 10,
-            'wave_preset': 'pulse-搓搓揉揉-9058076',
-            'wave_scale': 0.35,
-            'base_strength': 0.20,
-            'dynamic_range': 0.25,
-            'texture_floor': 0.45,
-            'wave_window_ops': 4,
-            'wave_sample_step': 1.0,
-            'wave_advance_samples': 4.0,
-            'wave_envelope_curve': 'smoothstep',
-            'preset_bands': [
-                {'threshold': 0.25, 'wave_preset': 'pulse-摸摸拍拍-9049275', 'wave_scale': 0.25},
-                {'threshold': 0.55, 'wave_preset': 'pulse-搓搓揉揉-9058076', 'wave_scale': 0.35},
-                {'threshold': 0.8, 'wave_preset': 'pulse-加速揉搓-9113608', 'wave_scale': 0.5},
-            ],
-            'n_derivative': 1,
-            'derivative_params': [
-                {'top': 1, 'bottom': 0},
-                {'top': 5, 'bottom': 0},
-                {'top': 50, 'bottom': 0},
-                {'top': 500, 'bottom': 0},
-            ],
-        },
-        'combo': {
-            'switch_duration': 0.3,
-        },
-        'boost': {
-            'value': 30,
+            'top': 0.8,
         },
     }
 
@@ -198,65 +150,43 @@ def normalize_avatar_param_entries(channel_settings: dict):
     normalized = []
     for entry in channel_settings.get('avatar_params', []):
         if isinstance(entry, str):
-            normalized.append({
-                'path': entry,
-                'mode': default_mode,
-                'enabled': True,
-            })
+            normalized.append({'path': entry, 'mode': default_mode, 'enabled': True})
         elif isinstance(entry, dict):
-            path = entry.get('path')
-            if not path:
-                logger.warning(f'Ignoring avatar param config without path: {entry}')
-                continue
             normalized.append({
-                'path': path,
+                'path': entry.get('path', ''),
                 'mode': entry.get('mode', default_mode),
                 'enabled': entry.get('enabled', True),
             })
-        else:
-            logger.warning(f'Ignoring invalid avatar param config: {entry}')
     channel_settings['avatar_params'] = normalized
-    return channel_settings
 
 
 def load_config_files():
-    with open(CONFIG_FILENAME, 'r', encoding='utf-8') as fr:
-        settings = yaml.safe_load(fr)
-    with open(CONFIG_FILENAME_BASIC, 'r', encoding='utf-8') as fr:
-        settings_basic = yaml.safe_load(fr)
-
-    settings = merge_defaults(DEFAULT_SETTINGS, settings)
-    settings_basic = merge_defaults(DEFAULT_SETTINGS_BASIC, settings_basic)
-
-    if settings.get('version', None) != CONFIG_FILE_VERSION or settings_basic.get('version', None) != CONFIG_FILE_VERSION:
-        raise Exception(
-            f'Configuration file version mismatch: {CONFIG_FILENAME_BASIC} {CONFIG_FILENAME}'
-        )
-
-    if settings['ws']['master_uuid'] is None:
-        settings['ws']['master_uuid'] = str(uuid.uuid4())
-
-    for chann in ['channel_a', 'channel_b']:
-        settings['dglab3'][chann]['avatar_params'] = settings_basic['dglab3'][chann]['avatar_params']
-        settings['dglab3'][chann]['mode'] = settings_basic['dglab3'][chann]['mode']
-        settings['dglab3'][chann]['strength_limit'] = settings_basic['dglab3'][chann]['strength_limit']
-        settings['dglab3'][chann]['overlimit_max'] = settings_basic['dglab3'][chann].get('overlimit_max', 20)
-        normalize_avatar_param_entries(settings['dglab3'][chann])
-
-    return settings, settings_basic
+    with open(CONFIG_FILENAME_BASIC, 'r', encoding='utf-8') as f:
+        basic = yaml.safe_load(f)
+    with open(CONFIG_FILENAME, 'r', encoding='utf-8') as f:
+        advanced = yaml.safe_load(f)
+    basic = merge_defaults(DEFAULT_SETTINGS_BASIC, basic)
+    advanced = merge_defaults(DEFAULT_SETTINGS, advanced)
+    # Sync basic params into advanced
+    for ch in ['channel_a', 'channel_b']:
+        advanced['dglab3'][ch]['avatar_params'] = basic['dglab3'][ch]['avatar_params']
+        advanced['dglab3'][ch]['mode'] = basic['dglab3'][ch]['mode']
+        advanced['dglab3'][ch]['strength_limit'] = basic['dglab3'][ch]['strength_limit']
+        if 'overlimit_max' in basic['dglab3'][ch]:
+            advanced['dglab3'][ch]['overlimit_max'] = basic['dglab3'][ch]['overlimit_max']
+        normalize_avatar_param_entries(advanced['dglab3'][ch])
+    return advanced, basic
 
 
 def reset_logger():
     logger.remove()
-    logger.add(sys.stderr, level=SETTINGS['log_level'])
+    logger.add(sys.stderr, level=SETTINGS.get('log_level', 'INFO'))
 
 
 def update_config_mtimes():
-    global CONFIG_MTIMES
-    CONFIG_MTIMES = {
-        CONFIG_FILENAME: os.path.getmtime(CONFIG_FILENAME) if os.path.exists(CONFIG_FILENAME) else None,
-        CONFIG_FILENAME_BASIC: os.path.getmtime(CONFIG_FILENAME_BASIC) if os.path.exists(CONFIG_FILENAME_BASIC) else None,
-    }
+    for path in [CONFIG_FILENAME, CONFIG_FILENAME_BASIC]:
+        if os.path.exists(path):
+            CONFIG_MTIMES[path] = os.path.getmtime(path)
 
 
 def has_config_file_changed():
@@ -273,7 +203,6 @@ def apply_hot_reloadable_settings(new_settings, new_settings_basic):
 
     engine_restart_needed = False
 
-    # Detect changes that need engine restart (OSC/WS/params)
     if new_settings['osc'] != old_settings['osc']:
         engine_restart_needed = True
     if new_settings['ws'] != old_settings['ws']:
@@ -290,12 +219,11 @@ def apply_hot_reloadable_settings(new_settings, new_settings_basic):
         ):
             engine_restart_needed = True
 
-    # Web server port/host cannot be changed at runtime (Flask already bound)
+    # Web server port/host cannot be changed at runtime
     if new_settings['web_server'] != old_settings['web_server']:
         logger.warning("[hot-reload] web_server config changed. Full program restart required to apply.")
         new_settings['web_server'] = old_settings['web_server']
 
-    # Apply all settings
     SETTINGS.clear()
     SETTINGS.update(new_settings)
     SETTINGS_BASIC.clear()
@@ -309,7 +237,6 @@ def apply_hot_reloadable_settings(new_settings, new_settings_basic):
         logger.info("[hot-reload] OSC/WS/param config changed, restarting engine...")
         engine.restart()
     else:
-        # Just refresh handler settings in-place
         for handler in handlers:
             if hasattr(handler, 'refresh_settings'):
                 handler.refresh_settings()
@@ -340,74 +267,59 @@ def get_current_ip():
     s.close()
     return client_ip
 
-@app.route('/get_ip')
-def web_get_ip():
-    return get_current_ip()
-
-@app.route("/")
-def web_index():
-    return _serve_spa()
-
-def _serve_spa():
-    """Serve Vue SPA index.html, fallback to legacy templates."""
-    spa_index = os.path.join(STATIC_DIR, 'index.html')
-    if os.path.exists(spa_index):
-        return app.send_static_file('index.html')
-    # Fallback: legacy template-based dashboard
-    return redirect("/dashboard-legacy", code=302)
-
-@app.route('/dashboard-legacy')
-def web_dashboard_legacy():
-    return render_template('dashboard.html')
-
-@app.route("/qr")
-def web_qr():
-    return render_template('tiny-qr.html', content=get_qr_content())
-
-
 def get_qr_content():
     return (
         f'https://www.dungeon-lab.com/app-download.php#DGLAB-SOCKET#ws://'
         f'{SERVER_IP}:{SETTINGS["ws"]["listen_port"]}/{SETTINGS["ws"]["master_uuid"]}'
     )
 
-@app.after_request
-async def after_request_hook(response):
-    if request.args.get('ret') == 'status' and response.status_code == 200:
-        response = jsonify(await api_v1_status())
-    return response
+def _serve_spa():
+    """Serve Vue SPA index.html."""
+    spa_index = os.path.join(STATIC_DIR, 'index.html')
+    if os.path.exists(spa_index):
+        return FileResponse(spa_index, media_type='text/html')
+    return RedirectResponse("/dashboard-legacy")
 
-class ClientNotAllowed(Exception):
-    pass
+def _read_template(name, **kwargs):
+    """Read a template file and do simple string substitution."""
+    path = os.path.join(TEMPLATES_DIR, name)
+    if not os.path.exists(path):
+        return HTMLResponse("<h1>Template not found</h1>", status_code=404)
+    with open(path, 'r', encoding='utf-8') as f:
+        content = f.read()
+    for key, val in kwargs.items():
+        content = content.replace('{{ ' + key + ' }}', str(val))
+        content = content.replace('{{' + key + '}}', str(val))
+    return HTMLResponse(content)
 
-@app.errorhandler(ClientNotAllowed)
-def hendle_ClientNotAllowed(e):
-    return {
-        "error": "Client not allowed."
-    }, 401
 
-@app.errorhandler(Exception)
-def handle_Exception(e):
-    return {
-        "error": str(e)
-    } , 500
+# --- Page routes ---
+@app.get("/")
+async def web_index():
+    return _serve_spa()
 
-# Disallow (Video)
-# User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/90.0.4430.72 Safari/537.36\r\n
-# User-Agent: NSPlayer/12.00.26100.2314 WMFSDK/12.00.26100.2314\r\n
-# Allow (Text/Image)
-# User-Agent: UnityPlayer/2022.3.22f1-DWR (UnityWebRequest/1.0, libcurl/8.5.0-DEV)\r\n
-def allow_vrchat_only(func):
-    async def wrapper(*args, **kwargs):
-        ua = request.headers.get('User-Agent', '')
-        if 'UnityPlayer' not in ua:
-            raise ClientNotAllowed
-        if 'NSPlayer' in ua or 'WMFSDK' in ua:
-            raise ClientNotAllowed
-        return await func(*args, **kwargs)
-    return wrapper
+@app.get("/get_ip")
+async def web_get_ip():
+    return get_current_ip()
 
-@app.route('/api/v1/status')
+@app.get("/dashboard-legacy")
+async def web_dashboard_legacy():
+    return _read_template('dashboard.html')
+
+@app.get("/qr")
+async def web_qr():
+    return _read_template('tiny-qr.html', content=get_qr_content())
+
+
+# --- Error handling ---
+@app.exception_handler(Exception)
+async def generic_exception_handler(request: Request, exc: Exception):
+    return JSONResponse(status_code=500, content={"error": str(exc)})
+
+
+# --- API Routes ---
+
+@app.get("/api/v1/status")
 async def api_v1_status():
     return {
         'healthy': 'ok',
@@ -430,34 +342,30 @@ async def api_v1_status():
         ],
     }
 
-@app.route('/api/v1/wave_history')
-def api_v1_wave_history():
+@app.get("/api/v1/wave_history")
+async def api_v1_wave_history():
     return {'A': _get_wave_history_snapshot('A'), 'B': _get_wave_history_snapshot('B')}
 
-@app.route('/api/v1/wave_history/stream')
-def api_v1_wave_history_stream():
+@app.get("/api/v1/wave_history/stream")
+async def api_v1_wave_history_stream(channel: str = 'A', since: int = 0):
     """Incremental wave history: return only samples after 'since' seq number."""
-    channel = request.args.get('channel', 'A').upper()
-    since = int(request.args.get('since', 0))
+    channel = channel.upper()
     history = _wave_history.get(channel, collections.deque())
-    # Filter samples with seq > since
     new_samples = [s for s in history if s.get('seq', 0) > since]
-    # Return samples without the seq field to save bandwidth, but include latest seq
     latest_seq = _wave_history_seq.get(channel, 0)
     samples = [{'s': s['s'], 'f': s['f']} for s in new_samples]
     return {'samples': samples, 'seq': latest_seq, 'sample_ms': WAVE_HISTORY_SAMPLE_MS}
 
-@app.route('/api/v1/osc_activity')
-def api_v1_osc_activity():
+@app.get("/api/v1/osc_activity")
+async def api_v1_osc_activity():
     return {'events': list(_osc_activity)}
 
-
-@app.route('/api/v1/qr_payload')
-def api_v1_qr_payload():
+@app.get("/api/v1/qr_payload")
+async def api_v1_qr_payload():
     return {'content': get_qr_content()}
 
-@app.route('/api/v1/strength/<channel>/<action>/<int:value>', endpoint='api_v1_strength')
-async def api_v1_strength(channel, action, value):
+@app.get("/api/v1/strength/{channel}/{action}/{value}")
+async def api_v1_strength(channel: str, action: str, value: int):
     """Adjust device strength. action: set/add/sub. value: 0-200."""
     channel = channel.upper()
     if channel == 'ALL':
@@ -465,11 +373,11 @@ async def api_v1_strength(channel, action, value):
     elif channel in ('A', 'B'):
         channels = [channel]
     else:
-        return {'error': 'invalid channel'}, 400
+        raise HTTPException(400, 'invalid channel')
     mode_map = {'set': '2', 'add': '1', 'sub': '0'}
     mode = mode_map.get(action)
     if mode is None:
-        return {'error': 'action must be set/add/sub'}, 400
+        raise HTTPException(400, 'action must be set/add/sub')
     value = max(0, min(200, value))
     for ch in channels:
         for conn in srv.WS_CONNECTIONS:
@@ -480,9 +388,8 @@ async def api_v1_strength(channel, action, value):
 _strength_boost = {'A': 0, 'B': 0}
 _strength_boost_expire = {'A': 0.0, 'B': 0.0}
 
-@app.route('/api/v1/strength_boost/<channel>/<int:value>/<float:duration>', endpoint='api_v1_strength_boost')
-@app.route('/api/v1/strength_boost/<channel>/<int:value>/<int:duration>', endpoint='api_v1_strength_boost_int')
-async def api_v1_strength_boost(channel, value, duration):
+@app.get("/api/v1/strength_boost/{channel}/{value}/{duration}")
+async def api_v1_strength_boost(channel: str, value: int, duration: float):
     """Temporarily boost strength by value, auto-reverts after duration seconds."""
     channel = channel.upper()
     if channel == 'ALL':
@@ -490,23 +397,20 @@ async def api_v1_strength_boost(channel, value, duration):
     elif channel in ('A', 'B'):
         channels = [channel]
     else:
-        return {'error': 'invalid channel'}, 400
+        raise HTTPException(400, 'invalid channel')
     value = max(1, min(100, value))
-    duration = max(0.5, min(30.0, float(duration)))
+    duration = max(0.5, min(30.0, duration))
     for ch in channels:
         already_boosted = _strength_boost[ch]
         if already_boosted == 0:
-            # Apply new boost
             for conn in srv.WS_CONNECTIONS:
                 await conn.set_strength(ch, mode='1', value=value, force=True)
             _strength_boost[ch] = value
         elif already_boosted != value:
-            # Adjust to new boost level
             for conn in srv.WS_CONNECTIONS:
                 await conn.set_strength(ch, mode='0', value=already_boosted, force=True)
                 await conn.set_strength(ch, mode='1', value=value, force=True)
             _strength_boost[ch] = value
-        # Reset/extend expiry
         _strength_boost_expire[ch] = time.time() + duration
     return {'result': 'OK', 'boost': value, 'duration': duration, 'channels': channels}
 
@@ -526,10 +430,9 @@ async def _strength_boost_checker(stop_event: asyncio.Event):
                     await conn.set_strength(ch, mode='0', value=boost_val, force=True)
                 logger.debug(f"[boost] channel={ch} reverted -{boost_val}")
 
-# --- Strength Limit (user-adjustable cap, persisted) ---
-@app.route('/api/v1/strength_limit', methods=['GET'], endpoint='api_v1_strength_limit_get')
+# --- Strength Limit ---
+@app.get("/api/v1/strength_limit")
 async def api_v1_strength_limit_get():
-    """Get current strength limits per channel."""
     return {
         'channel_a': SETTINGS_BASIC['dglab3']['channel_a']['strength_limit'],
         'channel_b': SETTINGS_BASIC['dglab3']['channel_b']['strength_limit'],
@@ -537,10 +440,9 @@ async def api_v1_strength_limit_get():
         'overlimit_b': SETTINGS_BASIC['dglab3']['channel_b'].get('overlimit_max', 20),
     }
 
-@app.route('/api/v1/strength_limit', methods=['POST'], endpoint='api_v1_strength_limit_set')
-async def api_v1_strength_limit_set():
-    """Set strength limits per channel. Immediately effective, no restart needed."""
-    data = request.get_json()
+@app.post("/api/v1/strength_limit")
+async def api_v1_strength_limit_set(request: Request):
+    data = await request.json()
     changed = False
     for ch_key, ch_name in [('channel_a', 'A'), ('channel_b', 'B')]:
         if ch_key in data:
@@ -566,11 +468,11 @@ async def api_v1_strength_limit_set():
         'overlimit_b': SETTINGS_BASIC['dglab3']['channel_b'].get('overlimit_max', 20),
     }
 
-# --- Overlimit Rules Engine (multi-level, condition-based) ---
+# --- Overlimit Rules Engine ---
 OVERLIMIT_RULES_FILE = 'overlimit_rules.yaml'
-_overlimit_rules = []       # list of rule dicts
-_osc_param_state = {}       # {address: latest_value} for rule evaluation
-_overlimit_effective = {'A': 0, 'B': 0}  # current effective overlimit per channel
+_overlimit_rules = []
+_osc_param_state = {}
+_overlimit_effective = {'A': 0, 'B': 0}
 
 def _load_overlimit_rules():
     global _overlimit_rules
@@ -588,7 +490,6 @@ def _save_overlimit_rules():
     os.replace(tmp, OVERLIMIT_RULES_FILE)
 
 def _eval_condition(condition: dict, param_state: dict) -> bool:
-    """Evaluate a single condition against current OSC param state."""
     param = condition.get('param', '')
     operator = condition.get('operator', '==')
     threshold = condition.get('value', 0)
@@ -600,22 +501,11 @@ def _eval_condition(condition: dict, param_state: dict) -> bool:
         threshold = float(threshold)
     except (TypeError, ValueError):
         return False
-    if operator == '==':
-        return abs(current - threshold) < 0.001
-    elif operator == '!=':
-        return abs(current - threshold) >= 0.001
-    elif operator == '>':
-        return current > threshold
-    elif operator == '<':
-        return current < threshold
-    elif operator == '>=':
-        return current >= threshold
-    elif operator == '<=':
-        return current <= threshold
-    return False
+    ops = {'==': lambda a,b: abs(a-b)<0.001, '!=': lambda a,b: abs(a-b)>=0.001,
+           '>': lambda a,b: a>b, '<': lambda a,b: a<b, '>=': lambda a,b: a>=b, '<=': lambda a,b: a<=b}
+    return ops.get(operator, lambda a,b: False)(current, threshold)
 
 def _evaluate_overlimit_rules():
-    """Re-evaluate all rules and update effective overlimit per channel."""
     global _overlimit_effective
     max_limit = {'A': 0, 'B': 0}
     for rule in _overlimit_rules:
@@ -628,7 +518,6 @@ def _evaluate_overlimit_rules():
                 max_limit['A'] = max(max_limit['A'], limit_val)
             if channel in ('b', 'both'):
                 max_limit['B'] = max(max_limit['B'], limit_val)
-    # Update connector overlimit
     changed = False
     for ch in ['A', 'B']:
         if max_limit[ch] != _overlimit_effective[ch]:
@@ -642,50 +531,46 @@ def _evaluate_overlimit_rules():
             conn.overlimit_max['B'] = max_limit['B'] if max_limit['B'] > 0 else SETTINGS['dglab3']['channel_b'].get('overlimit_max', 20)
 
 def _overlimit_osc_hook(address, *args):
-    """Called on every OSC message to update param state and evaluate rules."""
     if args:
         _osc_param_state[address] = args[0]
     if _overlimit_rules:
         _evaluate_overlimit_rules()
 
-@app.route('/api/v1/overlimit_rules', methods=['GET'], endpoint='api_v1_overlimit_rules_get')
+@app.get("/api/v1/overlimit_rules")
 async def api_v1_overlimit_rules_get():
-    """Get all overlimit rules."""
-    return jsonify({'rules': _overlimit_rules, 'effective': _overlimit_effective})
+    return {'rules': _overlimit_rules, 'effective': _overlimit_effective}
 
-@app.route('/api/v1/overlimit_rules', methods=['POST'], endpoint='api_v1_overlimit_rules_set')
-async def api_v1_overlimit_rules_set():
-    """Replace all overlimit rules."""
+@app.post("/api/v1/overlimit_rules")
+async def api_v1_overlimit_rules_set(request: Request):
     global _overlimit_rules
-    data = request.get_json()
+    data = await request.json()
     _overlimit_rules = data.get('rules', [])
     _save_overlimit_rules()
     _evaluate_overlimit_rules()
     logger.info(f"[overlimit_rules] Saved {len(_overlimit_rules)} rules")
-    return jsonify({'success': True, 'rules': _overlimit_rules})
+    return {'success': True, 'rules': _overlimit_rules}
 
-@app.route('/api/v1/overlimit_rules/<int:index>', methods=['DELETE'], endpoint='api_v1_overlimit_rules_delete')
-async def api_v1_overlimit_rules_delete(index):
-    """Delete a single rule by index."""
+@app.delete("/api/v1/overlimit_rules/{index}")
+async def api_v1_overlimit_rules_delete(index: int):
     if 0 <= index < len(_overlimit_rules):
         removed = _overlimit_rules.pop(index)
         _save_overlimit_rules()
         _evaluate_overlimit_rules()
         logger.info(f"[overlimit_rules] Deleted rule: {removed.get('name', index)}")
-        return jsonify({'success': True, 'rules': _overlimit_rules})
-    return jsonify({'success': False, 'error': 'invalid index'}), 400
+        return {'success': True, 'rules': _overlimit_rules}
+    raise HTTPException(400, 'invalid index')
 
-@app.route('/api/v1/shock/<channel>/<second>', endpoint='api_v1_shock')
-@allow_vrchat_only
-async def api_v1_shock(channel, second):
+
+# --- Shock / Sendwave ---
+@app.get("/api/v1/shock/{channel}/{second}")
+async def api_v1_shock(channel: str, second: str):
     if channel == 'all':
         channels = ['A', 'B']
     else:
-        channels = [channel]
-    try: 
+        channels = [channel.upper()]
+    try:
         second = float(second)
     except Exception:
-        logger.warning('[API][shock] Invalid second, set to 1.')
         second = 1.0
     second = min(second, 10.0)
     repeat = int(10 * second)
@@ -699,42 +584,32 @@ async def api_v1_shock(channel, second):
             await command_queue.put(CommandPriority.API, chan, 'wave', value=wavestr, source_id='api_shock')
     return {'result': 'OK'}
 
-@app.route('/api/v1/sendwave/<channel>/<repeat>/<wavedata>', endpoint='api_v1_sendwave')
-@allow_vrchat_only
-async def api_v1_sendwave(channel, repeat, wavedata):
-    """API V1 Sendwave.
-
-    Keyword arguments:
-    channel -- A or B.
-    repeat -- repeat times, 1 for 100ms, 1 to 80. Max 80 for json length limit.
-    wavedata -- Coyote v3 wave format, eg. 0A0A0A0A64646464.
-    """
+@app.get("/api/v1/sendwave/{channel}/{repeat}/{wavedata}")
+async def api_v1_sendwave(channel: str, repeat: str, wavedata: str):
+    """Send raw wave data. channel: A/B, repeat: 1-100, wavedata: 16 hex chars."""
     try:
         channel = channel.upper()
         if channel not in ['A', 'B']:
             raise Exception
     except:
-        logger.warning('[API][sendwave] Invalid Channel, set to A.')
         channel = 'A'
     try:
-        repeat = int(repeat)
-        if repeat > 100 or repeat < 1:
+        repeat_int = int(repeat)
+        if repeat_int > 100 or repeat_int < 1:
             raise Exception
     except:
-        logger.warning('[API][sendwave] Invalid repeat times, set to 10.')
-        repeat = 10
+        repeat_int = 10
     try:
         if not re.match(r'^([0-9A-F]{16})$', wavedata):
             raise Exception
     except:
-        logger.warning('[API][sendwave] Invalid wave, set to 0A0A0A0A64646464.')
         wavedata = '0A0A0A0A64646464'
-    wavestr = json.dumps([wavedata] * repeat, separators=(',', ':'))
-    logger.debug(f'[API][sendwave] C:{channel} R:{repeat} W:{wavedata}')
+    wavestr = json.dumps([wavedata] * repeat_int, separators=(',', ':'))
+    logger.debug(f'[API][sendwave] C:{channel} R:{repeat_int} W:{wavedata}')
     await command_queue.put(CommandPriority.API, channel, 'wave', value=wavestr, source_id='api_sendwave')
     return {'result': 'OK'}
 
-# --- Wave Test (looping test with start/stop control) ---
+# --- Wave Test ---
 _wave_test_state = {
     'active': False,
     'channel': 'A',
@@ -743,54 +618,43 @@ _wave_test_state = {
     'preset': None,
 }
 
-@app.route('/api/v1/wave_test/start', methods=['POST'], endpoint='api_v1_wave_test_start')
-async def api_v1_wave_test_start():
-    """Start looping wave test. Body: {channel, strength, wave_scale, preset?}"""
-    data = request.get_json()
+@app.post("/api/v1/wave_test/start")
+async def api_v1_wave_test_start(request: Request):
+    data = await request.json()
     channel = data.get('channel', 'A').upper()
     if channel not in ('A', 'B'):
-        return {'error': 'channel must be A or B'}, 400
+        raise HTTPException(400, 'channel must be A or B')
     strength = max(0, min(200, int(data.get('strength', 50))))
     wave_scale = max(0.0, min(1.0, float(data.get('wave_scale', 1.0))))
     preset_name = data.get('preset', None)
-
     _wave_test_state['active'] = True
     _wave_test_state['channel'] = channel
     _wave_test_state['strength'] = strength
     _wave_test_state['wave_scale'] = wave_scale
     _wave_test_state['preset'] = preset_name
-
     logger.info(f"[wave_test] Started: ch={channel} str={strength} scale={wave_scale} preset={preset_name or 'default'}")
     return {'result': 'OK', 'active': True}
 
-@app.route('/api/v1/wave_test/stop', methods=['POST'], endpoint='api_v1_wave_test_stop')
+@app.post("/api/v1/wave_test/stop")
 async def api_v1_wave_test_stop():
-    """Stop looping wave test."""
     _wave_test_state['active'] = False
     channel = _wave_test_state['channel']
-    # Clear wave on channel
     for conn in srv.WS_CONNECTIONS:
         await conn.clear_wave(channel)
-    logger.info(f"[wave_test] Stopped")
+    logger.info("[wave_test] Stopped")
     return {'result': 'OK', 'active': False}
 
-@app.route('/api/v1/wave_test/update', methods=['POST'], endpoint='api_v1_wave_test_update')
-async def api_v1_wave_test_update():
-    """Update running wave test params without restart. Body: {strength?, wave_scale?, preset?}"""
+@app.post("/api/v1/wave_test/update")
+async def api_v1_wave_test_update(request: Request):
     if not _wave_test_state['active']:
-        return {'error': 'test not running'}, 400
-    data = request.get_json()
-    channel = _wave_test_state['channel']
-
+        raise HTTPException(400, 'test not running')
+    data = await request.json()
     if 'strength' in data:
         _wave_test_state['strength'] = max(0, min(200, int(data['strength'])))
-
     if 'wave_scale' in data:
         _wave_test_state['wave_scale'] = max(0.0, min(1.0, float(data['wave_scale'])))
-
     if 'preset' in data:
         _wave_test_state['preset'] = data['preset'] or None
-
     return {'result': 'OK', 'state': {
         'active': True,
         'strength': _wave_test_state['strength'],
@@ -798,9 +662,8 @@ async def api_v1_wave_test_update():
         'preset': _wave_test_state['preset'],
     }}
 
-@app.route('/api/v1/wave_test/status', methods=['GET'], endpoint='api_v1_wave_test_status')
+@app.get("/api/v1/wave_test/status")
 async def api_v1_wave_test_status():
-    """Get wave test state."""
     return {
         'active': _wave_test_state['active'],
         'channel': _wave_test_state['channel'],
@@ -822,52 +685,38 @@ async def _wave_test_loop(stop_event: asyncio.Event):
                 strength = _wave_test_state['strength']
                 wave_scale = _wave_test_state['wave_scale']
                 preset_name = _wave_test_state['preset']
-
-                # Temporarily override strength_limit so normal handlers don't fight
                 if saved_limits is None:
                     saved_limits = {
                         'A': SETTINGS['dglab3']['channel_a']['strength_limit'],
                         'B': SETTINGS['dglab3']['channel_b']['strength_limit'],
                     }
                     DGConnection._suppress_clear = True
-                    # Suppress OSC-triggered waves to avoid interference
                     command_queue.set_enabled(CommandPriority.OSC_INTERACTION, False)
                     command_queue.set_enabled(CommandPriority.OSC_PANEL, False)
                     command_queue.set_enabled(CommandPriority.GAME, False)
                 ch_key = f'channel_{channel.lower()}'
                 SETTINGS['dglab3'][ch_key]['strength_limit'] = strength
                 DGConnection.refresh_limits_from_settings(SETTINGS)
-                # Also force-set strength directly (bypasses strength_max check)
                 for conn in srv.WS_CONNECTIONS:
                     await conn.set_strength(channel, mode='2', value=strength, force=True)
-
-                # Build wave using same method as normal distance mode
                 wavestr = None
                 if preset_name and lib.get(preset_name):
                     wavestr = lib.build_resampled_window(
-                        preset_name,
-                        start_position=wave_position,
-                        window_ops=10,
-                        wave_scale=wave_scale,
-                        texture_floor=0.35,
-                        sample_step=1.0,
+                        preset_name, start_position=wave_position,
+                        window_ops=10, wave_scale=wave_scale,
+                        texture_floor=0.35, sample_step=1.0,
                     )
-                    wave_position += 40.0  # advance by full window (10 ops × 4 samples)
-
+                    wave_position += 40.0
                 if not wavestr:
-                    # Default wave or preset failed: scale the default shock wave
                     wavestr = ShockHandler.scale_wavestr(DEFAULT_SHOCK_WAVE, wave_scale)
-
                 await command_queue.put(CommandPriority.API, channel, 'wave', value=wavestr, source_id='wave_test_loop')
-                await asyncio.sleep(0.9)  # 10 ops = 1s playback, send next batch 0.1s early
+                await asyncio.sleep(0.9)
             else:
-                # Restore original strength_limit when stopped
                 if saved_limits is not None:
                     SETTINGS['dglab3']['channel_a']['strength_limit'] = saved_limits['A']
                     SETTINGS['dglab3']['channel_b']['strength_limit'] = saved_limits['B']
                     DGConnection.refresh_limits_from_settings(SETTINGS)
                     DGConnection._suppress_clear = False
-                    # Restore OSC-triggered waves
                     command_queue.set_enabled(CommandPriority.OSC_INTERACTION, True)
                     command_queue.set_enabled(CommandPriority.OSC_PANEL, True)
                     command_queue.set_enabled(CommandPriority.GAME, True)
@@ -880,23 +729,24 @@ async def _wave_test_loop(stop_event: asyncio.Event):
             logger.error(f"[wave_test_loop] error: {e}")
             await asyncio.sleep(0.5)
 
+# --- Settings ---
 def strip_basic_settings(settings: dict):
     ret = copy.deepcopy(settings)
     for chann in ['channel_a', 'channel_b']:
         del ret['dglab3'][chann]['avatar_params']
-        del ret['dglab3'][chann]['mode'] 
-        del ret['dglab3'][chann]['strength_limit'] 
+        del ret['dglab3'][chann]['mode']
+        del ret['dglab3'][chann]['strength_limit']
     return ret
 
-@app.route('/setup')
-def web_setup_wizard():
-    return render_template('setup_wizard.html')
+@app.get("/setup")
+async def web_setup_wizard():
+    return _read_template('setup_wizard.html')
 
-@app.route('/api/v1/setup', methods=['POST'])
-def api_v1_setup():
+@app.post("/api/v1/setup")
+async def api_v1_setup(request: Request):
     global SETTINGS, SETTINGS_BASIC, SERVER_IP
     try:
-        data = request.get_json()
+        data = await request.json()
         for ch in ['channel_a', 'channel_b']:
             ch_data = data.get(ch, {})
             SETTINGS_BASIC['dglab3'][ch]['mode'] = ch_data.get('mode', 'distance')
@@ -909,22 +759,21 @@ def api_v1_setup():
             SETTINGS['osc']['listen_host'] = data['osc'].get('listen_host', '127.0.0.1')
         SETTINGS['ws']['master_uuid'] = str(uuid.uuid4())
         config_save()
-        app.config['SETUP_COMPLETE'] = True
-        return jsonify({'success': True, 'message': 'Configuration saved.'})
+        app.state.setup_complete = True
+        return {'success': True, 'message': 'Configuration saved.'}
     except Exception as e:
-        return jsonify({'success': False, 'message': str(e)}), 500
+        raise HTTPException(500, str(e))
 
-@app.route('/api/v1/config', methods=['GET', 'HEAD', 'OPTIONS'])
-def get_config():
+@app.get("/api/v1/config")
+async def get_config():
     return {
         'basic': SETTINGS_BASIC,
         'advanced': strip_basic_settings(SETTINGS),
     }
 
-@app.route('/api/v1/settings', methods=['POST'])
-def api_v1_settings_update():
-    """Update server settings (osc/ws/web_server). Auto-restarts for network changes."""
-    data = request.get_json()
+@app.post("/api/v1/settings")
+async def api_v1_settings_update(request: Request):
+    data = await request.json()
     restart_needed = []
     if 'osc' in data:
         osc = data['osc']
@@ -953,74 +802,67 @@ def api_v1_settings_update():
     config_save()
     if restart_needed:
         web_restart = 'web_server' in restart_needed
-        engine_restart = any(r in restart_needed for r in ('osc', 'ws'))
+        engine_needs_restart = any(r in restart_needed for r in ('osc', 'ws'))
         def _delayed_restart():
             time.sleep(0.5)
-            if engine_restart:
+            if engine_needs_restart:
                 logger.info("[settings] Restarting engine due to OSC/WS config change...")
                 engine.restart()
             if web_restart:
                 logger.warning("[settings] Web server port/host changed. Full restart required.")
                 _restart_program()
         Thread(target=_delayed_restart, daemon=True).start()
-    return jsonify({
+    return {
         'success': True,
         'restart_needed': list(set(restart_needed)),
         'message': '已保存。' + ('引擎正在重启...' if restart_needed else ''),
-    })
+    }
 
-@app.route('/api/v1/engine/restart', methods=['POST'])
-def api_v1_engine_restart():
-    """Restart the data engine (OSC+WS+handlers) without restarting the web server."""
+@app.post("/api/v1/engine/restart")
+async def api_v1_engine_restart():
     def _do_restart():
         time.sleep(0.3)
         engine.restart()
     Thread(target=_do_restart, daemon=True).start()
-    return jsonify({'success': True, 'message': '引擎正在重启...'})
+    return {'success': True, 'message': '引擎正在重启...'}
 
-@app.route('/api/v1/engine/status')
-def api_v1_engine_status():
-    """Get engine running status."""
-    return jsonify({'running': engine.running})
+@app.get("/api/v1/engine/status")
+async def api_v1_engine_status():
+    return {'running': engine.running}
 
 def _restart_program():
     """Restart the current process. Works on both Windows and Linux."""
     import subprocess
     if getattr(sys, 'frozen', False):
-        # PyInstaller bundled exe
         cmd = [sys.executable] + sys.argv[1:]
     else:
         cmd = [sys.executable] + sys.argv
-
     if sys.platform == 'win32':
-        # Windows: os.execv doesn't replace process, use subprocess + exit
         subprocess.Popen(cmd, close_fds=True, creationflags=subprocess.CREATE_NEW_PROCESS_GROUP)
         os._exit(0)
     else:
-        # Linux/Mac: os.execv replaces current process
         os.execv(cmd[0], cmd)
 
-@app.route('/api/v1/params/<channel>', methods=['GET'])
-def api_v1_params_get(channel):
-    """Get avatar_params for a channel."""
+
+# --- Params ---
+@app.get("/api/v1/params/{channel}")
+async def api_v1_params_get(channel: str):
     ch = channel.lower()
     if ch not in ('a', 'b'):
-        return jsonify({'error': 'invalid channel'}), 400
+        raise HTTPException(400, 'invalid channel')
     ch_key = f'channel_{ch}'
     params = SETTINGS_BASIC['dglab3'][ch_key].get('avatar_params', [])
     default_mode = SETTINGS_BASIC['dglab3'][ch_key].get('mode', 'distance')
     strength_limit = SETTINGS_BASIC['dglab3'][ch_key].get('strength_limit', 100)
-    return jsonify({'params': params, 'default_mode': default_mode, 'strength_limit': strength_limit})
+    return {'params': params, 'default_mode': default_mode, 'strength_limit': strength_limit}
 
-@app.route('/api/v1/params/<channel>', methods=['POST'])
-def api_v1_params_set(channel):
-    """Replace all avatar_params for a channel. Also update default_mode and strength_limit."""
+@app.post("/api/v1/params/{channel}")
+async def api_v1_params_set(channel: str, request: Request):
     ch = channel.lower()
     if ch not in ('a', 'b'):
-        return jsonify({'success': False, 'message': 'invalid channel'}), 400
-    data = request.get_json()
+        raise HTTPException(400, 'invalid channel')
+    data = await request.json()
     ch_key = f'channel_{ch}'
-    # Update params (preserve enabled field)
     new_params = data.get('params', [])
     validated = []
     for p in new_params:
@@ -1033,71 +875,64 @@ def api_v1_params_set(channel):
                 'enabled': p.get('enabled', True),
             })
     SETTINGS_BASIC['dglab3'][ch_key]['avatar_params'] = validated
-    # Update default mode and strength limit if provided
     if 'default_mode' in data:
         SETTINGS_BASIC['dglab3'][ch_key]['mode'] = data['default_mode']
     if 'strength_limit' in data:
         SETTINGS_BASIC['dglab3'][ch_key]['strength_limit'] = int(data['strength_limit'])
-    # Sync into SETTINGS (only enabled params are active)
     SETTINGS['dglab3'][ch_key]['avatar_params'] = validated
     SETTINGS['dglab3'][ch_key]['mode'] = SETTINGS_BASIC['dglab3'][ch_key]['mode']
     SETTINGS['dglab3'][ch_key]['strength_limit'] = SETTINGS_BASIC['dglab3'][ch_key]['strength_limit']
     normalize_avatar_param_entries(SETTINGS['dglab3'][ch_key])
     config_save()
-    # Restart engine to apply new param registrations (no web server restart needed)
     def _delayed_restart():
         time.sleep(0.5)
         logger.info("[params] Restarting engine to apply param changes...")
         engine.restart()
     Thread(target=_delayed_restart, daemon=True).start()
-    return jsonify({'success': True, 'params': validated, 'restarting': True})
+    return {'success': True, 'params': validated, 'restarting': True}
 
-@app.route('/api/v1/combo/<channel>', methods=['GET'])
-def api_v1_combo_get(channel):
+# --- Combo ---
+@app.get("/api/v1/combo/{channel}")
+async def api_v1_combo_get(channel: str):
     ch = channel.lower()
     if ch not in ('a', 'b'):
-        return jsonify({'error': 'invalid channel'}), 400
+        raise HTTPException(400, 'invalid channel')
     cfg = SETTINGS['dglab3'][f'channel_{ch}']['mode_config']
-    return jsonify({
+    return {
         'combo': cfg.get('combo', {}),
         'shock': cfg.get('shock', {}),
         'touch': cfg.get('touch', {}),
         'trigger_range': cfg.get('trigger_range', {}),
-    })
+    }
 
-@app.route('/api/v1/combo/<channel>', methods=['POST'])
-def api_v1_combo_set(channel):
+@app.post("/api/v1/combo/{channel}")
+async def api_v1_combo_set(channel: str, request: Request):
     ch = channel.lower()
     if ch not in ('a', 'b'):
-        return jsonify({'success': False, 'message': 'invalid channel'}), 400
-    data = request.get_json()
+        raise HTTPException(400, 'invalid channel')
+    data = await request.json()
     cfg = SETTINGS['dglab3'][f'channel_{ch}']['mode_config']
-    # Update combo config
     if 'combo' in data:
         cfg.setdefault('combo', {}).update(data['combo'])
-    # Update shock params
     if 'shock' in data:
         for key in ('duration', 'wave_preset', 'wave_scale'):
             if key in data['shock']:
                 cfg['shock'][key] = data['shock'][key]
-    # Update touch params
     if 'touch' in data:
         for key in ('wave_preset', 'wave_scale', 'n_derivative'):
             if key in data['touch']:
                 cfg['touch'][key] = data['touch'][key]
-    # Update trigger_range
     if 'trigger_range' in data:
         cfg['trigger_range'].update(data['trigger_range'])
-    # Hot reload handlers
     for handler in handlers:
         if hasattr(handler, 'refresh_settings'):
             handler.refresh_settings()
     config_save()
-    return jsonify({'success': True})
+    return {'success': True}
 
 # --- Curve Mapping ---
-DEFAULT_CURVE_POINTS = [{'x': 0, 'y': 0}, {'x': 1, 'y': 1}]  # linear
-_curve_config = {}  # key: param_path or 'channel_a'/'channel_b', value: points list
+DEFAULT_CURVE_POINTS = [{'x': 0, 'y': 0}, {'x': 1, 'y': 1}]
+_curve_config = {}
 
 def _get_curve_config_path():
     return os.path.join(os.path.dirname(os.path.abspath(__file__)) if not getattr(sys, "frozen", False) else os.path.dirname(sys.executable), 'curve_config.yaml')
@@ -1117,22 +952,16 @@ def _save_curve_config():
     os.replace(tmp, path)
 
 def get_curve_points(param_path):
-    """Get curve points for a specific param. Falls back to channel default, then global default."""
-    # Try exact param path
     if param_path and param_path in _curve_config:
         return _curve_config[param_path]
-    # Fallback: try channel key (legacy compat)
     if param_path and param_path.upper() in ('A', 'B'):
         return _curve_config.get(f'channel_{param_path.lower()}') or DEFAULT_CURVE_POINTS
-    # Global default
     return DEFAULT_CURVE_POINTS
 
 def get_curve_keys():
-    """List all configured curve keys (param paths and channel defaults)."""
     return list(_curve_config.keys())
 
 def apply_curve(value, points):
-    """Linearly interpolate value through control points."""
     if not points or value <= 0:
         return 0.0
     if value >= 1:
@@ -1144,27 +973,23 @@ def apply_curve(value, points):
                 return points[i]['y']
             t = (value - points[i]['x']) / dx
             return points[i]['y'] + t * (points[i + 1]['y'] - points[i]['y'])
-    # value beyond last point
     return points[-1]['y'] if points else value
 
-@app.route('/api/v1/curve', methods=['GET'])
-def api_v1_curve_list():
-    """List all configured curves."""
+@app.get("/api/v1/curve")
+async def api_v1_curve_list():
     result = {}
     for key, pts in _curve_config.items():
         result[key] = pts
-    return jsonify({'curves': result, 'default': DEFAULT_CURVE_POINTS})
+    return {'curves': result, 'default': DEFAULT_CURVE_POINTS}
 
-@app.route('/api/v1/curve/<path:param_key>', methods=['GET'])
-def api_v1_curve_get(param_key):
-    """Get curve for a param path or channel key."""
+@app.get("/api/v1/curve/{param_key:path}")
+async def api_v1_curve_get(param_key: str):
     pts = get_curve_points(param_key)
-    return jsonify({'key': param_key, 'points': pts})
+    return {'key': param_key, 'points': pts}
 
-@app.route('/api/v1/curve/<path:param_key>', methods=['POST'])
-def api_v1_curve_set(param_key):
-    """Set curve for a specific param path."""
-    data = request.get_json()
+@app.post("/api/v1/curve/{param_key:path}")
+async def api_v1_curve_set(param_key: str, request: Request):
+    data = await request.json()
     pts = data.get('points', [])
     validated = []
     for p in pts:
@@ -1174,15 +999,14 @@ def api_v1_curve_set(param_key):
     validated.sort(key=lambda p: p['x'])
     _curve_config[param_key] = validated
     _save_curve_config()
-    return jsonify({'success': True, 'key': param_key, 'points': validated})
+    return {'success': True, 'key': param_key, 'points': validated}
 
-@app.route('/api/v1/curve/<path:param_key>', methods=['DELETE'])
-def api_v1_curve_delete(param_key):
-    """Delete curve for a param (reverts to default)."""
+@app.delete("/api/v1/curve/{param_key:path}")
+async def api_v1_curve_delete(param_key: str):
     if param_key in _curve_config:
         del _curve_config[param_key]
         _save_curve_config()
-    return jsonify({'success': True})
+    return {'success': True}
 
 _load_curve_config()
 _load_overlimit_rules()
@@ -1196,21 +1020,21 @@ def _ensure_profiles_dir():
 def _safe_profile_name(name):
     return re.sub(r'[^\w\u4e00-\u9fff\-]', '_', name.strip())[:50]
 
-@app.route('/api/v1/profiles', methods=['GET'])
-def api_v1_profiles_list():
+@app.get("/api/v1/profiles")
+async def api_v1_profiles_list():
     _ensure_profiles_dir()
     profiles = []
     for f in sorted(os.listdir(PROFILES_DIR)):
         if f.endswith('.yaml'):
             profiles.append(f[:-5])
-    return jsonify({'profiles': profiles})
+    return {'profiles': profiles}
 
-@app.route('/api/v1/profiles/<name>', methods=['PUT'])
-def api_v1_profiles_save(name):
+@app.put("/api/v1/profiles/{name}")
+async def api_v1_profiles_save(name: str):
     _ensure_profiles_dir()
     safe_name = _safe_profile_name(name)
     if not safe_name:
-        return jsonify({'success': False, 'message': 'Invalid name'}), 400
+        raise HTTPException(400, 'Invalid name')
     profile_data = {
         'basic': copy.deepcopy(SETTINGS_BASIC),
         'advanced': strip_basic_settings(SETTINGS),
@@ -1219,43 +1043,41 @@ def api_v1_profiles_save(name):
     with open(path, 'w', encoding='utf-8') as fw:
         yaml.safe_dump(profile_data, fw, allow_unicode=True)
     logger.info(f"[profile] Saved profile: {safe_name}")
-    return jsonify({'success': True, 'name': safe_name})
+    return {'success': True, 'name': safe_name}
 
-@app.route('/api/v1/profiles/<name>', methods=['POST'])
-def api_v1_profiles_load(name):
+@app.post("/api/v1/profiles/{name}")
+async def api_v1_profiles_load(name: str):
     safe_name = _safe_profile_name(name)
     path = os.path.join(PROFILES_DIR, safe_name + '.yaml')
     if not os.path.exists(path):
-        return jsonify({'success': False, 'message': 'Profile not found'}), 404
+        raise HTTPException(404, 'Profile not found')
     try:
         with open(path, 'r', encoding='utf-8') as fr:
             profile_data = yaml.safe_load(fr)
-        # Write to config files then hot-reload
         new_basic = merge_defaults(DEFAULT_SETTINGS_BASIC, profile_data.get('basic', {}))
         new_advanced = merge_defaults(DEFAULT_SETTINGS, profile_data.get('advanced', {}))
-        # Restore basic fields into advanced
         for ch in ['channel_a', 'channel_b']:
             new_advanced['dglab3'][ch]['avatar_params'] = new_basic['dglab3'][ch]['avatar_params']
             new_advanced['dglab3'][ch]['mode'] = new_basic['dglab3'][ch]['mode']
             new_advanced['dglab3'][ch]['strength_limit'] = new_basic['dglab3'][ch]['strength_limit']
             normalize_avatar_param_entries(new_advanced['dglab3'][ch])
-        # Preserve ws uuid and non-hot-reloadable network settings
         new_advanced['ws']['master_uuid'] = SETTINGS['ws']['master_uuid']
         apply_hot_reloadable_settings(new_advanced, new_basic)
         config_save()
         logger.success(f"[profile] Loaded profile: {safe_name}")
-        return jsonify({'success': True, 'name': safe_name})
+        return {'success': True, 'name': safe_name}
     except Exception as e:
-        return jsonify({'success': False, 'message': str(e)}), 500
+        raise HTTPException(500, str(e))
 
-@app.route('/api/v1/profiles/<name>', methods=['DELETE'])
-def api_v1_profiles_delete(name):
+@app.delete("/api/v1/profiles/{name}")
+async def api_v1_profiles_delete(name: str):
     safe_name = _safe_profile_name(name)
     path = os.path.join(PROFILES_DIR, safe_name + '.yaml')
     if os.path.exists(path):
         os.remove(path)
-        return jsonify({'success': True})
-    return jsonify({'success': False, 'message': 'Not found'}), 404
+        return {'success': True}
+    raise HTTPException(404, 'Not found')
+
 
 # --- OSC Recording / Playback ---
 RECORDINGS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)) if not getattr(sys, "frozen", False) else os.path.dirname(sys.executable), 'recordings')
@@ -1282,9 +1104,7 @@ def _ensure_recordings_dir():
 
 def _osc_record_hook(address, *args):
     """Global OSC handler for recording ALL params."""
-    # Evaluate overlimit rules on every OSC message
     _overlimit_osc_hook(address, *args)
-    # Record if active
     if _recording_state['active']:
         elapsed_ms = (time.perf_counter() - _recording_state['start_time']) * 1000.0
         _recording_state['messages'].append({
@@ -1293,10 +1113,10 @@ def _osc_record_hook(address, *args):
             'args': list(args),
         })
 
-@app.route('/api/v1/recorder/start', methods=['POST'])
-def api_v1_recorder_start():
+@app.post("/api/v1/recorder/start")
+async def api_v1_recorder_start():
     if _recording_state['active']:
-        return jsonify({'success': False, 'message': 'Already recording'})
+        return {'success': False, 'message': 'Already recording'}
     _ensure_recordings_dir()
     from datetime import datetime
     _recording_state['active'] = True
@@ -1304,12 +1124,12 @@ def api_v1_recorder_start():
     _recording_state['messages'] = []
     _recording_state['filename'] = f"rec_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
     logger.success(f"[recorder] Started recording: {_recording_state['filename']}")
-    return jsonify({'success': True, 'filename': _recording_state['filename']})
+    return {'success': True, 'filename': _recording_state['filename']}
 
-@app.route('/api/v1/recorder/stop', methods=['POST'])
-def api_v1_recorder_stop():
+@app.post("/api/v1/recorder/stop")
+async def api_v1_recorder_stop():
     if not _recording_state['active']:
-        return jsonify({'success': False, 'message': 'Not recording'})
+        return {'success': False, 'message': 'Not recording'}
     _recording_state['active'] = False
     messages = _recording_state['messages']
     filename = _recording_state['filename']
@@ -1326,22 +1146,22 @@ def api_v1_recorder_stop():
         json.dump(data, f, ensure_ascii=False, separators=(',', ':'))
     _recording_state['messages'] = []
     logger.success(f"[recorder] Stopped. Saved {len(messages)} messages ({duration_ms/1000:.1f}s) to {filename}")
-    return jsonify({'success': True, 'filename': filename, 'message_count': len(messages), 'duration_ms': duration_ms})
+    return {'success': True, 'filename': filename, 'message_count': len(messages), 'duration_ms': duration_ms}
 
-@app.route('/api/v1/recorder/status')
-def api_v1_recorder_status():
+@app.get("/api/v1/recorder/status")
+async def api_v1_recorder_status():
     elapsed_ms = 0
     if _recording_state['active']:
         elapsed_ms = (time.perf_counter() - _recording_state['start_time']) * 1000.0
-    return jsonify({
+    return {
         'recording': _recording_state['active'],
         'filename': _recording_state['filename'],
         'message_count': len(_recording_state['messages']),
         'elapsed_ms': round(elapsed_ms, 0),
-    })
+    }
 
-@app.route('/api/v1/recordings')
-def api_v1_recordings_list():
+@app.get("/api/v1/recordings")
+async def api_v1_recordings_list():
     _ensure_recordings_dir()
     files = []
     for f in sorted(os.listdir(RECORDINGS_DIR), reverse=True):
@@ -1360,53 +1180,52 @@ def api_v1_recordings_list():
                 })
             except Exception:
                 files.append({'name': f, 'size_kb': 0, 'duration_ms': 0, 'message_count': 0, 'recorded_at': ''})
-    return jsonify({'recordings': files})
+    return {'recordings': files}
 
-@app.route('/api/v1/recordings/<filename>', methods=['DELETE'])
-def api_v1_recordings_delete(filename):
+@app.delete("/api/v1/recordings/{filename}")
+async def api_v1_recordings_delete(filename: str):
     filepath = os.path.join(RECORDINGS_DIR, filename)
     if os.path.exists(filepath):
         os.remove(filepath)
-        return jsonify({'success': True})
-    return jsonify({'success': False, 'message': 'Not found'}), 404
+        return {'success': True}
+    raise HTTPException(404, 'Not found')
 
-@app.route('/api/v1/playback/start', methods=['POST'])
-def api_v1_playback_start():
+@app.post("/api/v1/playback/start")
+async def api_v1_playback_start(request: Request):
     if _playback_state['active']:
-        return jsonify({'success': False, 'message': 'Already playing'})
-    data = request.get_json()
+        return {'success': False, 'message': 'Already playing'}
+    data = await request.json()
     filename = data.get('filename')
     speed = float(data.get('speed', 1.0))
     loop = bool(data.get('loop', False))
     filepath = os.path.join(RECORDINGS_DIR, filename)
     if not os.path.exists(filepath):
-        return jsonify({'success': False, 'message': 'File not found'}), 404
+        raise HTTPException(404, 'File not found')
     _playback_state['stop_flag'] = False
     _playback_state['filename'] = filename
     _playback_state['speed'] = speed
     _playback_state['loop'] = loop
     _playback_state['progress'] = 0
     _playback_state['active'] = True
-    # Start playback in background thread
     th = Thread(target=_playback_worker, args=(filepath, speed, loop), daemon=True)
     th.start()
-    return jsonify({'success': True, 'filename': filename})
+    return {'success': True, 'filename': filename}
 
-@app.route('/api/v1/playback/stop', methods=['POST'])
-def api_v1_playback_stop():
+@app.post("/api/v1/playback/stop")
+async def api_v1_playback_stop():
     _playback_state['stop_flag'] = True
-    return jsonify({'success': True})
+    return {'success': True}
 
-@app.route('/api/v1/playback/status')
-def api_v1_playback_status():
-    return jsonify({
+@app.get("/api/v1/playback/status")
+async def api_v1_playback_status():
+    return {
         'active': _playback_state['active'],
         'filename': _playback_state['filename'],
         'progress': _playback_state['progress'],
         'total': _playback_state['total'],
         'speed': _playback_state['speed'],
         'loop': _playback_state['loop'],
-    })
+    }
 
 def _playback_worker(filepath, speed, loop):
     """Background thread: replay OSC messages with original timing."""
@@ -1418,12 +1237,8 @@ def _playback_worker(filepath, speed, loop):
         _playback_state['total'] = len(messages)
         if not messages:
             return
-
-        # Send to our own OSC port so the main program processes it
         target_port = SETTINGS['osc']['listen_port']
-        target_host = '127.0.0.1'
-        client = SimpleUDPClient(target_host, target_port)
-
+        client = SimpleUDPClient('127.0.0.1', target_port)
         while True:
             start_time = time.perf_counter()
             for i, msg in enumerate(messages):
@@ -1440,20 +1255,18 @@ def _playback_worker(filepath, speed, loop):
                 addr = msg['addr']
                 args = msg.get('args', [])
                 try:
-                    # Ensure correct types for OSC (JSON may lose float vs int distinction)
                     osc_args = []
                     for a in args:
                         if isinstance(a, bool):
                             osc_args.append(a)
                         elif isinstance(a, int):
-                            osc_args.append(float(a))  # VRChat params are typically float
+                            osc_args.append(float(a))
                         else:
                             osc_args.append(a)
                     client.send_message(addr, osc_args if len(osc_args) != 1 else osc_args[0])
                 except Exception:
                     pass
                 _playback_state['progress'] = i + 1
-
             if not loop:
                 break
             time.sleep(0.5)
@@ -1461,28 +1274,27 @@ def _playback_worker(filepath, speed, loop):
         _playback_state['active'] = False
         _playback_state['progress'] = 0
 
-@app.route('/api/v1/wave_presets')
-def api_v1_wave_presets():
+# --- Wave Presets ---
+@app.get("/api/v1/wave_presets")
+async def api_v1_wave_presets():
     from srv.wave_preset import WavePresetLibrary
     lib = WavePresetLibrary()
     return {'presets': list(lib.presets.keys())}
 
-@app.route('/api/v1/wave_presets/<preset_name>/preview')
-def api_v1_wave_preset_preview(preset_name):
+@app.get("/api/v1/wave_presets/{preset_name}/preview")
+async def api_v1_wave_preset_preview(preset_name: str):
     from srv.wave_preset import WavePresetLibrary
     from pulse_to_hex.dglab_pulse_converter import parse_pulse
-    import os
+    import math
 
     lib = WavePresetLibrary()
     preset = lib.get(preset_name)
     if not preset:
-        return {'error': 'preset not found'}, 404
+        raise HTTPException(404, 'preset not found')
 
-    # Try to load source .pulse file for section-level view
     pulse_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'dg-lab')
     pulse_file = os.path.join(pulse_dir, preset_name + '.pulse')
     if not os.path.exists(pulse_file):
-        # Fallback: just return flat ops data
         ops = preset.get('ops', [])
         strengths = []
         for op in ops:
@@ -1499,25 +1311,21 @@ def api_v1_wave_preset_preview(preset_name):
     header, sections = parse_pulse(pulse_text)
     speed = header.speed if header else 1
 
-    # Build section-level preview: each enabled section with its point list
     result_sections = []
     for sec in sections:
         if not sec.enabled:
             continue
         if not sec.points:
             continue
-        import math
         n_points = len(sec.points)
         duration = max(0, sec.duration)
         repeats = max(1, math.ceil(duration / n_points)) if duration > 0 else 1
-
         points = []
         for val, flag in sec.points:
             points.append({
                 'strength': round(max(0, min(100, val))),
                 'anchor': flag == 1,
             })
-
         result_sections.append({
             'freq_low': sec.freq_low,
             'freq_high': sec.freq_high,
@@ -1535,34 +1343,27 @@ def api_v1_wave_preset_preview(preset_name):
         'sections': result_sections,
     }
 
-@app.route('/api/v1/wave_presets/import', methods=['POST'])
-def api_v1_wave_presets_import():
+@app.post("/api/v1/wave_presets/import")
+async def api_v1_wave_presets_import(file: UploadFile = File(...)):
     """Import a wave preset from uploaded .pulse or .json file."""
     from pulse_to_hex.dglab_pulse_converter import convert_to_ops
     from srv.wave_preset import WavePresetLibrary, PRESET_DIR
 
-    if 'file' not in request.files:
-        return {'error': 'no file uploaded'}, 400
-    file = request.files['file']
     if not file.filename:
-        return {'error': 'empty filename'}, 400
+        raise HTTPException(400, 'empty filename')
 
     filename = file.filename
-    content = file.read().decode('utf-8', errors='replace').strip()
+    content_bytes = await file.read()
+    content = content_bytes.decode('utf-8', errors='replace').strip()
 
     if filename.endswith('.pulse'):
-        # Convert .pulse to JSON preset
         try:
             ops, wavestrs, header, sections = convert_to_ops(content)
         except Exception as e:
-            return {'error': f'pulse parse failed: {e}'}, 400
-
+            raise HTTPException(400, f'pulse parse failed: {e}')
         if not ops:
-            return {'error': 'no valid wave data in file'}, 400
-
-        # Build preset name from filename
+            raise HTTPException(400, 'no valid wave data in file')
         preset_name = filename.rsplit('.', 1)[0]
-        # Save as JSON
         preset_data = {
             'name': preset_name,
             'source_file': filename,
@@ -1573,63 +1374,48 @@ def api_v1_wave_presets_import():
         out_path = PRESET_DIR / f'{preset_name}.json'
         with open(out_path, 'w', encoding='utf-8') as f:
             json.dump(preset_data, f, ensure_ascii=False, indent=2)
-
-        # Also save the .pulse source to dg-lab dir
         dg_lab_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'dg-lab')
         os.makedirs(dg_lab_dir, exist_ok=True)
         pulse_path = os.path.join(dg_lab_dir, filename)
         with open(pulse_path, 'w', encoding='utf-8') as f:
             f.write(content)
-
-        # Reload library
         lib = WavePresetLibrary()
         lib.reload()
-
         return {'result': 'OK', 'name': preset_name, 'ops': len(ops)}
 
     elif filename.endswith('.json'):
-        # Direct JSON preset import
         try:
             preset_data = json.loads(content)
         except json.JSONDecodeError as e:
-            return {'error': f'invalid JSON: {e}'}, 400
-
-        # Validate: must have 'wavestrs' or 'ops'
+            raise HTTPException(400, f'invalid JSON: {e}')
         if 'wavestrs' not in preset_data and 'ops' not in preset_data:
-            return {'error': 'JSON must contain "wavestrs" or "ops"'}, 400
-
+            raise HTTPException(400, 'JSON must contain "wavestrs" or "ops"')
         preset_name = preset_data.get('name') or filename.rsplit('.', 1)[0]
         preset_data['name'] = preset_name
-
-        # Save to wave_presets dir
         out_path = PRESET_DIR / f'{preset_name}.json'
         with open(out_path, 'w', encoding='utf-8') as f:
             json.dump(preset_data, f, ensure_ascii=False, indent=2)
-
-        # Reload library
         lib = WavePresetLibrary()
         lib.reload()
-
         num_ops = preset_data.get('num_ops', 0)
         return {'result': 'OK', 'name': preset_name, 'ops': num_ops}
 
     else:
-        return {'error': 'unsupported format, use .pulse or .json'}, 400
+        raise HTTPException(400, 'unsupported format, use .pulse or .json')
 
-@app.route('/api/v1/wave_preset/<channel>/<preset_name>/<int:duration>')
-async def api_v1_wave_preset(channel, preset_name, duration):
+@app.get("/api/v1/wave_preset/{channel}/{preset_name}/{duration}")
+async def api_v1_wave_preset(channel: str, preset_name: str, duration: int):
     from srv.wave_preset import WavePresetLibrary
     lib = WavePresetLibrary()
     preset = lib.get(preset_name)
     if not preset:
-        return {'error': 'preset not found'}, 404
+        raise HTTPException(404, 'preset not found')
     channel = channel.upper()
     if channel not in ['A', 'B']:
         channel = 'A'
     duration = min(max(duration, 1), 10)
-    # Send wave data in chunks to cover duration
     ops = preset['ops']
-    ops_needed = duration * 10  # 10 ops per second
+    ops_needed = duration * 10
     repeated = (ops * ((ops_needed // len(ops)) + 1))[:ops_needed]
     for i in range(0, len(repeated), 80):
         chunk = repeated[i:i+80]
@@ -1637,23 +1423,24 @@ async def api_v1_wave_preset(channel, preset_name, duration):
         await command_queue.put(CommandPriority.API, channel, 'wave', value=wavestr, source_id='api_wave_preset')
     return {'result': 'OK', 'ops_sent': len(repeated)}
 
-# SPA catch-all: serve index.html for Vue Router paths
-@app.route('/dashboard')
-@app.route('/curve')
-@app.route('/combo')
-@app.route('/params')
-@app.route('/recorder')
-@app.route('/setup')
-@app.route('/settings')
-@app.route('/strength')
-@app.route('/overlimit-rules')
-@app.route('/wave-test')
-def spa_catch_all():
-    return _serve_spa()
 
+# --- SPA catch-all routes ---
+_SPA_PATHS = ["/dashboard", "/curve", "/combo", "/params", "/recorder",
+              "/settings", "/strength", "/overlimit-rules", "/wave-test"]
+
+for _spa_path in _SPA_PATHS:
+    async def _spa_handler(_p=_spa_path):
+        return _serve_spa()
+    app.add_api_route(_spa_path, _spa_handler, methods=["GET"], include_in_schema=False)
+
+# Mount static files AFTER all routes (so API routes take priority)
+if os.path.exists(STATIC_DIR):
+    app.mount("/", StaticFiles(directory=STATIC_DIR, html=True), name="static")
+
+# --- Shared state ---
 command_queue = CommandQueue()
 
-# OSC activity ring buffer for dashboard live feedback
+# OSC activity ring buffer
 _osc_activity = collections.deque(maxlen=50)
 
 def _record_osc_activity(address, value, channel, mode):
@@ -1665,18 +1452,16 @@ def _record_osc_activity(address, value, channel, mode):
         'mode': mode,
     })
 
-# Wave history ring buffer for dashboard visualization
+# Wave history ring buffer
 _wave_history = {'A': collections.deque(maxlen=800), 'B': collections.deque(maxlen=800)}
 _wave_history_last_update = {'A': 0.0, 'B': 0.0}
 _wave_history_seq = {'A': 0, 'B': 0}
 
 def _record_wave(channel, wavestr):
-    """Parse wavestr and append (strength, freq) samples to history."""
     try:
         channel = channel.upper()
         ops = json.loads(wavestr)
         for op in ops:
-            # Each op is 16 hex chars: 8 freq + 8 strength (4 pulses)
             for i in range(4):
                 freq = int(op[i*2:i*2+2], 16)
                 strength = int(op[8+i*2:10+i*2], 16)
@@ -1686,7 +1471,6 @@ def _record_wave(channel, wavestr):
     except Exception:
         pass
 
-
 def _clear_wave_history(channel):
     channel = channel.upper()
     if channel not in _wave_history:
@@ -1694,40 +1478,30 @@ def _clear_wave_history(channel):
     _wave_history[channel].clear()
     _wave_history_last_update[channel] = 0.0
 
-
 DGConnection.wave_observer = _record_wave
 DGConnection.clear_observer = _clear_wave_history
-
 
 def _get_wave_history_snapshot(channel):
     history = list(_wave_history[channel])
     if not history:
         return []
-
     last_update = _wave_history_last_update.get(channel, 0.0)
     zero_sample = {'s': 0, 'f': 10}
-
     if last_update <= 0.0:
         return history[-200:]
-
     elapsed_ms = max(0.0, (time.monotonic() - last_update) * 1000.0)
     elapsed_samples = int(elapsed_ms // WAVE_HISTORY_SAMPLE_MS)
-
-    # Only pad zeros after data stops arriving (indicates playback ended)
     if elapsed_samples <= 0:
         return history[-200:]
     if elapsed_samples >= 200:
         return [zero_sample] * 200
-
-    # Take the most recent samples and pad trailing zeros for elapsed silence
     tail = history[-200:]
     if elapsed_samples >= len(tail):
         return [zero_sample] * len(tail)
     return tail[elapsed_samples:] + [zero_sample] * elapsed_samples
 
-
+# --- Command Queue Processor ---
 async def command_queue_processor(stop_event: asyncio.Event):
-    """Process commands from the priority queue."""
     while not stop_event.is_set():
         try:
             cmd = await asyncio.wait_for(command_queue.get(), timeout=0.5)
@@ -1737,7 +1511,6 @@ async def command_queue_processor(stop_event: asyncio.Event):
             elif cmd.action == 'wave':
                 await DGConnection.broadcast_wave(channel=cmd.channel, wavestr=cmd.value)
             elif cmd.action == 'clear':
-                # Skip clear during wave test to prevent it from killing test output
                 if not _wave_test_state['active']:
                     await DGConnection.broadcast_clear_wave(cmd.channel)
             command_queue.task_done()
@@ -1749,16 +1522,15 @@ async def command_queue_processor(stop_event: asyncio.Event):
             logger.error(f"[command_queue] error: {e}")
             await asyncio.sleep(0.01)
 
-
+# --- DG-LAB WebSocket handler ---
 async def wshandler(connection):
     client = DGConnection(connection, SETTINGS=SETTINGS)
     await client.serve()
 
+# --- Engine ---
 class Engine:
-    """Data processing engine: OSC listener, WebSocket server, command queue, handlers.
-    
-    Can be started/stopped/restarted independently of the Flask web server.
-    """
+    """Data processing engine: OSC listener, WebSocket server, command queue, handlers."""
+
     def __init__(self):
         self._thread: Thread | None = None
         self._loop: asyncio.AbstractEventLoop | None = None
@@ -1766,13 +1538,12 @@ class Engine:
         self._running = False
         self.dispatcher: Dispatcher | None = None
         self.handlers: list = []
-    
+
     @property
     def running(self):
         return self._running
-    
+
     def _build_dispatcher_and_handlers(self):
-        """Create OSC dispatcher and ShockHandlers from current SETTINGS."""
         self.dispatcher = Dispatcher()
         self.dispatcher.set_default_handler(_osc_record_hook)
         self.handlers = []
@@ -1801,15 +1572,14 @@ class Engine:
                 logger.success(f"Channel {chann} mode {param_mode} listening {param_path}")
                 self.dispatcher.map(param_path, channel_handlers[param_mode].osc_handler)
 
-        # Update module-level reference for hot-reload access
         global handlers
         handlers = self.handlers
 
     async def _async_main(self):
-        """Async entry point for the engine thread."""
         self._stop_event = asyncio.Event()
-        
-        # Start background tasks
+        # Recreate queue in this event loop context
+        command_queue.clear()
+
         tasks = [
             asyncio.ensure_future(command_queue_processor(self._stop_event)),
             asyncio.ensure_future(_strength_boost_checker(self._stop_event)),
@@ -1818,7 +1588,6 @@ class Engine:
         for handler in self.handlers:
             handler.start_background_jobs()
 
-        # Start OSC server
         transport = None
         try:
             server = AsyncIOOSCUDPServer(
@@ -1827,7 +1596,7 @@ class Engine:
             )
             transport, protocol = await server.create_serve_endpoint()
             logger.success(f'OSC Listening: {SETTINGS["osc"]["listen_host"]}:{SETTINGS["osc"]["listen_port"]}')
-        except Exception as e:
+        except Exception:
             logger.error(traceback.format_exc())
             logger.error("OSC监听失败，可能存在端口冲突")
             self._stop_event.set()
@@ -1836,12 +1605,11 @@ class Engine:
             self._running = False
             return
 
-        # Start WebSocket server
         ws_server = None
         try:
             ws_server = await wsserve(wshandler, SETTINGS['ws']["listen_host"], SETTINGS['ws']["listen_port"])
             logger.success(f'WS Listening: {SETTINGS["ws"]["listen_host"]}:{SETTINGS["ws"]["listen_port"]}')
-        except Exception as e:
+        except Exception:
             logger.error(traceback.format_exc())
             logger.error("WS服务监听失败，可能存在端口冲突")
             if transport:
@@ -1855,10 +1623,8 @@ class Engine:
         self._running = True
         logger.info("[engine] Started.")
 
-        # Wait until stop is requested
         await self._stop_event.wait()
 
-        # Cleanup
         logger.info("[engine] Stopping...")
         if ws_server:
             ws_server.close()
@@ -1867,13 +1633,11 @@ class Engine:
             transport.close()
         for t in tasks:
             t.cancel()
-        # Wait for task cancellation
         await asyncio.gather(*tasks, return_exceptions=True)
         self._running = False
         logger.info("[engine] Stopped.")
 
     def _thread_target(self):
-        """Thread entry: create event loop and run async_main."""
         self._loop = asyncio.new_event_loop()
         asyncio.set_event_loop(self._loop)
         try:
@@ -1885,7 +1649,6 @@ class Engine:
             self._loop = None
 
     def start(self):
-        """Start the engine in a background thread."""
         if self._thread and self._thread.is_alive():
             logger.warning("[engine] Already running, stop first.")
             return
@@ -1894,11 +1657,8 @@ class Engine:
         self._thread.start()
 
     def stop(self, timeout=5.0):
-        """Stop the engine gracefully."""
-        # Stop wave test if active (restore limits)
         if _wave_test_state['active']:
             _wave_test_state['active'] = False
-            # Restore suppressed command priorities
             command_queue.set_enabled(CommandPriority.OSC_INTERACTION, True)
             command_queue.set_enabled(CommandPriority.OSC_PANEL, True)
             command_queue.set_enabled(CommandPriority.GAME, True)
@@ -1913,19 +1673,14 @@ class Engine:
                 logger.warning("[engine] Thread did not exit cleanly.")
             self._thread = None
 
-        # Clear pending commands (they reference old handler objects)
-        command_queue.clear()
-
     def restart(self):
-        """Restart the engine with current settings."""
         logger.info("[engine] Restarting...")
         self.stop()
-        # Re-read settings if needed (caller should update SETTINGS before calling)
         self.start()
 
-# Global engine instance
 engine = Engine()
 
+# --- Config save ---
 def config_save():
     for path, data in [(CONFIG_FILENAME, SETTINGS), (CONFIG_FILENAME_BASIC, SETTINGS_BASIC)]:
         tmp = path + '.tmp'
@@ -1948,7 +1703,7 @@ def config_init():
 
     if SETTINGS.get('version', None) != CONFIG_FILE_VERSION or SETTINGS_BASIC.get('version', None) != CONFIG_FILE_VERSION:
         logger.error(f"配置文件版本不匹配！请删除 {CONFIG_FILENAME_BASIC} 和 {CONFIG_FILENAME} 后重启。")
-        raise Exception(f'Config version mismatch. Delete {CONFIG_FILENAME_BASIC} and {CONFIG_FILENAME} to regenerate.')
+        raise Exception(f'Config version mismatch.')
     SERVER_IP = SETTINGS['SERVER_IP'] or get_current_ip()
 
     reset_logger()
@@ -1956,7 +1711,7 @@ def config_init():
     logger.success("配置加载完成 | Websocket 需要监听外来连接，如弹出防火墙提示请允许")
 
 def main():
-    # Start the data engine (OSC + WS + handlers) in background
+    # Start the data engine
     engine.start()
 
     # Start config hot-reload watcher
@@ -1978,8 +1733,15 @@ def main():
     logger.info(f"Channel A: {enabled_a} params | Channel B: {enabled_b} params")
     logger.info(f"Web: :{SETTINGS['web_server']['listen_port']} | WS: :{SETTINGS['ws']['listen_port']} | OSC: :{SETTINGS['osc']['listen_port']}")
 
-    # Flask web server runs in main thread - never restarts
-    app.run(SETTINGS['web_server']['listen_host'], SETTINGS['web_server']['listen_port'], debug=False)
+    # Run FastAPI with Uvicorn
+    import uvicorn
+    uvicorn.run(
+        app,
+        host=SETTINGS['web_server']['listen_host'],
+        port=SETTINGS['web_server']['listen_port'],
+        log_level="warning",
+        access_log=False,
+    )
 
 if __name__ == "__main__":
     try:
@@ -1990,28 +1752,25 @@ if __name__ == "__main__":
         import webbrowser
         port = SETTINGS['web_server']['listen_port']
         webbrowser.open_new_tab(f"http://127.0.0.1:{port}/setup")
-        app.config['SETUP_COMPLETE'] = False
-        # Run wizard web server in a thread so we can detect completion
-        from threading import Event
-        _setup_done = Event()
+        app.state.setup_complete = False
 
-        @app.route('/api/v1/setup/poll')
-        def setup_poll():
-            return jsonify({'done': app.config.get('SETUP_COMPLETE', False)})
+        @app.get('/api/v1/setup/poll')
+        async def setup_poll():
+            return {'done': getattr(app.state, 'setup_complete', False)}
+
+        import uvicorn
 
         def _run_wizard_server():
-            app.run('127.0.0.1', port, debug=False, use_reloader=False)
+            uvicorn.run(app, host='127.0.0.1', port=port, log_level="warning", access_log=False)
 
         wizard_th = Thread(target=_run_wizard_server, daemon=True)
         wizard_th.start()
 
-        # Wait for setup completion then restart into main
-        import time as _time
-        while not app.config.get('SETUP_COMPLETE', False):
-            _time.sleep(0.5)
+        # Wait for setup completion then restart
+        while not getattr(app.state, 'setup_complete', False):
+            time.sleep(0.5)
 
         logger.success('配置向导完成，正在重启...')
-        # Set env var to skip opening browser on this restart only (browser already open)
         os.environ['SHOCKING_SKIP_OPEN'] = '1'
         config_save()
         time.sleep(1)
