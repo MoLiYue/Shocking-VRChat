@@ -270,37 +270,32 @@ def has_config_file_changed():
 def apply_hot_reloadable_settings(new_settings, new_settings_basic):
     global SERVER_IP
     old_settings = copy.deepcopy(SETTINGS)
-    old_settings_basic = copy.deepcopy(SETTINGS_BASIC)
 
-    restart_required_reasons = []
+    engine_restart_needed = False
 
+    # Detect changes that need engine restart (OSC/WS/params)
     if new_settings['osc'] != old_settings['osc']:
-        restart_required_reasons.append('osc')
-        new_settings['osc'] = old_settings['osc']
+        engine_restart_needed = True
     if new_settings['ws'] != old_settings['ws']:
-        restart_required_reasons.append('ws')
-        new_settings['ws'] = old_settings['ws']
-    if new_settings['web_server'] != old_settings['web_server']:
-        restart_required_reasons.append('web_server')
-        new_settings['web_server'] = old_settings['web_server']
+        engine_restart_needed = True
     if new_settings.get('SERVER_IP') != old_settings.get('SERVER_IP'):
-        restart_required_reasons.append('SERVER_IP')
-        new_settings['SERVER_IP'] = old_settings.get('SERVER_IP')
-    if new_settings_basic['dglab3'] != old_settings_basic['dglab3']:
-        old_basic = old_settings_basic['dglab3']
-        new_basic = new_settings_basic['dglab3']
+        engine_restart_needed = True
+
+    old_basic = copy.deepcopy(SETTINGS_BASIC)
+    if new_settings_basic['dglab3'] != old_basic['dglab3']:
         if any(
-            new_basic[ch]['avatar_params'] != old_basic[ch]['avatar_params'] or
-            new_basic[ch]['mode'] != old_basic[ch]['mode']
+            new_settings_basic['dglab3'][ch]['avatar_params'] != old_basic['dglab3'][ch]['avatar_params'] or
+            new_settings_basic['dglab3'][ch]['mode'] != old_basic['dglab3'][ch]['mode']
             for ch in ['channel_a', 'channel_b']
         ):
-            restart_required_reasons.append('avatar_params/mode')
-            for ch in ['channel_a', 'channel_b']:
-                new_settings_basic['dglab3'][ch]['avatar_params'] = old_basic[ch]['avatar_params']
-                new_settings_basic['dglab3'][ch]['mode'] = old_basic[ch]['mode']
-                new_settings['dglab3'][ch]['avatar_params'] = old_settings['dglab3'][ch]['avatar_params']
-                new_settings['dglab3'][ch]['mode'] = old_settings['dglab3'][ch]['mode']
+            engine_restart_needed = True
 
+    # Web server port/host cannot be changed at runtime (Flask already bound)
+    if new_settings['web_server'] != old_settings['web_server']:
+        logger.warning("[hot-reload] web_server config changed. Full program restart required to apply.")
+        new_settings['web_server'] = old_settings['web_server']
+
+    # Apply all settings
     SETTINGS.clear()
     SETTINGS.update(new_settings)
     SETTINGS_BASIC.clear()
@@ -310,14 +305,15 @@ def apply_hot_reloadable_settings(new_settings, new_settings_basic):
     reset_logger()
     DGConnection.refresh_limits_from_settings(SETTINGS)
 
-    for handler in handlers:
-        if hasattr(handler, 'refresh_settings'):
-            handler.refresh_settings()
+    if engine_restart_needed:
+        logger.info("[hot-reload] OSC/WS/param config changed, restarting engine...")
+        engine.restart()
+    else:
+        # Just refresh handler settings in-place
+        for handler in handlers:
+            if hasattr(handler, 'refresh_settings'):
+                handler.refresh_settings()
 
-    if restart_required_reasons:
-        logger.warning(
-            f"[hot-reload] Applied runtime-safe config changes. Restart required for: {', '.join(restart_required_reasons)}"
-        )
     logger.success("[hot-reload] Configuration reloaded.")
 
 
@@ -415,6 +411,7 @@ def allow_vrchat_only(func):
 async def api_v1_status():
     return {
         'healthy': 'ok',
+        'engine_running': engine.running,
         'osc_listening': f"{SETTINGS['osc']['listen_host']}:{SETTINGS['osc']['listen_port']}",
         'last_osc_time': _osc_activity[0]['time'] if _osc_activity else None,
         'devices': [
@@ -513,10 +510,13 @@ async def api_v1_strength_boost(channel, value, duration):
         _strength_boost_expire[ch] = time.time() + duration
     return {'result': 'OK', 'boost': value, 'duration': duration, 'channels': channels}
 
-async def _strength_boost_checker():
+async def _strength_boost_checker(stop_event: asyncio.Event):
     """Background task: revert expired strength boosts."""
-    while True:
-        await asyncio.sleep(0.1)
+    while not stop_event.is_set():
+        try:
+            await asyncio.sleep(0.1)
+        except asyncio.CancelledError:
+            return
         now = time.time()
         for ch in ['A', 'B']:
             if _strength_boost[ch] > 0 and now >= _strength_boost_expire[ch]:
@@ -809,13 +809,13 @@ async def api_v1_wave_test_status():
         'preset': _wave_test_state['preset'],
     }
 
-async def _wave_test_loop():
+async def _wave_test_loop(stop_event: asyncio.Event):
     """Background loop that sends waves continuously while test is active."""
     from srv.wave_preset import WavePresetLibrary
     wave_position = 0.0
     lib = WavePresetLibrary()
     saved_limits = None
-    while True:
+    while not stop_event.is_set():
         try:
             if _wave_test_state['active']:
                 channel = _wave_test_state['channel']
@@ -874,6 +874,8 @@ async def _wave_test_loop():
                     saved_limits = None
                 wave_position = 0.0
                 await asyncio.sleep(0.1)
+        except asyncio.CancelledError:
+            return
         except Exception as e:
             logger.error(f"[wave_test_loop] error: {e}")
             await asyncio.sleep(0.5)
@@ -950,17 +952,36 @@ def api_v1_settings_update():
         reset_logger()
     config_save()
     if restart_needed:
-        # Schedule restart after response is sent
+        web_restart = 'web_server' in restart_needed
+        engine_restart = any(r in restart_needed for r in ('osc', 'ws'))
         def _delayed_restart():
-            time.sleep(1)
-            logger.info("[settings] Restarting due to network config change...")
-            _restart_program()
+            time.sleep(0.5)
+            if engine_restart:
+                logger.info("[settings] Restarting engine due to OSC/WS config change...")
+                engine.restart()
+            if web_restart:
+                logger.warning("[settings] Web server port/host changed. Full restart required.")
+                _restart_program()
         Thread(target=_delayed_restart, daemon=True).start()
     return jsonify({
         'success': True,
         'restart_needed': list(set(restart_needed)),
-        'message': '已保存。' + ('程序正在重启...' if restart_needed else ''),
+        'message': '已保存。' + ('引擎正在重启...' if restart_needed else ''),
     })
+
+@app.route('/api/v1/engine/restart', methods=['POST'])
+def api_v1_engine_restart():
+    """Restart the data engine (OSC+WS+handlers) without restarting the web server."""
+    def _do_restart():
+        time.sleep(0.3)
+        engine.restart()
+    Thread(target=_do_restart, daemon=True).start()
+    return jsonify({'success': True, 'message': '引擎正在重启...'})
+
+@app.route('/api/v1/engine/status')
+def api_v1_engine_status():
+    """Get engine running status."""
+    return jsonify({'running': engine.running})
 
 def _restart_program():
     """Restart the current process. Works on both Windows and Linux."""
@@ -1023,11 +1044,11 @@ def api_v1_params_set(channel):
     SETTINGS['dglab3'][ch_key]['strength_limit'] = SETTINGS_BASIC['dglab3'][ch_key]['strength_limit']
     normalize_avatar_param_entries(SETTINGS['dglab3'][ch_key])
     config_save()
-    # Auto-restart to apply new param registrations
+    # Restart engine to apply new param registrations (no web server restart needed)
     def _delayed_restart():
-        time.sleep(1)
-        logger.info("[params] Restarting to apply param changes...")
-        _restart_program()
+        time.sleep(0.5)
+        logger.info("[params] Restarting engine to apply param changes...")
+        engine.restart()
     Thread(target=_delayed_restart, daemon=True).start()
     return jsonify({'success': True, 'params': validated, 'restarting': True})
 
@@ -1705,11 +1726,11 @@ def _get_wave_history_snapshot(channel):
     return tail[elapsed_samples:] + [zero_sample] * elapsed_samples
 
 
-async def command_queue_processor():
+async def command_queue_processor(stop_event: asyncio.Event):
     """Process commands from the priority queue."""
-    while True:
+    while not stop_event.is_set():
         try:
-            cmd = await command_queue.get()
+            cmd = await asyncio.wait_for(command_queue.get(), timeout=0.5)
             if cmd.action == 'osc_trigger':
                 handler_fn = cmd.value['handler']
                 await handler_fn(cmd.value['val'], context=cmd.value['context'])
@@ -1720,6 +1741,10 @@ async def command_queue_processor():
                 if not _wave_test_state['active']:
                     await DGConnection.broadcast_clear_wave(cmd.channel)
             command_queue.task_done()
+        except asyncio.TimeoutError:
+            continue
+        except asyncio.CancelledError:
+            return
         except Exception as e:
             logger.error(f"[command_queue] error: {e}")
             await asyncio.sleep(0.01)
@@ -1729,36 +1754,177 @@ async def wshandler(connection):
     client = DGConnection(connection, SETTINGS=SETTINGS)
     await client.serve()
 
-async def async_main():
-    asyncio.ensure_future(command_queue_processor())
-    asyncio.ensure_future(_strength_boost_checker())
-    asyncio.ensure_future(_wave_test_loop())
-    for handler in handlers:
-        handler.start_background_jobs()
-    try: 
-        server = AsyncIOOSCUDPServer((SETTINGS["osc"]["listen_host"], SETTINGS["osc"]["listen_port"]), dispatcher, asyncio.get_event_loop())
-        logger.success(f'OSC Listening: {SETTINGS["osc"]["listen_host"]}:{SETTINGS["osc"]["listen_port"]}')
-        transport, protocol = await server.create_serve_endpoint()
-        # await wsserve(wshandler, "127.0.0.1", 8765)
-    except Exception as e:
-        logger.error(traceback.format_exc())
-        logger.error("OSC UDP Recevier listen failed.")
-        logger.error("OSC监听失败，可能存在端口冲突")
-        return
-    try: 
-        async with wsserve(wshandler, SETTINGS['ws']["listen_host"], SETTINGS['ws']["listen_port"]):
-            await asyncio.Future()  # run forever
-    except Exception as e:
-        logger.error(traceback.format_exc())
-        logger.error("Websocket server listen failed.")
-        logger.error("WS服务监听失败，可能存在端口冲突")
-        return
+class Engine:
+    """Data processing engine: OSC listener, WebSocket server, command queue, handlers.
+    
+    Can be started/stopped/restarted independently of the Flask web server.
+    """
+    def __init__(self):
+        self._thread: Thread | None = None
+        self._loop: asyncio.AbstractEventLoop | None = None
+        self._stop_event: asyncio.Event | None = None
+        self._running = False
+        self.dispatcher: Dispatcher | None = None
+        self.handlers: list = []
+    
+    @property
+    def running(self):
+        return self._running
+    
+    def _build_dispatcher_and_handlers(self):
+        """Create OSC dispatcher and ShockHandlers from current SETTINGS."""
+        self.dispatcher = Dispatcher()
+        self.dispatcher.set_default_handler(_osc_record_hook)
+        self.handlers = []
 
-    transport.close()
+        ShockHandler.set_command_queue(command_queue)
+        ShockHandler.osc_activity_observer = _record_osc_activity
+        ShockHandler._curve_getter = get_curve_points
 
-def async_main_wrapper():
-    """Not async Wrapper around async_main to run it as target function of Thread"""
-    asyncio.run(async_main())
+        for chann in ['A', 'B']:
+            config_chann_name = f'channel_{chann.lower()}'
+            channel_handlers = {}
+            for param_entry in SETTINGS['dglab3'][config_chann_name]['avatar_params']:
+                if not param_entry.get('enabled', True):
+                    logger.info(f"Channel {chann} skipping disabled param: {param_entry['path']}")
+                    continue
+                param_path = param_entry['path']
+                param_mode = param_entry['mode']
+                if param_mode not in channel_handlers:
+                    channel_handlers[param_mode] = ShockHandler(
+                        SETTINGS=SETTINGS,
+                        DG_CONN=DGConnection,
+                        channel_name=chann,
+                        handler_mode=param_mode,
+                    )
+                    self.handlers.append(channel_handlers[param_mode])
+                logger.success(f"Channel {chann} mode {param_mode} listening {param_path}")
+                self.dispatcher.map(param_path, channel_handlers[param_mode].osc_handler)
+
+        # Update module-level reference for hot-reload access
+        global handlers
+        handlers = self.handlers
+
+    async def _async_main(self):
+        """Async entry point for the engine thread."""
+        self._stop_event = asyncio.Event()
+        
+        # Start background tasks
+        tasks = [
+            asyncio.ensure_future(command_queue_processor(self._stop_event)),
+            asyncio.ensure_future(_strength_boost_checker(self._stop_event)),
+            asyncio.ensure_future(_wave_test_loop(self._stop_event)),
+        ]
+        for handler in self.handlers:
+            handler.start_background_jobs()
+
+        # Start OSC server
+        transport = None
+        try:
+            server = AsyncIOOSCUDPServer(
+                (SETTINGS["osc"]["listen_host"], SETTINGS["osc"]["listen_port"]),
+                self.dispatcher, asyncio.get_event_loop()
+            )
+            transport, protocol = await server.create_serve_endpoint()
+            logger.success(f'OSC Listening: {SETTINGS["osc"]["listen_host"]}:{SETTINGS["osc"]["listen_port"]}')
+        except Exception as e:
+            logger.error(traceback.format_exc())
+            logger.error("OSC监听失败，可能存在端口冲突")
+            self._stop_event.set()
+            for t in tasks:
+                t.cancel()
+            self._running = False
+            return
+
+        # Start WebSocket server
+        ws_server = None
+        try:
+            ws_server = await wsserve(wshandler, SETTINGS['ws']["listen_host"], SETTINGS['ws']["listen_port"])
+            logger.success(f'WS Listening: {SETTINGS["ws"]["listen_host"]}:{SETTINGS["ws"]["listen_port"]}')
+        except Exception as e:
+            logger.error(traceback.format_exc())
+            logger.error("WS服务监听失败，可能存在端口冲突")
+            if transport:
+                transport.close()
+            self._stop_event.set()
+            for t in tasks:
+                t.cancel()
+            self._running = False
+            return
+
+        self._running = True
+        logger.info("[engine] Started.")
+
+        # Wait until stop is requested
+        await self._stop_event.wait()
+
+        # Cleanup
+        logger.info("[engine] Stopping...")
+        if ws_server:
+            ws_server.close()
+            await ws_server.wait_closed()
+        if transport:
+            transport.close()
+        for t in tasks:
+            t.cancel()
+        # Wait for task cancellation
+        await asyncio.gather(*tasks, return_exceptions=True)
+        self._running = False
+        logger.info("[engine] Stopped.")
+
+    def _thread_target(self):
+        """Thread entry: create event loop and run async_main."""
+        self._loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(self._loop)
+        try:
+            self._loop.run_until_complete(self._async_main())
+        except Exception:
+            logger.error(traceback.format_exc())
+        finally:
+            self._loop.close()
+            self._loop = None
+
+    def start(self):
+        """Start the engine in a background thread."""
+        if self._thread and self._thread.is_alive():
+            logger.warning("[engine] Already running, stop first.")
+            return
+        self._build_dispatcher_and_handlers()
+        self._thread = Thread(target=self._thread_target, daemon=True, name='Engine')
+        self._thread.start()
+
+    def stop(self, timeout=5.0):
+        """Stop the engine gracefully."""
+        # Stop wave test if active (restore limits)
+        if _wave_test_state['active']:
+            _wave_test_state['active'] = False
+            # Restore suppressed command priorities
+            command_queue.set_enabled(CommandPriority.OSC_INTERACTION, True)
+            command_queue.set_enabled(CommandPriority.OSC_PANEL, True)
+            command_queue.set_enabled(CommandPriority.GAME, True)
+            DGConnection._suppress_clear = False
+            logger.info("[engine] Wave test stopped due to engine shutdown.")
+
+        if self._loop and self._stop_event:
+            self._loop.call_soon_threadsafe(self._stop_event.set)
+        if self._thread:
+            self._thread.join(timeout=timeout)
+            if self._thread.is_alive():
+                logger.warning("[engine] Thread did not exit cleanly.")
+            self._thread = None
+
+        # Clear pending commands (they reference old handler objects)
+        command_queue.clear()
+
+    def restart(self):
+        """Restart the engine with current settings."""
+        logger.info("[engine] Restarting...")
+        self.stop()
+        # Re-read settings if needed (caller should update SETTINGS before calling)
+        self.start()
+
+# Global engine instance
+engine = Engine()
 
 def config_save():
     for path, data in [(CONFIG_FILENAME, SETTINGS), (CONFIG_FILENAME_BASIC, SETTINGS_BASIC)]:
@@ -1790,38 +1956,10 @@ def config_init():
     logger.success("配置加载完成 | Websocket 需要监听外来连接，如弹出防火墙提示请允许")
 
 def main():
-    global dispatcher, handlers
-    dispatcher = Dispatcher()
-    # Record ALL OSC messages (not just registered params) when recording is active
-    dispatcher.set_default_handler(_osc_record_hook)
-    handlers = []
+    # Start the data engine (OSC + WS + handlers) in background
+    engine.start()
 
-    ShockHandler.set_command_queue(command_queue)
-    ShockHandler.osc_activity_observer = _record_osc_activity
-    ShockHandler._curve_getter = get_curve_points
-
-    for chann in ['A', 'B']:
-        config_chann_name = f'channel_{chann.lower()}'
-        channel_handlers = {}
-        for param_entry in SETTINGS['dglab3'][config_chann_name]['avatar_params']:
-            if not param_entry.get('enabled', True):
-                logger.info(f"Channel {chann} skipping disabled param: {param_entry['path']}")
-                continue
-            param_path = param_entry['path']
-            param_mode = param_entry['mode']
-            if param_mode not in channel_handlers:
-                channel_handlers[param_mode] = ShockHandler(
-                    SETTINGS=SETTINGS,
-                    DG_CONN=DGConnection,
-                    channel_name=chann,
-                    handler_mode=param_mode,
-                )
-                handlers.append(channel_handlers[param_mode])
-            logger.success(f"Channel {chann} mode {param_mode} listening {param_path}")
-            dispatcher.map(param_path, channel_handlers[param_mode].osc_handler)
-    
-    th = Thread(target=async_main_wrapper, daemon=True)
-    th.start()
+    # Start config hot-reload watcher
     reload_th = Thread(target=config_hot_reload_loop, daemon=True)
     reload_th.start()
 
@@ -1840,6 +1978,7 @@ def main():
     logger.info(f"Channel A: {enabled_a} params | Channel B: {enabled_b} params")
     logger.info(f"Web: :{SETTINGS['web_server']['listen_port']} | WS: :{SETTINGS['ws']['listen_port']} | OSC: :{SETTINGS['osc']['listen_port']}")
 
+    # Flask web server runs in main thread - never restarts
     app.run(SETTINGS['web_server']['listen_host'], SETTINGS['web_server']['listen_port'], debug=False)
 
 if __name__ == "__main__":

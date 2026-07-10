@@ -81,3 +81,13 @@ class CommandQueue:
 
     def empty(self) -> bool:
         return self._queue.empty()
+
+    def clear(self):
+        """Discard all pending commands."""
+        while not self._queue.empty():
+            try:
+                self._queue.get_nowait()
+                self._queue.task_done()
+            except asyncio.QueueEmpty:
+                break
+        self._source_last_time.clear()
