@@ -1653,7 +1653,8 @@ class Engine:
         for chann in ['A', 'B']:
             config_chann_name = f'channel_{chann.lower()}'
             channel_handlers = {}
-            for param_entry in SETTINGS['dglab3'][config_chann_name]['avatar_params']:
+            avatar_params = SETTINGS['dglab3'][config_chann_name].get('avatar_params', [])
+            for param_entry in avatar_params:
                 if not param_entry.get('enabled', True):
                     logger.info(f"Channel {chann} skipping disabled param: {param_entry['path']}")
                     continue
