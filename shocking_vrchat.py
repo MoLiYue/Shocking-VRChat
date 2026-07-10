@@ -1431,11 +1431,32 @@ async def api_v1_wave_presets_import(file: UploadFile = File(...)):
         if not ops:
             raise HTTPException(400, 'no valid wave data in file')
         preset_name = filename.rsplit('.', 1)[0]
+
+        # Build preview_sections metadata (same logic as batch converter)
+        import math as _math
+        preview_sections = []
+        for sec in sections:
+            if not sec.enabled or not sec.points:
+                continue
+            n_points = len(sec.points)
+            duration = max(0, sec.duration)
+            repeats = max(1, _math.ceil(duration / n_points)) if duration > 0 else 1
+            preview_sections.append({
+                'freq_low': sec.freq_low,
+                'freq_high': sec.freq_high,
+                'freq_mode': sec.freq_mode,
+                'duration': duration,
+                'n_points': n_points,
+                'repeats': repeats,
+                'points': [{'strength': round(max(0, min(100, v))), 'anchor': flag == 1} for v, flag in sec.points],
+            })
+
         preset_data = {
             'name': preset_name,
             'source_file': filename,
             'num_ops': len(ops),
             'header': header.__dict__ if header else None,
+            'preview_sections': preview_sections,
             'wavestrs': wavestrs,
         }
         out_path = PRESET_DIR / f'{preset_name}.json'

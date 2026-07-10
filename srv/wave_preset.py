@@ -76,10 +76,20 @@ def _decode_ops_to_samples(ops: List[str]) -> Dict[str, List[float]]:
 
 
 class WavePresetLibrary:
+    _instance: Optional['WavePresetLibrary'] = None
+
+    def __new__(cls, preset_dir: Optional[Path] = None):
+        if cls._instance is None:
+            obj = super().__new__(cls)
+            obj.preset_dir = Path(preset_dir) if preset_dir is not None else PRESET_DIR
+            obj.presets = {}
+            obj.reload()
+            cls._instance = obj
+        return cls._instance
+
     def __init__(self, preset_dir: Optional[Path] = None) -> None:
-        self.preset_dir = Path(preset_dir) if preset_dir is not None else PRESET_DIR
-        self.presets: Dict[str, Dict[str, List[str]]] = {}
-        self.reload()
+        # __new__ handles initialization; avoid re-init on subsequent calls
+        pass
 
     def reload(self):
         self.presets = {}
