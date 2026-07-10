@@ -16,14 +16,37 @@ def convert_pulse_file(pulse_file: Path, output_dir: Path, max_ops: int) -> Path
     with pulse_file.open("r", encoding="utf-8", errors="replace") as fr:
         pulse_text = fr.read().strip()
 
-    ops, wavestrs, header, _sections = convert_to_ops(pulse_text, max_ops_per_msg=max_ops)
+    ops, wavestrs, header, sections = convert_to_ops(pulse_text, max_ops_per_msg=max_ops)
     preset_name = build_preset_name(pulse_file)
     output_path = output_dir / f"{preset_name}.json"
+
+    import math
+    speed = header.speed if header else 1
+
+    # Save section metadata for preview (so we don't need .pulse file at runtime)
+    preview_sections = []
+    for sec in sections:
+        if not sec.enabled or not sec.points:
+            continue
+        n_points = len(sec.points)
+        duration = max(0, sec.duration)
+        repeats = max(1, math.ceil(duration / n_points)) if duration > 0 else 1
+        preview_sections.append({
+            'freq_low': sec.freq_low,
+            'freq_high': sec.freq_high,
+            'freq_mode': sec.freq_mode,
+            'duration': duration,
+            'n_points': n_points,
+            'repeats': repeats,
+            'points': [{'strength': round(max(0, min(100, v))), 'anchor': flag == 1} for v, flag in sec.points],
+        })
+
     payload = {
         "name": preset_name,
         "source_file": pulse_file.name,
         "num_ops": len(ops),
         "header": (header.__dict__ if header else None),
+        "preview_sections": preview_sections,
         "wavestrs": wavestrs,
     }
     with output_path.open("w", encoding="utf-8") as fw:

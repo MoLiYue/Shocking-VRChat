@@ -103,6 +103,7 @@ class WavePresetLibrary:
                     "ops": ops,
                     "wavestrs": _ops_to_wavestrs(ops),
                     "header": raw.get("header"),
+                    "preview_sections": raw.get("preview_sections"),
                     **_decode_ops_to_samples(ops),
                 }
                 logger.info(f"Loaded wave preset `{name}` with {len(ops)} ops.")
@@ -116,6 +117,10 @@ class WavePresetLibrary:
         if preset is None:
             logger.warning(f"Wave preset `{name}` not found.")
         return preset
+
+    def get_raw(self, name: Optional[str]):
+        """Get preset data including preview_sections and header metadata."""
+        return self.get(name)
 
     @staticmethod
     def scale_op(op: str, strength_scale: float) -> str:

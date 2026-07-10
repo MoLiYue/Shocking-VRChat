@@ -58,7 +58,9 @@ jobs:
         shell: pwsh
 
       - name: Copy wave_presets alongside binary
-        run: Copy-Item -Recurse wave_presets dist\shocking_vrchat\wave_presets
+        run: |
+          Copy-Item -Recurse wave_presets dist\shocking_vrchat\wave_presets
+          Copy-Item -Recurse dg-lab dist\shocking_vrchat\dg-lab
         shell: pwsh
 
       - name: Show output size
@@ -134,7 +136,9 @@ jobs:
         shell: pwsh
 
       - name: Copy wave_presets alongside binary
-        run: Copy-Item -Recurse wave_presets dist_nuitka\wave_presets
+        run: |
+          Copy-Item -Recurse wave_presets dist_nuitka\wave_presets
+          Copy-Item -Recurse dg-lab dist_nuitka\dg-lab
         shell: pwsh
 
       - name: Show output size

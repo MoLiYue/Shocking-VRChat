@@ -1331,67 +1331,83 @@ async def api_v1_wave_preset_preview(preset_name: str):
     if not preset:
         raise HTTPException(404, 'preset not found')
 
-    pulse_dir = os.path.join(get_exe_dir(), 'dg-lab')
-    pulse_file = os.path.join(pulse_dir, preset_name + '.pulse')
-    if not os.path.exists(pulse_file):
-        # Fallback: build preview from raw ops data
-        ops = preset.get('ops', [])
-        strengths = []
-        for op in ops:
-            for i in range(4):
-                strengths.append(int(op[8 + i * 2:8 + i * 2 + 2], 16))
-        n_points = len(strengths)
+    # Try to get preview from preset JSON metadata (works on all platforms)
+    raw_preset = lib.get_raw(preset_name)
+    if raw_preset and 'preview_sections' in raw_preset and raw_preset['preview_sections']:
+        header_data = raw_preset.get('header') or {}
+        speed = header_data.get('speed', 1) if header_data else 1
+        rest_ticks = header_data.get('rest_ticks', 0) if header_data else 0
         return {
             'name': preset_name,
-            'speed': 1,
-            'rest_ticks': 0,
-            'sections': [{
-                'freq_low': 0,
-                'freq_high': 0,
-                'freq_mode': 1,
-                'duration': n_points,
-                'n_points': n_points,
-                'repeats': 1,
-                'points': [{'strength': s, 'anchor': True} for s in strengths],
-            }],
+            'speed': speed,
+            'rest_ticks': rest_ticks,
+            'sections': raw_preset['preview_sections'],
         }
 
-    with open(pulse_file, 'r', encoding='utf-8') as f:
-        pulse_text = f.read().strip()
+    # Fallback: try .pulse source file
+    pulse_dir = os.path.join(get_exe_dir(), 'dg-lab')
+    pulse_file = os.path.join(pulse_dir, preset_name + '.pulse')
+    if os.path.exists(pulse_file):
+        with open(pulse_file, 'r', encoding='utf-8') as f:
+            pulse_text = f.read().strip()
 
-    header, sections = parse_pulse(pulse_text)
-    speed = header.speed if header else 1
+        header, sections = parse_pulse(pulse_text)
+        speed = header.speed if header else 1
 
-    result_sections = []
-    for sec in sections:
-        if not sec.enabled:
-            continue
-        if not sec.points:
-            continue
-        n_points = len(sec.points)
-        duration = max(0, sec.duration)
-        repeats = max(1, math.ceil(duration / n_points)) if duration > 0 else 1
-        points = []
-        for val, flag in sec.points:
-            points.append({
-                'strength': round(max(0, min(100, val))),
-                'anchor': flag == 1,
+        result_sections = []
+        for sec in sections:
+            if not sec.enabled:
+                continue
+            if not sec.points:
+                continue
+            n_points = len(sec.points)
+            duration = max(0, sec.duration)
+            repeats = max(1, math.ceil(duration / n_points)) if duration > 0 else 1
+            points = []
+            for val, flag in sec.points:
+                points.append({
+                    'strength': round(max(0, min(100, val))),
+                    'anchor': flag == 1,
+                })
+            result_sections.append({
+                'freq_low': sec.freq_low,
+                'freq_high': sec.freq_high,
+                'freq_mode': sec.freq_mode,
+                'duration': duration,
+                'n_points': n_points,
+                'repeats': repeats,
+                'points': points,
             })
-        result_sections.append({
-            'freq_low': sec.freq_low,
-            'freq_high': sec.freq_high,
-            'freq_mode': sec.freq_mode,
-            'duration': duration,
-            'n_points': n_points,
-            'repeats': repeats,
-            'points': points,
-        })
 
+        return {
+            'name': preset_name,
+            'speed': speed,
+            'rest_ticks': header.rest_ticks if header else 0,
+            'sections': result_sections,
+        }
+
+    # Last fallback: build from ops data
+    ops = preset.get('ops', [])
+    strengths = []
+    for op in ops:
+        for i in range(4):
+            strengths.append(int(op[8 + i * 2:8 + i * 2 + 2], 16))
+    n_points = len(strengths)
+    header_data = raw_preset.get('header') or {} if raw_preset else {}
+    speed = header_data.get('speed', 1) if header_data else 1
     return {
         'name': preset_name,
         'speed': speed,
-        'rest_ticks': header.rest_ticks if header else 0,
-        'sections': result_sections,
+        'rest_ticks': header_data.get('rest_ticks', 0) if header_data else 0,
+        'sections': [{
+            'freq_low': 0,
+            'freq_high': 0,
+            'freq_mode': 1,
+            'duration': n_points,
+            'n_points': n_points,
+            'repeats': 1,
+            'points': [{'strength': s, 'anchor': True} for s in strengths],
+        }],
     }
 
 @app.post("/api/v1/wave_presets/import")
