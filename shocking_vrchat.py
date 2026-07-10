@@ -1327,14 +1327,26 @@ async def api_v1_wave_preset_preview(preset_name: str):
     pulse_dir = os.path.join(get_exe_dir(), 'dg-lab')
     pulse_file = os.path.join(pulse_dir, preset_name + '.pulse')
     if not os.path.exists(pulse_file):
+        # Fallback: build preview from raw ops data
         ops = preset.get('ops', [])
         strengths = []
         for op in ops:
             for i in range(4):
                 strengths.append(int(op[8 + i * 2:8 + i * 2 + 2], 16))
+        n_points = len(strengths)
         return {
             'name': preset_name,
-            'sections': [{'points': [{'strength': s} for s in strengths]}],
+            'speed': 1,
+            'rest_ticks': 0,
+            'sections': [{
+                'freq_low': 0,
+                'freq_high': 0,
+                'freq_mode': 1,
+                'duration': n_points,
+                'n_points': n_points,
+                'repeats': 1,
+                'points': [{'strength': s, 'anchor': True} for s in strengths],
+            }],
         }
 
     with open(pulse_file, 'r', encoding='utf-8') as f:
