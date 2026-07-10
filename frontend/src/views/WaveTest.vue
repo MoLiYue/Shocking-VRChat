@@ -128,8 +128,11 @@ async function loadPreview() {
     const data = await api(`/api/v1/wave_presets/${encodeURIComponent(preset.value)}/preview`)
     previewSections.value = data.sections || []
     previewSpeed.value = data.speed || 1
-    const totalPulses = previewSections.value.reduce((sum: number, s: SectionData) => sum + s.n_points * s.repeats, 0)
-    previewInfo.value = `${previewSections.value.length} 小节 · ${totalPulses} 脉冲 · ${data.speed || 1}x`
+    const spd = data.speed || 1
+    const totalPoints = previewSections.value.reduce((sum: number, s: SectionData) => sum + s.n_points * s.repeats, 0)
+    const slotsPerPoint = 4 / spd
+    const totalDurationS = (totalPoints * slotsPerPoint * 25 / 1000).toFixed(1)
+    previewInfo.value = `${previewSections.value.length} 小节 · ${totalPoints} 点 · ${totalDurationS}s · ${spd}x速`
     await nextTick()
     // Use rAF to ensure browser has laid out the element after v-if flip
     requestAnimationFrame(() => { drawPreview() })
@@ -217,7 +220,8 @@ function drawPreview() {
   for (let si = 0; si < sections.length; si++) {
     const sec = sections[si]
     const secW = sec.n_points * sec.repeats * barW
-    const label = `${sec.n_points}×${sec.repeats}`
+    const secTimeMs = sec.n_points * sec.repeats * (4 / previewSpeed.value) * 25
+    const label = sec.repeats > 1 ? `${sec.n_points}×${sec.repeats} ${(secTimeMs/1000).toFixed(1)}s` : `${sec.n_points}pt ${(secTimeMs/1000).toFixed(1)}s`
     ctx.fillStyle = colors[si % colors.length] + '0.9)'
     ctx.font = '9px Inter, sans-serif'
     const tx = x + secW / 2 - ctx.measureText(label).width / 2
