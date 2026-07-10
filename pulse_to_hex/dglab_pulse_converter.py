@@ -82,17 +82,12 @@ def slider_to_freq_byte(slider: int) -> int:
     """
     Convert frequency slider position (0-83) to the freq byte used in hex ops.
 
-    The device protocol uses a byte where:
-    - Lower value = longer interval (lower frequency)
-    - Higher value = shorter interval (higher frequency)
-
-    Mapping: interval_ms → byte value via inverse linear scale within [10, 240].
-    10ms (slider=0) → byte 240, 1000ms (slider=83) → byte 10.
+    The freq byte IS the pulse interval in milliseconds, clamped to [10, 240].
+    Device protocol range: 0x0A (10ms, 100Hz) to 0xF0 (240ms, ~4Hz).
+    Slider values above 75 (>240ms) are clamped to 240.
     """
     interval = slider_to_interval_ms(slider)
-    # Linear map: 10ms→240, 1000ms→10
-    byte_val = 240 - (interval - 10) * (240 - 10) / (1000 - 10)
-    return max(10, min(240, int(round(byte_val))))
+    return max(10, min(240, interval))
 
 
 # --- Data classes ---
