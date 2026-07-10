@@ -11,8 +11,8 @@ const limit = ref({ A: 100, B: 100 })
 const oscStatus = ref('')
 const lastTrigger = ref('-')
 const oscEvents = ref<any[]>([])
-const waveA = ref<number[]>([])
-const waveB = ref<number[]>([])
+const waveA = ref<{s: number; f: number}[]>([])
+const waveB = ref<{s: number; f: number}[]>([])
 const canvasARef = ref<HTMLCanvasElement | null>(null)
 const canvasBRef = ref<HTMLCanvasElement | null>(null)
 const qrContent = ref('')
@@ -50,13 +50,13 @@ function connectLiveWs() {
     try {
       const msg = JSON.parse(ev.data)
       if (msg.topic === 'wave_A' && msg.samples) {
-        for (const s of msg.samples) waveA.value.push(s.s)
+        waveA.value.push(...msg.samples)
         if (waveA.value.length > 200) waveA.value = waveA.value.slice(-200)
-        drawWave(canvasARef.value, waveA.value, '#8b5cf6')
+        drawWave(canvasARef.value, waveA.value)
       } else if (msg.topic === 'wave_B' && msg.samples) {
-        for (const s of msg.samples) waveB.value.push(s.s)
+        waveB.value.push(...msg.samples)
         if (waveB.value.length > 200) waveB.value = waveB.value.slice(-200)
-        drawWave(canvasBRef.value, waveB.value, '#3b82f6')
+        drawWave(canvasBRef.value, waveB.value)
       } else if (msg.topic === 'osc' && msg.event) {
         oscEvents.value.unshift(msg.event)
         if (oscEvents.value.length > 20) oscEvents.value = oscEvents.value.slice(0, 20)
@@ -110,31 +110,54 @@ async function pollStatus() {
   } catch { connected.value = false }
 }
 
-function drawWave(canvas: HTMLCanvasElement | null, samples: number[], color: string) {
+function drawWave(canvas: HTMLCanvasElement | null, samples: {s: number; f: number}[]) {
   if (!canvas) return
-  const ratio = window.devicePixelRatio || 1
+  const dpr = window.devicePixelRatio || 1
   const W = canvas.clientWidth
   const H = canvas.clientHeight
-  canvas.width = W * ratio
-  canvas.height = H * ratio
+  if (W < 1 || H < 1) return
+  canvas.width = W * dpr
+  canvas.height = H * dpr
   const ctx = canvas.getContext('2d')!
-  ctx.setTransform(ratio, 0, 0, ratio, 0, 0)
-  ctx.clearRect(0, 0, W, H)
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
 
-  const bars = samples.slice(-60)
-  if (!bars.length) return
-  const gap = 2
-  const barW = Math.max(2, (W - gap * (bars.length - 1)) / bars.length)
-  bars.forEach((sample, i) => {
-    const v = Math.max(0, Math.min(100, sample))
-    const barH = (v / 100) * (H - 4)
-    const x = i * (barW + gap)
-    const y = H - barH
-    ctx.globalAlpha = 0.4 + v / 180
-    ctx.fillStyle = color
-    ctx.fillRect(x, y, barW, barH)
-  })
-  ctx.globalAlpha = 1
+  // Clear
+  ctx.fillStyle = 'rgba(10, 8, 16, 0.95)'
+  ctx.fillRect(0, 0, W, H)
+
+  // Grid
+  ctx.strokeStyle = 'rgba(139,92,246,0.08)'
+  ctx.lineWidth = 1
+  for (let pct = 25; pct <= 75; pct += 25) {
+    const py = H - (pct / 100) * H
+    ctx.beginPath(); ctx.moveTo(0, py); ctx.lineTo(W, py); ctx.stroke()
+  }
+
+  const DISPLAY = 200
+  const data = samples.slice(-DISPLAY)
+  if (!data.length) return
+
+  const slotW = W / DISPLAY
+  const xBase = (DISPLAY - data.length) * slotW
+
+  for (let i = 0; i < data.length; i++) {
+    const sample = data[i]
+    if (sample.s <= 0) continue
+
+    // Duty cycle: f=10 (densest) → widest, f=240 (sparsest) → narrowest
+    const dutyCycle = Math.max(0.05, 1 - (sample.f - 10) / (240 - 10))
+    const barW = slotW * dutyCycle
+    const barH = (sample.s / 100) * H
+    const x = xBase + i * slotW + (slotW - barW) / 2
+
+    // Color: high freq (f=10) = purple, low freq (f=240) = reddish
+    const freqT = 1 - (sample.f - 10) / 230
+    const r = Math.round(139 + (1 - freqT) * 100)
+    const g = Math.round(92 * freqT)
+    const b = Math.round(246 * freqT + 100 * (1 - freqT))
+    ctx.fillStyle = `rgba(${r},${g},${b},0.85)`
+    ctx.fillRect(x, H - barH, Math.max(barW, 0.5), barH)
+  }
 }
 
 // --- Actions ---
