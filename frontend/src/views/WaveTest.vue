@@ -85,13 +85,14 @@ function drawRealtime() {
     const sample = rtBuffer[startIdx + i]
     if (sample.s <= 0) continue
 
-    const dutyCycle = Math.max(0.05, (sample.f - 10) / (240 - 10))
+    // Duty cycle: f=10 (10ms, highest freq) → widest bar; f=240 (240ms, lowest freq) → narrowest
+    const dutyCycle = Math.max(0.05, 1 - (sample.f - 10) / (240 - 10))
     const barW = slotW * dutyCycle
     const barH = (sample.s / 100) * h
     const x = xBase + i * slotW + (slotW - barW) / 2
 
-    // Color: high freq = purple, low freq = reddish
-    const freqT = (sample.f - 10) / 230
+    // Color: low interval (high freq, f=10) = purple, high interval (low freq, f=240) = reddish
+    const freqT = 1 - (sample.f - 10) / 230
     const r = Math.round(139 + (1 - freqT) * 100)
     const g = Math.round(92 * freqT)
     const b = Math.round(246 * freqT + 100 * (1 - freqT))
