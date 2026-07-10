@@ -281,10 +281,11 @@ def get_qr_content():
     )
 
 def _serve_spa():
-    """Serve Vue SPA index.html."""
+    """Serve Vue SPA index.html with no-cache headers."""
     spa_index = os.path.join(STATIC_DIR, 'index.html')
     if os.path.exists(spa_index):
-        return FileResponse(spa_index, media_type='text/html')
+        return FileResponse(spa_index, media_type='text/html',
+                          headers={'Cache-Control': 'no-cache, no-store, must-revalidate', 'Pragma': 'no-cache'})
     return RedirectResponse("/dashboard-legacy")
 
 def _read_template(name, **kwargs):
