@@ -430,6 +430,31 @@ async def _strength_boost_checker(stop_event: asyncio.Event):
                     await conn.set_strength(ch, mode='0', value=boost_val, force=True)
                 logger.debug(f"[boost] channel={ch} reverted -{boost_val}")
 
+async def _ws_status_pusher(stop_event: asyncio.Event):
+    """Periodically push device status to subscribed WS clients."""
+    last_device_count = -1
+    while not stop_event.is_set():
+        try:
+            await asyncio.sleep(2.0)
+        except asyncio.CancelledError:
+            return
+        # Only push if there are subscribers
+        has_subs = any('status' in subs for subs in _ws_subscriptions.values())
+        if not has_subs:
+            continue
+        device_count = len(srv.WS_CONNECTIONS)
+        # Push on device count change, or every 10s as heartbeat
+        if device_count != last_device_count:
+            last_device_count = device_count
+            devices = []
+            for conn in srv.WS_CONNECTIONS:
+                devices.append({
+                    'strength': conn.strength,
+                    'strength_max': conn.strength_max,
+                    'strength_limit': conn.strength_limit,
+                })
+            await _ws_broadcast('status', {'devices': devices, 'engine_running': True})
+
 # --- Strength Limit ---
 @app.get("/api/v1/strength_limit")
 async def api_v1_strength_limit_get():
@@ -1433,24 +1458,86 @@ for _spa_path in _SPA_PATHS:
         return _serve_spa()
     app.add_api_route(_spa_path, _spa_handler, methods=["GET"], include_in_schema=False)
 
-# Mount static files AFTER all routes (so API routes take priority)
+# Mount static files for assets only (not root, to avoid interfering with WS/API)
 if os.path.exists(STATIC_DIR):
-    app.mount("/", StaticFiles(directory=STATIC_DIR, html=True), name="static")
+    assets_dir = os.path.join(STATIC_DIR, 'assets')
+    if os.path.exists(assets_dir):
+        app.mount("/assets", StaticFiles(directory=assets_dir), name="static_assets")
 
 # --- Shared state ---
 command_queue = CommandQueue()
+
+# --- Frontend WebSocket push ---
+_ws_clients: set[WebSocket] = set()
+_ws_subscriptions: dict[WebSocket, set] = {}  # ws -> set of topics ('wave_A', 'wave_B', 'osc', 'status')
+
+async def _ws_broadcast(topic: str, data: dict):
+    """Send data to all clients subscribed to topic."""
+    dead = []
+    msg = json.dumps({'topic': topic, **data}, separators=(',', ':'))
+    for ws in _ws_clients:
+        if topic in _ws_subscriptions.get(ws, set()):
+            try:
+                await ws.send_text(msg)
+            except Exception:
+                dead.append(ws)
+    for ws in dead:
+        _ws_clients.discard(ws)
+        _ws_subscriptions.pop(ws, None)
+
+def _ws_broadcast_sync(topic: str, data: dict):
+    """Non-async broadcast helper: schedule send on uvicorn's event loop."""
+    if not _ws_clients:
+        return
+    import asyncio
+    try:
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            loop.create_task(_ws_broadcast(topic, data))
+    except RuntimeError:
+        pass
+
+@app.websocket("/ws/live")
+async def ws_live(ws: WebSocket):
+    """Frontend WebSocket for real-time push.
+    
+    Client sends JSON to subscribe: {"subscribe": ["wave_A", "wave_B", "osc", "status"]}
+    Server pushes: {"topic": "wave_A", "samples": [...]}
+    """
+    await ws.accept()
+    _ws_clients.add(ws)
+    _ws_subscriptions[ws] = set()
+    try:
+        while True:
+            raw = await ws.receive_text()
+            try:
+                msg = json.loads(raw)
+                if 'subscribe' in msg:
+                    _ws_subscriptions[ws] = set(msg['subscribe'])
+                if msg.get('ping'):
+                    await ws.send_text(json.dumps({'pong': True}))
+            except (json.JSONDecodeError, TypeError):
+                pass
+    except Exception:
+        pass
+    finally:
+        _ws_clients.discard(ws)
+        _ws_subscriptions.pop(ws, None)
 
 # OSC activity ring buffer
 _osc_activity = collections.deque(maxlen=50)
 
 def _record_osc_activity(address, value, channel, mode):
-    _osc_activity.appendleft({
+    event = {
         'time': time.time(),
         'address': address,
         'value': round(value, 4),
         'channel': channel,
         'mode': mode,
-    })
+    }
+    _osc_activity.appendleft(event)
+    # Push to WS clients
+    _ws_broadcast_sync('osc', {'event': event})
 
 # Wave history ring buffer
 _wave_history = {'A': collections.deque(maxlen=800), 'B': collections.deque(maxlen=800)}
@@ -1461,13 +1548,20 @@ def _record_wave(channel, wavestr):
     try:
         channel = channel.upper()
         ops = json.loads(wavestr)
+        samples = []
         for op in ops:
             for i in range(4):
                 freq = int(op[i*2:i*2+2], 16)
                 strength = int(op[8+i*2:10+i*2], 16)
                 _wave_history_seq[channel] += 1
                 _wave_history[channel].append({'s': strength, 'f': freq, 'seq': _wave_history_seq[channel]})
+                samples.append({'s': strength, 'f': freq})
         _wave_history_last_update[channel] = time.monotonic()
+        # Push to WS clients
+        _ws_broadcast_sync(f'wave_{channel}', {
+            'samples': samples,
+            'seq': _wave_history_seq[channel],
+        })
     except Exception:
         pass
 
@@ -1584,6 +1678,7 @@ class Engine:
             asyncio.ensure_future(command_queue_processor(self._stop_event)),
             asyncio.ensure_future(_strength_boost_checker(self._stop_event)),
             asyncio.ensure_future(_wave_test_loop(self._stop_event)),
+            asyncio.ensure_future(_ws_status_pusher(self._stop_event)),
         ]
         for handler in self.handlers:
             handler.start_background_jobs()

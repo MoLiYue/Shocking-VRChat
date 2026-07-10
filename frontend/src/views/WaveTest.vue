@@ -19,14 +19,12 @@ let resizeObserver: ResizeObserver | null = null
 // Scrolling waveform state
 const DISPLAY_SLOTS = 200         // Number of pulse slots visible on screen
 const SLOT_MS = 25                // Each slot = 25ms (matches backend WAVE_HISTORY_SAMPLE_MS)
-const POLL_MS = 150               // How often to fetch new data from server
 let rtBuffer: WaveSample[] = []   // Samples currently on display
 let pendingQueue: WaveSample[] = []  // Samples received but not yet released to display
-let lastSeq = 0                   // Last sequence number received from server
 let animFrameId = 0               // requestAnimationFrame ID
 let lastFrameTime = 0             // For metering samples into display
 let sampleDebt = 0                // Fractional samples owed to display
-let pollTimer: ReturnType<typeof setInterval> | null = null
+let liveWs: WebSocket | null = null  // WebSocket connection for real-time data
 
 // Preset preview
 const previewCanvasRef = ref<HTMLCanvasElement | null>(null)
@@ -327,30 +325,34 @@ function onParamChange() {
 }
 
 function startPolling() {
-  if (pollTimer) return
+  if (liveWs) return
   // Reset state
-  lastSeq = 0
   rtBuffer = []
   pendingQueue = []
   sampleDebt = 0
   lastFrameTime = 0
 
-  // Periodic data fetch (incremental)
-  pollTimer = setInterval(fetchNewSamples, POLL_MS)
-  fetchNewSamples()  // immediate first fetch
+  // Connect WebSocket
+  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:'
+  const wsUrl = `${proto}//${location.host}/ws/live`
+  liveWs = new WebSocket(wsUrl)
+  liveWs.onopen = () => {
+    // Subscribe to wave data for current channel
+    liveWs!.send(JSON.stringify({ subscribe: [`wave_${channel.value}`] }))
+  }
+  liveWs.onmessage = (ev) => {
+    try {
+      const msg = JSON.parse(ev.data)
+      if (msg.topic === `wave_${channel.value}` && msg.samples) {
+        pendingQueue.push(...msg.samples)
+      }
+    } catch {}
+  }
+  liveWs.onclose = () => { liveWs = null }
+  liveWs.onerror = () => { liveWs?.close(); liveWs = null }
 
   // Start animation loop
   animFrameId = requestAnimationFrame(animLoop)
-}
-
-async function fetchNewSamples() {
-  try {
-    const data = await api(`/api/v1/wave_history/stream?channel=${channel.value}&since=${lastSeq}`)
-    if (data.samples && data.samples.length > 0) {
-      pendingQueue.push(...data.samples)
-    }
-    if (data.seq !== undefined) lastSeq = data.seq
-  } catch {}
 }
 
 function animLoop(now: number) {
@@ -362,19 +364,16 @@ function animLoop(now: number) {
   // Meter samples from pendingQueue into rtBuffer at real-time speed
   if (lastFrameTime > 0 && pendingQueue.length > 0) {
     const dt = now - lastFrameTime
-    // How many samples worth of time has elapsed
     sampleDebt += dt / SLOT_MS
     const toRelease = Math.min(Math.floor(sampleDebt), pendingQueue.length)
     if (toRelease > 0) {
       rtBuffer.push(...pendingQueue.splice(0, toRelease))
       sampleDebt -= toRelease
-      // Trim buffer
       if (rtBuffer.length > DISPLAY_SLOTS * 2) {
         rtBuffer = rtBuffer.slice(rtBuffer.length - DISPLAY_SLOTS * 2)
       }
     }
   } else if (pendingQueue.length > 0 && lastFrameTime === 0) {
-    // First frame: dump initial batch immediately for instant feedback
     rtBuffer.push(...pendingQueue.splice(0))
     if (rtBuffer.length > DISPLAY_SLOTS * 2) {
       rtBuffer = rtBuffer.slice(rtBuffer.length - DISPLAY_SLOTS * 2)
@@ -388,16 +387,15 @@ function animLoop(now: number) {
 }
 
 function stopPolling() {
-  if (pollTimer) {
-    clearInterval(pollTimer)
-    pollTimer = null
+  if (liveWs) {
+    liveWs.close()
+    liveWs = null
   }
   if (animFrameId) {
     cancelAnimationFrame(animFrameId)
     animFrameId = 0
   }
   lastFrameTime = 0
-  // Draw final state
   drawRealtime()
 }
 

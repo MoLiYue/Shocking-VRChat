@@ -35,8 +35,59 @@ const profileName = ref('')
 const profileMsg = ref('')
 
 let intervals: number[] = []
+let dashWs: WebSocket | null = null
 
-// --- Polling ---
+// --- WebSocket-based real-time data ---
+function connectLiveWs() {
+  if (dashWs) return
+  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:'
+  const wsUrl = `${proto}//${location.host}/ws/live`
+  dashWs = new WebSocket(wsUrl)
+  dashWs.onopen = () => {
+    dashWs!.send(JSON.stringify({ subscribe: ['wave_A', 'wave_B', 'osc', 'status'] }))
+  }
+  dashWs.onmessage = (ev) => {
+    try {
+      const msg = JSON.parse(ev.data)
+      if (msg.topic === 'wave_A' && msg.samples) {
+        for (const s of msg.samples) waveA.value.push(s.s)
+        if (waveA.value.length > 200) waveA.value = waveA.value.slice(-200)
+        drawWave(canvasARef.value, waveA.value, '#8b5cf6')
+      } else if (msg.topic === 'wave_B' && msg.samples) {
+        for (const s of msg.samples) waveB.value.push(s.s)
+        if (waveB.value.length > 200) waveB.value = waveB.value.slice(-200)
+        drawWave(canvasBRef.value, waveB.value, '#3b82f6')
+      } else if (msg.topic === 'osc' && msg.event) {
+        oscEvents.value.unshift(msg.event)
+        if (oscEvents.value.length > 20) oscEvents.value = oscEvents.value.slice(0, 20)
+        lastTrigger.value = '刚刚'
+      } else if (msg.topic === 'status') {
+        const devices = msg.devices || []
+        deviceCount.value = devices.length
+        connected.value = devices.length > 0
+        if (devices.length > 0) {
+          strength.value = devices[0].strength || { A: 0, B: 0 }
+          limit.value = {
+            A: Math.min(devices[0].strength_max?.A || 0, devices[0].strength_limit?.A || 100),
+            B: Math.min(devices[0].strength_max?.B || 0, devices[0].strength_limit?.B || 100),
+          }
+        }
+      }
+    } catch {}
+  }
+  dashWs.onclose = () => {
+    dashWs = null
+    // Reconnect after 2s
+    setTimeout(connectLiveWs, 2000)
+  }
+  dashWs.onerror = () => { dashWs?.close() }
+}
+
+function disconnectLiveWs() {
+  if (dashWs) { dashWs.close(); dashWs = null }
+}
+
+// --- Polling (fallback for initial load and status heartbeat) ---
 async function pollStatus() {
   try {
     const data = await api('/api/v1/status')
@@ -57,23 +108,6 @@ async function pollStatus() {
       lastTrigger.value = ago < 2 ? '刚刚' : `${ago}s 前`
     } else { lastTrigger.value = '无数据' }
   } catch { connected.value = false }
-}
-
-async function pollOsc() {
-  try {
-    const data = await api('/api/v1/osc_activity')
-    oscEvents.value = (data.events || []).slice(0, 20)
-  } catch {}
-}
-
-async function pollWave() {
-  try {
-    const data = await api('/api/v1/wave_history')
-    waveA.value = data.A || []
-    waveB.value = data.B || []
-    drawWave(canvasARef.value, waveA.value, '#8b5cf6')
-    drawWave(canvasBRef.value, waveB.value, '#3b82f6')
-  } catch {}
 }
 
 function drawWave(canvas: HTMLCanvasElement | null, samples: number[], color: string) {
@@ -205,12 +239,15 @@ function timeStr(ts: number) { return new Date(ts * 1000).toLocaleTimeString([],
 function presetLabel(name: string) { return name.replace(/^pulse-/, '').replace(/-\d+$/, '') }
 
 onMounted(() => {
-  pollStatus(); pollOsc(); pollWave(); loadPresets(); loadProfiles(); loadQr()
-  intervals.push(window.setInterval(pollStatus, 2000))
-  intervals.push(window.setInterval(pollOsc, 500))
-  intervals.push(window.setInterval(pollWave, 250))
+  pollStatus(); loadPresets(); loadProfiles(); loadQr()
+  connectLiveWs()
+  // Reduced polling: only status every 5s as fallback (WS handles real-time)
+  intervals.push(window.setInterval(pollStatus, 5000))
 })
-onUnmounted(() => intervals.forEach(clearInterval))
+onUnmounted(() => {
+  intervals.forEach(clearInterval)
+  disconnectLiveWs()
+})
 </script>
 
 <template>
