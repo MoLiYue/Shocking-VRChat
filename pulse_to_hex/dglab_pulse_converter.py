@@ -225,6 +225,11 @@ def convert_to_ops(
     """
     header, sections = parse_pulse(pulse_text)
 
+    # Speed determines how many 25ms slots each point occupies
+    # speed=4: 1 point = 25ms = 1 slot; speed=2: 1 point = 50ms = 2 slots; speed=1: 1 point = 100ms = 4 slots
+    speed = header.speed if header else 1
+    slots_per_point = 4 // speed  # 4, 2, or 1
+
     ops: List[str] = []
 
     for sec in sections:
@@ -246,44 +251,49 @@ def convert_to_ops(
         else:
             repeats = math.ceil(duration / n_points)
 
-        # Get strength values (each point = 1 pulse)
+        # Get strength values (each point = 1 tick, expanded to slots_per_point sub-steps)
         strengths = [max(0.0, min(100.0, v)) for v, _ in sec.points]
 
         # Calculate freq bytes for interpolation endpoints
         f_low = slider_to_freq_byte(sec.freq_low)
         f_high = slider_to_freq_byte(sec.freq_high)
 
-        # Build the full sequence of points (all repetitions)
-        # Each point = 1 pulse (one 25ms sub-step in the device protocol)
+        # Build the full sequence of slots (all repetitions, expanded by speed)
+        # Each point expands to slots_per_point slots (25ms each)
         all_strengths: List[float] = []
         all_freqs: List[int] = []
-        total_pulses = repeats * n_points
+        total_points = repeats * n_points  # logical points
+        total_slots = total_points * slots_per_point  # actual 25ms slots
 
-        for pulse_idx in range(total_pulses):
-            unit_idx = pulse_idx % n_points      # position within current wave unit
-            repeat_idx = pulse_idx // n_points   # which repetition we're in
+        for point_idx in range(total_points):
+            unit_idx = point_idx % n_points      # position within current wave unit
+            repeat_idx = point_idx // n_points   # which repetition we're in
 
-            # Strength from point list (cyclic)
-            all_strengths.append(strengths[unit_idx])
+            # Strength from point list
+            strength = strengths[unit_idx]
 
-            # Frequency depends on mode
+            # Frequency depends on mode (calculated per logical point)
             if sec.freq_mode == 1:
-                # Fixed: all pulses use freq_low
-                all_freqs.append(f_low)
+                freq = f_low
             elif sec.freq_mode == 2:
-                # 节内渐变: linear from f_low to f_high across entire section
-                t = pulse_idx / (total_pulses - 1) if total_pulses > 1 else 0.0
-                all_freqs.append(int(round(f_low + (f_high - f_low) * t)))
+                # 节内渐变: linear across entire section
+                t = point_idx / (total_points - 1) if total_points > 1 else 0.0
+                freq = int(round(f_low + (f_high - f_low) * t))
             elif sec.freq_mode == 3:
-                # 元内渐变: linear from f_low to f_high within each wave unit
+                # 元内渐变: linear within each wave unit
                 t = unit_idx / (n_points - 1) if n_points > 1 else 0.0
-                all_freqs.append(int(round(f_low + (f_high - f_low) * t)))
+                freq = int(round(f_low + (f_high - f_low) * t))
             elif sec.freq_mode == 4:
-                # 元间渐变: fixed within each unit, changes between units
+                # 元间渐变: fixed within unit, changes between units
                 t = repeat_idx / (repeats - 1) if repeats > 1 else 0.0
-                all_freqs.append(int(round(f_low + (f_high - f_low) * t)))
+                freq = int(round(f_low + (f_high - f_low) * t))
             else:
-                all_freqs.append(f_low)
+                freq = f_low
+
+            # Expand this point to slots_per_point slots
+            for _ in range(slots_per_point):
+                all_strengths.append(strength)
+                all_freqs.append(freq)
 
         # Pad to multiple of 4 (repeat last value)
         while len(all_strengths) % 4 != 0:
@@ -298,13 +308,13 @@ def convert_to_ops(
             strength_hex = "".join(f"{b:02X}" for b in strength_bytes)
             ops.append(freq_hex + strength_hex)
 
-    # Append rest silence: rest_ticks pulses of zero strength
+    # Append rest silence: rest_ticks × slots_per_point slots of zero
     if header and header.rest_ticks > 0:
-        rest_pulses = header.rest_ticks
+        rest_slots = header.rest_ticks * slots_per_point
         # Pad to multiple of 4
-        padded = rest_pulses + ((-rest_pulses) % 4)
-        for _ in range(padded // 4):
-            ops.append("0A0A0A0A" + "00000000")
+        rest_slots += (-rest_slots) % 4
+        for _ in range(rest_slots // 4):
+            ops.append("0000000000000000")
 
     # Build wavestrs (chunked JSON arrays for WS protocol)
     wavestrs: List[str] = []
