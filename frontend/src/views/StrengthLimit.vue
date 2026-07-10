@@ -51,19 +51,19 @@ onMounted(load)
 
 <template>
   <div>
-    <h1 class="gradient-text" style="font-size:var(--text-2xl);margin-bottom:var(--sp-2)">强度上限</h1>
+    <h1 class="gradient-text" style="font-size:var(--text-2xl);margin-bottom:var(--sp-2)">强度设置</h1>
     <p class="page-desc">设置郊狼输出的最大强度。调节后实时生效，无需重启。</p>
 
     <div class="recommend-banner">
       <span class="recommend-icon">💡</span>
-      <span>推荐将强度上限设置为 <strong>200</strong>（设备允许的最大值），然后通过郊狼 APP 内的被控设置调节实际体验上限。初始默认值为 <strong>5</strong>，请根据自身承受能力逐步提高。</span>
+      <span>推荐将强度设置为 <strong>200</strong>（设备允许的最大值），然后通过郊狼 APP 内的被控设置调节实际体验上限。初始默认值为 <strong>5</strong>，请根据自身承受能力逐步提高。</span>
     </div>
 
     <div class="limit-grid">
       <section class="card">
         <h2>通道 A</h2>
         <div class="field">
-          <label>强度上限 (0–200)</label>
+          <label>强度 (0–200)</label>
           <div class="slider-row">
             <input type="range" v-model.number="limitA" min="0" max="200" step="1" @input="onInput">
             <input type="number" v-model.number="limitA" min="0" max="200" class="num-input" @input="onInput">
@@ -85,7 +85,7 @@ onMounted(load)
       <section class="card">
         <h2>通道 B</h2>
         <div class="field">
-          <label>强度上限 (0–200)</label>
+          <label>强度 (0–200)</label>
           <div class="slider-row">
             <input type="range" v-model.number="limitB" min="0" max="200" step="1" @input="onInput">
             <input type="number" v-model.number="limitB" min="0" max="200" class="num-input" @input="onInput">
@@ -122,7 +122,7 @@ onMounted(load)
       <h3 style="margin-top:var(--sp-4)">超限规则</h3>
       <ul>
         <li>在 <router-link to="/overlimit-rules">超限规则</router-link> 页面中配置条件规则</li>
-        <li>当 OSC 参数满足规则条件时，对应通道的强度上限临时提升到规则设定的值</li>
+        <li>当 OSC 参数满足规则条件时，对应通道的强度临时提升到规则设定的值</li>
         <li>本页的"超限额度"作为默认回退值（当旧的单参数触发超限时使用）</li>
         <li>推荐使用超限规则页面进行更灵活的多层级配置</li>
       </ul>

@@ -230,8 +230,7 @@ async function loadQr() {
 
 // Helpers
 function barPct(ch: 'A' | 'B') {
-  const l = limit.value[ch]
-  return l > 0 ? Math.min(strength.value[ch] / l * 100, 100) : 0
+  return Math.min(strength.value[ch] / 200 * 100, 100)
 }
 function shortPath(addr: string) { return addr.replace('/avatar/parameters/', '') }
 function timeStr(ts: number) { return new Date(ts * 1000).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit',second:'2-digit'}) }
@@ -277,7 +276,7 @@ onUnmounted(() => {
         <section class="card">
           <h2>设备状态</h2>
           <div class="ch-row" v-for="ch in (['A', 'B'] as const)" :key="ch">
-            <div class="ch-head"><span class="ch-name">{{ ch }}</span><strong>{{ strength[ch] }} / {{ limit[ch] }}</strong></div>
+            <div class="ch-head"><span class="ch-name">{{ ch }}</span><strong>{{ strength[ch] }} / 200</strong></div>
             <div class="bar-track"><div class="bar-fill" :class="'bar-' + ch.toLowerCase()" :style="{width: barPct(ch) + '%'}"></div></div>
           </div>
         </section>
