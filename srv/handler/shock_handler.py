@@ -1,4 +1,3 @@
-import numpy as np
 import collections
 from .base_handler import BaseHandler
 from loguru import logger
@@ -524,20 +523,40 @@ class ShockHandler(BaseHandler):
     def compute_derivative(self):
         data = self.touch_dist_arr
         if len(data) < 4:
-            # logger.warning('At least 4 samples are required to calculate acc and jerk.')
             return 0, 0, 0, 0
 
-        time_ = np.array([point[0] for point in data])
-        distance = np.array([point[1] for point in data])
+        time_ = [point[0] for point in data]
+        distance = [point[1] for point in data]
 
+        # Moving average (window=3, valid mode)
         window_size = 3
-        distance = np.convolve(distance, np.ones(window_size) / window_size, mode='valid')
+        smoothed = []
+        for i in range(len(distance) - window_size + 1):
+            smoothed.append(sum(distance[i:i+window_size]) / window_size)
+        distance = smoothed
         time_ = time_[:len(distance)]
 
-        velocity = np.gradient(distance, time_)
-        acceleration = np.gradient(velocity, time_)
-        jerk = np.gradient(acceleration, time_)
-        # logger.success(f"{distance[-1]:9.4f} {velocity[-1]:9.4f} {acceleration[-1]:9.4f} {jerk[-1]:9.4f}")
+        # Gradient (central differences, matching np.gradient behavior)
+        def _gradient(values, times):
+            n = len(values)
+            if n < 2:
+                return [0.0] * n
+            grad = [0.0] * n
+            # Forward difference for first element
+            dt = times[1] - times[0]
+            grad[0] = (values[1] - values[0]) / dt if dt != 0 else 0.0
+            # Central differences for interior
+            for i in range(1, n - 1):
+                dt = times[i+1] - times[i-1]
+                grad[i] = (values[i+1] - values[i-1]) / dt if dt != 0 else 0.0
+            # Backward difference for last element
+            dt = times[-1] - times[-2]
+            grad[-1] = (values[-1] - values[-2]) / dt if dt != 0 else 0.0
+            return grad
+
+        velocity = _gradient(distance, time_)
+        acceleration = _gradient(velocity, time_)
+        jerk = _gradient(acceleration, time_)
         return distance[-1], velocity[-1], acceleration[-1], jerk[-1]
 
     async def touch_background_wave_feeder(self):

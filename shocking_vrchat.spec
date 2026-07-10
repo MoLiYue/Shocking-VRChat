@@ -72,13 +72,10 @@ a = Analysis(
         'doctest', 'pdb', 'profile', 'cProfile',
         'xmlrpc', 'ftplib', 'imaplib', 'smtplib', 'poplib',
         'sqlite3',
-        # Unused numpy submodules (if numpy is pulled in)
-        'numpy.testing', 'numpy.f2py', 'numpy.distutils',
-        'numpy.doc', 'numpy.ma',
         # IPython / Jupyter
         'IPython', 'jupyter', 'notebook',
         # Other unused
-        'matplotlib', 'PIL', 'cv2', 'scipy',
+        'numpy', 'matplotlib', 'PIL', 'cv2', 'scipy',
         'pandas', 'sklearn', 'torch', 'tensorflow',
     ],
     noarchive=False,

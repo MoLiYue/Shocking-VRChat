@@ -48,9 +48,7 @@ def build():
         "--nofollow-import-to=setuptools",
         "--nofollow-import-to=pip",
         "--nofollow-import-to=tkinter",
-        "--nofollow-import-to=numpy.testing",
-        "--nofollow-import-to=numpy.f2py",
-        "--nofollow-import-to=numpy.distutils",
+        "--nofollow-import-to=numpy",
 
         # Compilation options
         "--jobs=4",
