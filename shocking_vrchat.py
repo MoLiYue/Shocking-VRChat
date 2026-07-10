@@ -235,7 +235,7 @@ def apply_hot_reloadable_settings(new_settings, new_settings_basic):
 
     if engine_restart_needed:
         logger.info("[hot-reload] OSC/WS/param config changed, restarting engine...")
-        engine.restart()
+        _schedule_engine_restart()
     else:
         for handler in handlers:
             if hasattr(handler, 'refresh_settings'):
@@ -828,15 +828,15 @@ async def api_v1_settings_update(request: Request):
     if restart_needed:
         web_restart = 'web_server' in restart_needed
         engine_needs_restart = any(r in restart_needed for r in ('osc', 'ws'))
-        def _delayed_restart():
-            time.sleep(0.5)
+        async def _delayed_restart():
+            await asyncio.sleep(0.5)
             if engine_needs_restart:
                 logger.info("[settings] Restarting engine due to OSC/WS config change...")
-                engine.restart()
+                await engine.restart()
             if web_restart:
                 logger.warning("[settings] Web server port/host changed. Full restart required.")
                 _restart_program()
-        Thread(target=_delayed_restart, daemon=True).start()
+        asyncio.create_task(_delayed_restart())
     return {
         'success': True,
         'restart_needed': list(set(restart_needed)),
@@ -845,10 +845,10 @@ async def api_v1_settings_update(request: Request):
 
 @app.post("/api/v1/engine/restart")
 async def api_v1_engine_restart():
-    def _do_restart():
-        time.sleep(0.3)
-        engine.restart()
-    Thread(target=_do_restart, daemon=True).start()
+    async def _do_restart():
+        await asyncio.sleep(0.3)
+        await engine.restart()
+    asyncio.create_task(_do_restart())
     return {'success': True, 'message': '引擎正在重启...'}
 
 @app.get("/api/v1/engine/status")
@@ -909,11 +909,11 @@ async def api_v1_params_set(channel: str, request: Request):
     SETTINGS['dglab3'][ch_key]['strength_limit'] = SETTINGS_BASIC['dglab3'][ch_key]['strength_limit']
     normalize_avatar_param_entries(SETTINGS['dglab3'][ch_key])
     config_save()
-    def _delayed_restart():
-        time.sleep(0.5)
+    async def _delayed_restart():
+        await asyncio.sleep(0.5)
         logger.info("[params] Restarting engine to apply param changes...")
-        engine.restart()
-    Thread(target=_delayed_restart, daemon=True).start()
+        await engine.restart()
+    asyncio.create_task(_delayed_restart())
     return {'success': True, 'params': validated, 'restarting': True}
 
 # --- Combo ---
@@ -1486,14 +1486,12 @@ async def _ws_broadcast(topic: str, data: dict):
         _ws_subscriptions.pop(ws, None)
 
 def _ws_broadcast_sync(topic: str, data: dict):
-    """Non-async broadcast helper: schedule send on uvicorn's event loop."""
+    """Schedule WS broadcast as a task on the running event loop."""
     if not _ws_clients:
         return
-    import asyncio
     try:
-        loop = asyncio.get_event_loop()
-        if loop.is_running():
-            loop.create_task(_ws_broadcast(topic, data))
+        loop = asyncio.get_running_loop()
+        loop.create_task(_ws_broadcast(topic, data))
     except RuntimeError:
         pass
 
@@ -1623,12 +1621,16 @@ async def wshandler(connection):
 
 # --- Engine ---
 class Engine:
-    """Data processing engine: OSC listener, WebSocket server, command queue, handlers."""
+    """Data processing engine: OSC listener, WebSocket server, command queue, handlers.
+    
+    Runs as async tasks on the same event loop as Uvicorn (no separate thread).
+    """
 
     def __init__(self):
-        self._thread: Thread | None = None
-        self._loop: asyncio.AbstractEventLoop | None = None
         self._stop_event: asyncio.Event | None = None
+        self._tasks: list[asyncio.Task] = []
+        self._transport = None
+        self._ws_server = None
         self._running = False
         self.dispatcher: Dispatcher | None = None
         self.handlers: list = []
@@ -1669,89 +1671,62 @@ class Engine:
         global handlers
         handlers = self.handlers
 
-    async def _async_main(self):
+    async def start(self):
+        """Start the engine as async tasks on the current event loop."""
+        if self._running:
+            logger.warning("[engine] Already running, stop first.")
+            return
+
+        self._build_dispatcher_and_handlers()
         self._stop_event = asyncio.Event()
-        # Recreate queue in this event loop context
         command_queue.clear()
 
-        tasks = [
-            asyncio.ensure_future(command_queue_processor(self._stop_event)),
-            asyncio.ensure_future(_strength_boost_checker(self._stop_event)),
-            asyncio.ensure_future(_wave_test_loop(self._stop_event)),
-            asyncio.ensure_future(_ws_status_pusher(self._stop_event)),
+        # Start background tasks
+        self._tasks = [
+            asyncio.create_task(command_queue_processor(self._stop_event)),
+            asyncio.create_task(_strength_boost_checker(self._stop_event)),
+            asyncio.create_task(_wave_test_loop(self._stop_event)),
+            asyncio.create_task(_ws_status_pusher(self._stop_event)),
         ]
         for handler in self.handlers:
             handler.start_background_jobs()
 
-        transport = None
+        # Start OSC server
         try:
             server = AsyncIOOSCUDPServer(
                 (SETTINGS["osc"]["listen_host"], SETTINGS["osc"]["listen_port"]),
                 self.dispatcher, asyncio.get_event_loop()
             )
-            transport, protocol = await server.create_serve_endpoint()
+            self._transport, _ = await server.create_serve_endpoint()
             logger.success(f'OSC Listening: {SETTINGS["osc"]["listen_host"]}:{SETTINGS["osc"]["listen_port"]}')
         except Exception:
             logger.error(traceback.format_exc())
             logger.error("OSC监听失败，可能存在端口冲突")
-            self._stop_event.set()
-            for t in tasks:
-                t.cancel()
-            self._running = False
+            await self._cleanup_tasks()
             return
 
-        ws_server = None
+        # Start DG-LAB WebSocket server
         try:
-            ws_server = await wsserve(wshandler, SETTINGS['ws']["listen_host"], SETTINGS['ws']["listen_port"])
+            self._ws_server = await wsserve(wshandler, SETTINGS['ws']["listen_host"], SETTINGS['ws']["listen_port"])
             logger.success(f'WS Listening: {SETTINGS["ws"]["listen_host"]}:{SETTINGS["ws"]["listen_port"]}')
         except Exception:
             logger.error(traceback.format_exc())
             logger.error("WS服务监听失败，可能存在端口冲突")
-            if transport:
-                transport.close()
-            self._stop_event.set()
-            for t in tasks:
-                t.cancel()
-            self._running = False
+            if self._transport:
+                self._transport.close()
+                self._transport = None
+            await self._cleanup_tasks()
             return
 
         self._running = True
         logger.info("[engine] Started.")
 
-        await self._stop_event.wait()
-
-        logger.info("[engine] Stopping...")
-        if ws_server:
-            ws_server.close()
-            await ws_server.wait_closed()
-        if transport:
-            transport.close()
-        for t in tasks:
-            t.cancel()
-        await asyncio.gather(*tasks, return_exceptions=True)
-        self._running = False
-        logger.info("[engine] Stopped.")
-
-    def _thread_target(self):
-        self._loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(self._loop)
-        try:
-            self._loop.run_until_complete(self._async_main())
-        except Exception:
-            logger.error(traceback.format_exc())
-        finally:
-            self._loop.close()
-            self._loop = None
-
-    def start(self):
-        if self._thread and self._thread.is_alive():
-            logger.warning("[engine] Already running, stop first.")
+    async def stop(self):
+        """Stop the engine gracefully."""
+        if not self._running:
             return
-        self._build_dispatcher_and_handlers()
-        self._thread = Thread(target=self._thread_target, daemon=True, name='Engine')
-        self._thread.start()
 
-    def stop(self, timeout=5.0):
+        # Stop wave test if active
         if _wave_test_state['active']:
             _wave_test_state['active'] = False
             command_queue.set_enabled(CommandPriority.OSC_INTERACTION, True)
@@ -1760,20 +1735,60 @@ class Engine:
             DGConnection._suppress_clear = False
             logger.info("[engine] Wave test stopped due to engine shutdown.")
 
-        if self._loop and self._stop_event:
-            self._loop.call_soon_threadsafe(self._stop_event.set)
-        if self._thread:
-            self._thread.join(timeout=timeout)
-            if self._thread.is_alive():
-                logger.warning("[engine] Thread did not exit cleanly.")
-            self._thread = None
+        # Signal stop
+        if self._stop_event:
+            self._stop_event.set()
 
-    def restart(self):
+        logger.info("[engine] Stopping...")
+
+        # Close servers
+        if self._ws_server:
+            self._ws_server.close()
+            await self._ws_server.wait_closed()
+            self._ws_server = None
+        if self._transport:
+            self._transport.close()
+            self._transport = None
+
+        # Cancel tasks
+        await self._cleanup_tasks()
+        self._running = False
+        logger.info("[engine] Stopped.")
+
+    async def _cleanup_tasks(self):
+        for t in self._tasks:
+            t.cancel()
+        if self._tasks:
+            await asyncio.gather(*self._tasks, return_exceptions=True)
+        self._tasks = []
+
+    async def restart(self):
+        """Restart the engine."""
         logger.info("[engine] Restarting...")
-        self.stop()
-        self.start()
+        await self.stop()
+        await self.start()
 
 engine = Engine()
+
+def _schedule_engine_restart():
+    """Schedule engine restart from sync context (e.g., hot-reload thread)."""
+    try:
+        loop = asyncio.get_running_loop()
+        loop.create_task(engine.restart())
+    except RuntimeError:
+        # Not in async context — schedule via call_soon_threadsafe
+        try:
+            import uvicorn
+            # Get the running loop from another way
+            loop = asyncio.get_event_loop()
+            loop.call_soon_threadsafe(lambda: asyncio.ensure_future(engine.restart()))
+        except Exception:
+            logger.error("[engine] Cannot schedule restart: no running event loop")
+
+@app.on_event("startup")
+async def on_startup():
+    """Start the engine when Uvicorn's event loop is ready."""
+    await engine.start()
 
 # --- Config save ---
 def config_save():
@@ -1806,9 +1821,6 @@ def config_init():
     logger.success("配置加载完成 | Websocket 需要监听外来连接，如弹出防火墙提示请允许")
 
 def main():
-    # Start the data engine
-    engine.start()
-
     # Start config hot-reload watcher
     reload_th = Thread(target=config_hot_reload_loop, daemon=True)
     reload_th.start()
@@ -1828,7 +1840,7 @@ def main():
     logger.info(f"Channel A: {enabled_a} params | Channel B: {enabled_b} params")
     logger.info(f"Web: :{SETTINGS['web_server']['listen_port']} | WS: :{SETTINGS['ws']['listen_port']} | OSC: :{SETTINGS['osc']['listen_port']}")
 
-    # Run FastAPI with Uvicorn
+    # Run FastAPI with Uvicorn (engine starts via startup event)
     import uvicorn
     uvicorn.run(
         app,
