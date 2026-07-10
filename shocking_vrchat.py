@@ -254,9 +254,9 @@ def hot_reload_configs():
         logger.error("[hot-reload] Failed to reload configuration.")
 
 
-def config_hot_reload_loop():
+async def config_hot_reload_loop():
     while True:
-        time.sleep(CONFIG_HOT_RELOAD_INTERVAL)
+        await asyncio.sleep(CONFIG_HOT_RELOAD_INTERVAL)
         if has_config_file_changed():
             hot_reload_configs()
 
@@ -1473,9 +1473,11 @@ _ws_subscriptions: dict[WebSocket, set] = {}  # ws -> set of topics ('wave_A', '
 
 async def _ws_broadcast(topic: str, data: dict):
     """Send data to all clients subscribed to topic."""
+    if not _ws_clients:
+        return
     dead = []
     msg = json.dumps({'topic': topic, **data}, separators=(',', ':'))
-    for ws in _ws_clients:
+    for ws in list(_ws_clients):
         if topic in _ws_subscriptions.get(ws, set()):
             try:
                 await ws.send_text(msg)
@@ -1771,24 +1773,18 @@ class Engine:
 engine = Engine()
 
 def _schedule_engine_restart():
-    """Schedule engine restart from sync context (e.g., hot-reload thread)."""
+    """Schedule engine restart from sync context."""
     try:
         loop = asyncio.get_running_loop()
         loop.create_task(engine.restart())
     except RuntimeError:
-        # Not in async context — schedule via call_soon_threadsafe
-        try:
-            import uvicorn
-            # Get the running loop from another way
-            loop = asyncio.get_event_loop()
-            loop.call_soon_threadsafe(lambda: asyncio.ensure_future(engine.restart()))
-        except Exception:
-            logger.error("[engine] Cannot schedule restart: no running event loop")
+        logger.error("[engine] Cannot schedule restart: no running event loop")
 
 @app.on_event("startup")
 async def on_startup():
-    """Start the engine when Uvicorn's event loop is ready."""
+    """Start the engine and config watcher when Uvicorn's event loop is ready."""
     await engine.start()
+    asyncio.create_task(config_hot_reload_loop())
 
 # --- Config save ---
 def config_save():
@@ -1821,10 +1817,6 @@ def config_init():
     logger.success("配置加载完成 | Websocket 需要监听外来连接，如弹出防火墙提示请允许")
 
 def main():
-    # Start config hot-reload watcher
-    reload_th = Thread(target=config_hot_reload_loop, daemon=True)
-    reload_th.start()
-
     if SETTINGS['general']['auto_open_qr_web_page'] and not os.environ.pop('SHOCKING_SKIP_OPEN', None):
         import webbrowser
         webbrowser.open_new_tab(f"http://127.0.0.1:{SETTINGS['web_server']['listen_port']}")
