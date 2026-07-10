@@ -18,17 +18,6 @@ const canvasBRef = ref<HTMLCanvasElement | null>(null)
 const qrContent = ref('')
 const logs = ref<{text: string; level: string}[]>([])
 
-// Control
-const ctrlChannel = ref('all')
-const ctrlStrength = ref(0)
-
-// Wave test
-const wavePresets = ref<string[]>([])
-const selectedPreset = ref('')
-const waveDuration = ref(3)
-const previewSamples = ref<number[]>([])
-const previewInfo = ref('')
-
 // Profiles
 const profiles = ref<string[]>([])
 const profileName = ref('')
@@ -160,66 +149,12 @@ function drawWave(canvas: HTMLCanvasElement | null, samples: {s: number; f: numb
   }
 }
 
-// --- Actions ---
+// Profiles
 function addLog(msg: string, level = '') {
   logs.value.unshift({ text: `[${new Date().toLocaleTimeString()}] ${msg}`, level })
   if (logs.value.length > 80) logs.value.pop()
 }
 
-function getChannels(): string[] {
-  return ctrlChannel.value === 'all' ? ['A', 'B'] : [ctrlChannel.value]
-}
-
-async function sendStrength() {
-  const hex = Math.min(ctrlStrength.value, 100).toString(16).padStart(2, '0').toUpperCase()
-  const wave = '0A0A0A0A' + hex + hex + hex + hex
-  for (const ch of getChannels()) await api(`/api/v1/sendwave/${ch}/10/${wave}`)
-  addLog(`发送固定强度 ${ctrlStrength.value} → ${ctrlChannel.value}`)
-}
-
-async function sendShock() {
-  const duration = Math.min(ctrlStrength.value / 20 || 1, 5)
-  await api(`/api/v1/shock/${ctrlChannel.value}/${duration}`)
-  addLog(`Shock ${ctrlChannel.value} ${duration.toFixed(1)}s`)
-}
-
-async function sendStop() {
-  for (const ch of getChannels()) await api(`/api/v1/sendwave/${ch}/10/0A0A0A0A00000000`)
-  addLog('停止输出')
-}
-
-// Wave presets
-async function loadPresets() {
-  const data = await api('/api/v1/wave_presets')
-  wavePresets.value = data.presets || []
-  if (wavePresets.value.length && !selectedPreset.value) {
-    selectedPreset.value = wavePresets.value[0]
-    previewWave()
-  }
-}
-
-async function previewWave() {
-  if (!selectedPreset.value) { previewSamples.value = []; previewInfo.value = ''; return }
-  try {
-    const data = await api(`/api/v1/wave_presets/${encodeURIComponent(selectedPreset.value)}/preview`)
-    previewSamples.value = data.strength_samples || []
-    previewInfo.value = `${data.ops_count} ops · ${(data.duration_ms / 1000).toFixed(1)}s`
-  } catch { previewInfo.value = '加载失败' }
-}
-
-async function sendWave() {
-  if (!selectedPreset.value) { addLog('请选择预设', 'warn'); return }
-  for (const ch of getChannels()) await api(`/api/v1/wave_preset/${ch}/${encodeURIComponent(selectedPreset.value)}/${waveDuration.value}`)
-  addLog(`发送 ${selectedPreset.value} → ${ctrlChannel.value} (${waveDuration.value}s)`)
-}
-
-async function quickTest() {
-  if (!selectedPreset.value) return
-  for (const ch of getChannels()) await api(`/api/v1/wave_preset/${ch}/${encodeURIComponent(selectedPreset.value)}/1`)
-  addLog(`试一下 ${selectedPreset.value} → ${ctrlChannel.value}`)
-}
-
-// Profiles
 async function loadProfiles() {
   const data = await api('/api/v1/profiles')
   profiles.value = data.profiles || []
@@ -259,10 +194,9 @@ function barPct(ch: 'A' | 'B') {
 }
 function shortPath(addr: string) { return addr.replace('/avatar/parameters/', '') }
 function timeStr(ts: number) { return new Date(ts * 1000).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit',second:'2-digit'}) }
-function presetLabel(name: string) { return name.replace(/^pulse-/, '').replace(/-\d+$/, '') }
 
 onMounted(() => {
-  pollStatus(); loadPresets(); loadProfiles(); loadQr()
+  pollStatus(); loadProfiles(); loadQr()
   connectLiveWs()
   // Reduced polling: only status every 5s as fallback (WS handles real-time)
   intervals.push(window.setInterval(pollStatus, 5000))
@@ -353,44 +287,6 @@ onUnmounted(() => {
           <h2>连接二维码</h2>
           <QrCode :content="qrContent" :size="240" />
           <div class="qr-text">{{ qrContent }}</div>
-        </section>
-
-        <!-- Strength control -->
-        <section class="card">
-          <h2>强度控制</h2>
-          <div class="form-field">
-            <label>通道</label>
-            <select v-model="ctrlChannel"><option value="A">A</option><option value="B">B</option><option value="all">全部</option></select>
-          </div>
-          <div class="form-field">
-            <label>强度: {{ ctrlStrength }}</label>
-            <input type="range" v-model.number="ctrlStrength" min="0" max="100">
-          </div>
-          <div class="btn-group">
-            <button class="btn btn-danger" @click="sendStrength">发送固定强度</button>
-            <button class="btn btn-success" @click="sendShock">Shock</button>
-            <button class="btn btn-gray" @click="sendStop">停止</button>
-          </div>
-        </section>
-
-        <!-- Wave test -->
-        <section class="card">
-          <h2>波形测试</h2>
-          <div class="form-field">
-            <label>波形预设</label>
-            <select v-model="selectedPreset" @change="previewWave">
-              <option v-for="p in wavePresets" :key="p" :value="p">{{ presetLabel(p) }}</option>
-            </select>
-          </div>
-          <div class="preview-info" v-if="previewInfo">{{ previewInfo }}</div>
-          <div class="form-field">
-            <label>持续: {{ waveDuration }}s</label>
-            <input type="range" v-model.number="waveDuration" min="1" max="10">
-          </div>
-          <div class="btn-group">
-            <button class="btn btn-primary" @click="sendWave">发送预设</button>
-            <button class="btn btn-success" @click="quickTest">试一下(1s)</button>
-          </div>
         </section>
 
         <!-- Profiles -->
