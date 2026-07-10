@@ -654,8 +654,8 @@ _wave_test_state = {
 async def api_v1_wave_test_start(request: Request):
     data = await request.json()
     channel = data.get('channel', 'A').upper()
-    if channel not in ('A', 'B'):
-        raise HTTPException(400, 'channel must be A or B')
+    if channel not in ('A', 'B', 'AB'):
+        raise HTTPException(400, 'channel must be A, B, or AB')
     strength = max(0, min(200, int(data.get('strength', 50))))
     wave_scale = max(0.0, min(1.0, float(data.get('wave_scale', 1.0))))
     preset_name = data.get('preset', None)
@@ -671,8 +671,10 @@ async def api_v1_wave_test_start(request: Request):
 async def api_v1_wave_test_stop():
     _wave_test_state['active'] = False
     channel = _wave_test_state['channel']
-    for conn in srv.WS_CONNECTIONS:
-        await conn.clear_wave(channel)
+    channels = ['A', 'B'] if channel == 'AB' else [channel]
+    for ch in channels:
+        for conn in srv.WS_CONNECTIONS:
+            await conn.clear_wave(ch)
     logger.info("[wave_test] Stopped")
     return {'result': 'OK', 'active': False}
 
@@ -714,6 +716,7 @@ async def _wave_test_loop(stop_event: asyncio.Event):
         try:
             if _wave_test_state['active']:
                 channel = _wave_test_state['channel']
+                channels = ['A', 'B'] if channel == 'AB' else [channel]
                 strength = _wave_test_state['strength']
                 wave_scale = _wave_test_state['wave_scale']
                 preset_name = _wave_test_state['preset']
@@ -726,11 +729,13 @@ async def _wave_test_loop(stop_event: asyncio.Event):
                     command_queue.set_enabled(CommandPriority.OSC_INTERACTION, False)
                     command_queue.set_enabled(CommandPriority.OSC_PANEL, False)
                     command_queue.set_enabled(CommandPriority.GAME, False)
-                ch_key = f'channel_{channel.lower()}'
-                SETTINGS['dglab3'][ch_key]['strength_limit'] = strength
+                for ch in channels:
+                    ch_key = f'channel_{ch.lower()}'
+                    SETTINGS['dglab3'][ch_key]['strength_limit'] = strength
                 DGConnection.refresh_limits_from_settings(SETTINGS)
-                for conn in srv.WS_CONNECTIONS:
-                    await conn.set_strength(channel, mode='2', value=strength, force=True)
+                for ch in channels:
+                    for conn in srv.WS_CONNECTIONS:
+                        await conn.set_strength(ch, mode='2', value=strength, force=True)
                 wavestr = None
                 if preset_name and lib.get(preset_name):
                     wavestr = lib.build_resampled_window(
@@ -741,7 +746,8 @@ async def _wave_test_loop(stop_event: asyncio.Event):
                     wave_position += 40.0
                 if not wavestr:
                     wavestr = ShockHandler.scale_wavestr(DEFAULT_SHOCK_WAVE, wave_scale)
-                await command_queue.put(CommandPriority.API, channel, 'wave', value=wavestr, source_id='wave_test_loop')
+                for ch in channels:
+                    await command_queue.put(CommandPriority.API, ch, 'wave', value=wavestr, source_id='wave_test_loop')
                 await asyncio.sleep(0.9)
             else:
                 if saved_limits is not None:

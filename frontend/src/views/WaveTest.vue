@@ -2,7 +2,7 @@
 import { ref, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { api, apiPost } from '@/api'
 
-const channel = ref<'A' | 'B'>('A')
+const channel = ref<'A' | 'B' | 'AB'>('A')
 const strength = ref(50)
 const waveScale = ref(1.0)
 const preset = ref('')
@@ -494,6 +494,7 @@ onUnmounted(() => {
           <div class="channel-tabs">
             <button :class="{ active: channel === 'A' }" @click="channel = 'A'" :disabled="playing">A</button>
             <button :class="{ active: channel === 'B' }" @click="channel = 'B'" :disabled="playing">B</button>
+            <button :class="{ active: channel === 'AB' }" @click="channel = 'AB'" :disabled="playing">A+B</button>
           </div>
           <p class="hint" v-if="playing">播放中不可切换通道，请先停止</p>
         </div>
