@@ -94,6 +94,7 @@ jobs:
       - name: Build with Nuitka
         run: |
           python -m nuitka `
+            --assume-yes-for-downloads `
             --standalone `
             --onefile `
             --output-dir=dist_nuitka `
