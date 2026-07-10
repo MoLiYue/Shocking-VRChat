@@ -12,19 +12,23 @@ const msg = ref('')
 
 // Waveform data (real-time scrolling)
 interface WaveSample { s: number; f: number }
-const rtCanvasRef = ref<HTMLCanvasElement | null>(null)
+const rtCanvasRefA = ref<HTMLCanvasElement | null>(null)
+const rtCanvasRefB = ref<HTMLCanvasElement | null>(null)
 let updateTimer: ReturnType<typeof setTimeout> | null = null
 let resizeObserver: ResizeObserver | null = null
 
-// Scrolling waveform state
-const DISPLAY_SLOTS = 200         // Number of pulse slots visible on screen
-const SLOT_MS = 25                // Each slot = 25ms (matches backend WAVE_HISTORY_SAMPLE_MS)
-let rtBuffer: WaveSample[] = []   // Samples currently on display
-let pendingQueue: WaveSample[] = []  // Samples received but not yet released to display
-let animFrameId = 0               // requestAnimationFrame ID
-let lastFrameTime = 0             // For metering samples into display
-let sampleDebt = 0                // Fractional samples owed to display
-let liveWs: WebSocket | null = null  // WebSocket connection for real-time data
+// Scrolling waveform state (per channel)
+const DISPLAY_SLOTS = 200
+const SLOT_MS = 25
+let rtBufferA: WaveSample[] = []
+let rtBufferB: WaveSample[] = []
+let pendingQueueA: WaveSample[] = []
+let pendingQueueB: WaveSample[] = []
+let animFrameId = 0
+let lastFrameTime = 0
+let sampleDebtA = 0
+let sampleDebtB = 0
+let liveWs: WebSocket | null = null
 
 // Preset preview
 const previewCanvasRef = ref<HTMLCanvasElement | null>(null)
@@ -38,8 +42,7 @@ const previewSections = ref<SectionData[]>([])
 const previewSpeed = ref(1)
 
 // Real-time waveform canvas drawing (smooth scrolling)
-function drawRealtime() {
-  const canvas = rtCanvasRef.value
+function drawRealtimeCanvas(canvas: HTMLCanvasElement | null, buffer: WaveSample[]) {
   if (!canvas) return
   const ctx = canvas.getContext('2d')
   if (!ctx) return
@@ -65,7 +68,7 @@ function drawRealtime() {
     ctx.beginPath(); ctx.moveTo(0, py); ctx.lineTo(w, py); ctx.stroke()
   }
 
-  if (!rtBuffer.length) {
+  if (!buffer.length) {
     ctx.fillStyle = 'rgba(255,255,255,0.2)'
     ctx.font = '12px Inter, sans-serif'
     ctx.textAlign = 'center'
@@ -74,24 +77,20 @@ function drawRealtime() {
     return
   }
 
-  // Draw the last DISPLAY_SLOTS samples right-justified
   const slotW = w / DISPLAY_SLOTS
-  const startIdx = Math.max(0, rtBuffer.length - DISPLAY_SLOTS)
-  const visibleCount = rtBuffer.length - startIdx
-  // Right-justify: first visible sample starts at (DISPLAY_SLOTS - visibleCount) * slotW
+  const startIdx = Math.max(0, buffer.length - DISPLAY_SLOTS)
+  const visibleCount = buffer.length - startIdx
   const xBase = (DISPLAY_SLOTS - visibleCount) * slotW
 
   for (let i = 0; i < visibleCount; i++) {
-    const sample = rtBuffer[startIdx + i]
+    const sample = buffer[startIdx + i]
     if (sample.s <= 0) continue
 
-    // Duty cycle: f=10 (10ms, highest freq) → widest bar; f=240 (240ms, lowest freq) → narrowest
     const dutyCycle = Math.max(0.05, 1 - (sample.f - 10) / (240 - 10))
     const barW = slotW * dutyCycle
     const barH = (sample.s / 100) * h
     const x = xBase + i * slotW + (slotW - barW) / 2
 
-    // Color: low interval (high freq, f=10) = purple, high interval (low freq, f=240) = reddish
     const freqT = 1 - (sample.f - 10) / 230
     const r = Math.round(139 + (1 - freqT) * 100)
     const g = Math.round(92 * freqT)
@@ -100,16 +99,18 @@ function drawRealtime() {
     ctx.fillRect(x, h - barH, Math.max(barW, 0.5), barH)
   }
 
-  // Y labels
   ctx.fillStyle = 'rgba(255,255,255,0.35)'
   ctx.font = '9px Inter, sans-serif'
   ctx.fillText('100%', 2, 10)
   ctx.fillText('0%', 2, h - 2)
-
-  // Time scale label
   const totalSeconds = (DISPLAY_SLOTS * SLOT_MS / 1000).toFixed(1)
   ctx.fillStyle = 'rgba(255,255,255,0.25)'
   ctx.fillText(`${totalSeconds}s`, w - 25, h - 2)
+}
+
+function drawRealtime() {
+  drawRealtimeCanvas(rtCanvasRefA.value, rtBufferA)
+  drawRealtimeCanvas(rtCanvasRefB.value, rtBufferB)
 }
 
 async function loadPresets() {
@@ -328,9 +329,12 @@ function onParamChange() {
 function startPolling() {
   if (liveWs) return
   // Reset state
-  rtBuffer = []
-  pendingQueue = []
-  sampleDebt = 0
+  rtBufferA = []
+  rtBufferB = []
+  pendingQueueA = []
+  pendingQueueB = []
+  sampleDebtA = 0
+  sampleDebtB = 0
   lastFrameTime = 0
 
   // Connect WebSocket
@@ -338,14 +342,16 @@ function startPolling() {
   const wsUrl = `${proto}//${location.host}/ws/live`
   liveWs = new WebSocket(wsUrl)
   liveWs.onopen = () => {
-    // Subscribe to wave data for current channel
-    liveWs!.send(JSON.stringify({ subscribe: [`wave_${channel.value}`] }))
+    // Subscribe to both channels
+    liveWs!.send(JSON.stringify({ subscribe: ['wave_A', 'wave_B'] }))
   }
   liveWs.onmessage = (ev) => {
     try {
       const msg = JSON.parse(ev.data)
-      if (msg.topic === `wave_${channel.value}` && msg.samples) {
-        pendingQueue.push(...msg.samples)
+      if (msg.topic === 'wave_A' && msg.samples) {
+        pendingQueueA.push(...msg.samples)
+      } else if (msg.topic === 'wave_B' && msg.samples) {
+        pendingQueueB.push(...msg.samples)
       }
     } catch {}
   }
@@ -362,24 +368,44 @@ function animLoop(now: number) {
     return
   }
 
-  // Meter samples from pendingQueue into rtBuffer at real-time speed
-  if (lastFrameTime > 0 && pendingQueue.length > 0) {
+  // Meter samples from pending queues into buffers at real-time speed
+  if (lastFrameTime > 0) {
     const dt = now - lastFrameTime
-    sampleDebt += dt / SLOT_MS
-    const toRelease = Math.min(Math.floor(sampleDebt), pendingQueue.length)
-    if (toRelease > 0) {
-      rtBuffer.push(...pendingQueue.splice(0, toRelease))
-      sampleDebt -= toRelease
-      if (rtBuffer.length > DISPLAY_SLOTS * 2) {
-        rtBuffer = rtBuffer.slice(rtBuffer.length - DISPLAY_SLOTS * 2)
+    const samplesOwed = dt / SLOT_MS
+
+    // Channel A
+    if (pendingQueueA.length > 0) {
+      sampleDebtA += samplesOwed
+      const toRelease = Math.min(Math.floor(sampleDebtA), pendingQueueA.length)
+      if (toRelease > 0) {
+        rtBufferA.push(...pendingQueueA.splice(0, toRelease))
+        sampleDebtA -= toRelease
+        if (rtBufferA.length > DISPLAY_SLOTS * 2) rtBufferA = rtBufferA.slice(-DISPLAY_SLOTS * 2)
       }
     }
-  } else if (pendingQueue.length > 0 && lastFrameTime === 0) {
-    rtBuffer.push(...pendingQueue.splice(0))
-    if (rtBuffer.length > DISPLAY_SLOTS * 2) {
-      rtBuffer = rtBuffer.slice(rtBuffer.length - DISPLAY_SLOTS * 2)
+
+    // Channel B
+    if (pendingQueueB.length > 0) {
+      sampleDebtB += samplesOwed
+      const toRelease = Math.min(Math.floor(sampleDebtB), pendingQueueB.length)
+      if (toRelease > 0) {
+        rtBufferB.push(...pendingQueueB.splice(0, toRelease))
+        sampleDebtB -= toRelease
+        if (rtBufferB.length > DISPLAY_SLOTS * 2) rtBufferB = rtBufferB.slice(-DISPLAY_SLOTS * 2)
+      }
     }
-    sampleDebt = 0
+  } else {
+    // First frame: dump initial batch
+    if (pendingQueueA.length > 0) {
+      rtBufferA.push(...pendingQueueA.splice(0))
+      if (rtBufferA.length > DISPLAY_SLOTS * 2) rtBufferA = rtBufferA.slice(-DISPLAY_SLOTS * 2)
+    }
+    if (pendingQueueB.length > 0) {
+      rtBufferB.push(...pendingQueueB.splice(0))
+      if (rtBufferB.length > DISPLAY_SLOTS * 2) rtBufferB = rtBufferB.slice(-DISPLAY_SLOTS * 2)
+    }
+    sampleDebtA = 0
+    sampleDebtB = 0
   }
   lastFrameTime = now
 
@@ -414,10 +440,11 @@ onMounted(async () => {
   }
   // Observe canvas resize to redraw
   resizeObserver = new ResizeObserver(() => {
-    if (!playing.value) drawRealtime()  // When playing, animLoop handles it
+    if (!playing.value) drawRealtime()
     if (previewSections.value.length) drawPreview()
   })
-  if (rtCanvasRef.value) resizeObserver.observe(rtCanvasRef.value)
+  if (rtCanvasRefA.value) resizeObserver.observe(rtCanvasRefA.value)
+  if (rtCanvasRefB.value) resizeObserver.observe(rtCanvasRefB.value)
   // previewCanvasRef may not exist yet (v-if), watch for it
   watch(previewCanvasRef, (el) => {
     if (el && resizeObserver) resizeObserver.observe(el)
@@ -438,10 +465,19 @@ onUnmounted(() => {
 
     <div class="wave-display">
       <div class="wave-header">
-        <span class="wave-title">实时波形 · 通道 {{ channel }}</span>
+        <span class="wave-title">实时波形</span>
         <span class="wave-status" :class="{ active: playing }">{{ playing ? '▶ 播放中' : '⏹ 停止' }}</span>
       </div>
-      <canvas ref="rtCanvasRef" class="rt-canvas"></canvas>
+      <div class="wave-dual">
+        <div class="wave-channel">
+          <div class="wave-ch-label">A</div>
+          <canvas ref="rtCanvasRefA" class="rt-canvas"></canvas>
+        </div>
+        <div class="wave-channel">
+          <div class="wave-ch-label">B</div>
+          <canvas ref="rtCanvasRefB" class="rt-canvas"></canvas>
+        </div>
+      </div>
       <div class="rt-legend">
         <span>柱宽=脉冲间隔(占空比)</span>
         <span><span class="dot purple"></span>高频(柔和)</span>
@@ -517,7 +553,10 @@ onUnmounted(() => {
 .wave-title { font-size: var(--text-sm); color: var(--text-secondary); font-weight: 500; }
 .wave-status { font-size: var(--text-xs); padding: var(--sp-1) var(--sp-2); border-radius: var(--radius-full); background: var(--bg-tertiary); color: var(--text-muted); }
 .wave-status.active { background: rgba(139,92,246,0.15); color: var(--accent); }
-.rt-canvas { width: 100%; height: 150px; display: block; }
+.rt-canvas { width: 100%; height: 100px; display: block; }
+.wave-dual { display: flex; flex-direction: column; gap: var(--sp-2); }
+.wave-channel { display: flex; align-items: stretch; gap: var(--sp-2); }
+.wave-ch-label { display: flex; align-items: center; justify-content: center; width: 24px; font-size: var(--text-xs); font-weight: 600; color: var(--accent); opacity: 0.7; }
 .rt-legend { display: flex; gap: var(--sp-4); padding: var(--sp-2) var(--sp-4); font-size: var(--text-xs); color: var(--text-muted); border-top: 1px solid var(--border); }
 .rt-legend .dot { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 3px; vertical-align: middle; }
 .rt-legend .dot.purple { background: rgba(139,92,246,0.85); }
