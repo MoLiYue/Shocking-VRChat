@@ -199,10 +199,15 @@ class WavePresetLibrary:
             position = start_position + sample_idx * sample_step
             texture_strength = self._sample_looped(texture_samples, position)
             sampled_freq = self._sample_looped(freq_samples, position)
-            lifted_texture = texture_floor + texture_strength * (1.0 - texture_floor)
-            final_strength = lifted_texture * wave_scale
-            sampled_freqs.append(max(0, min(255, int(round(sampled_freq)))))
-            sampled_strengths.append(max(0, min(100, int(round(final_strength * 100)))))
+            # freq=0 and strength=0 means explicit silence — don't apply texture_floor
+            if sampled_freq < 0.5 and texture_strength <= 0:
+                sampled_freqs.append(0)
+                sampled_strengths.append(0)
+            else:
+                lifted_texture = texture_floor + texture_strength * (1.0 - texture_floor)
+                final_strength = lifted_texture * wave_scale
+                sampled_freqs.append(max(0, min(255, int(round(sampled_freq)))))
+                sampled_strengths.append(max(0, min(100, int(round(final_strength * 100)))))
 
         ops: List[str] = []
         for idx in range(0, total_samples, 4):
