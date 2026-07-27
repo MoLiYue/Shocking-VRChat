@@ -1,5 +1,6 @@
 import asyncio
 import collections
+import datetime
 import yaml, uuid, os, sys, traceback, time, socket, re, json
 from threading import Thread
 from loguru import logger
@@ -872,6 +873,84 @@ async def api_v1_settings_update(request: Request):
         'restart_needed': list(set(restart_needed)),
         'message': '已保存。' + ('引擎正在重启...' if restart_needed else ''),
     }
+
+@app.get("/api/v1/config/export")
+async def api_v1_config_export():
+    """Export full configuration as a downloadable JSON file."""
+    from fastapi.responses import Response
+    export_data = {
+        'version': CONFIG_FILE_VERSION,
+        'exported_at': datetime.datetime.now().isoformat(),
+        'basic': copy.deepcopy(SETTINGS_BASIC),
+        'advanced': strip_basic_settings(SETTINGS),
+    }
+    content = json.dumps(export_data, ensure_ascii=False, indent=2)
+    return Response(
+        content=content,
+        media_type='application/json',
+        headers={'Content-Disposition': 'attachment; filename="shocking-vrchat-config.json"'},
+    )
+
+@app.post("/api/v1/config/import")
+async def api_v1_config_import(file: UploadFile = File(...)):
+    """Import configuration from a previously exported JSON file."""
+    if not file.filename or not file.filename.endswith('.json'):
+        raise HTTPException(400, 'Please upload a .json file')
+
+    content_bytes = await file.read()
+    try:
+        import_data = json.loads(content_bytes.decode('utf-8'))
+    except (json.JSONDecodeError, UnicodeDecodeError) as e:
+        raise HTTPException(400, f'Invalid JSON: {e}')
+
+    if 'basic' not in import_data or 'advanced' not in import_data:
+        raise HTTPException(400, 'Invalid config file: missing "basic" or "advanced" section')
+
+    imported_version = import_data.get('version', '')
+    if imported_version != CONFIG_FILE_VERSION:
+        raise HTTPException(400, f'Config version mismatch: file is {imported_version}, expected {CONFIG_FILE_VERSION}')
+
+    # Merge imported config into current settings
+    new_basic = import_data['basic']
+    new_advanced = import_data['advanced']
+
+    # Reconstruct full advanced settings (re-add basic fields to dglab3)
+    for ch in ['channel_a', 'channel_b']:
+        if ch in new_basic.get('dglab3', {}):
+            new_advanced.setdefault('dglab3', {}).setdefault(ch, {})
+            new_advanced['dglab3'][ch]['avatar_params'] = new_basic['dglab3'][ch].get('avatar_params', [])
+            new_advanced['dglab3'][ch]['mode'] = new_basic['dglab3'][ch].get('mode', 'distance')
+            new_advanced['dglab3'][ch]['strength_limit'] = new_basic['dglab3'][ch].get('strength_limit', 100)
+
+    # Preserve non-exportable fields
+    new_advanced.setdefault('ws', {})['master_uuid'] = SETTINGS['ws'].get('master_uuid')
+    new_advanced['version'] = CONFIG_FILE_VERSION
+    new_basic['version'] = CONFIG_FILE_VERSION
+
+    # Normalize avatar params
+    for ch in ['channel_a', 'channel_b']:
+        if ch in new_advanced.get('dglab3', {}):
+            normalize_avatar_param_entries(new_advanced['dglab3'][ch])
+
+    # Apply
+    SETTINGS_BASIC.clear()
+    SETTINGS_BASIC.update(new_basic)
+    SETTINGS.clear()
+    SETTINGS.update(new_advanced)
+
+    global SERVER_IP
+    SERVER_IP = SETTINGS.get('SERVER_IP') or get_current_ip()
+    reset_logger()
+    DGConnection.refresh_limits_from_settings(SETTINGS)
+    config_save()
+
+    # Restart engine to apply all changes (keep WS since port likely didn't change)
+    async def _delayed():
+        await asyncio.sleep(0.3)
+        await engine.restart(keep_ws=True)
+    asyncio.create_task(_delayed())
+
+    return {'success': True, 'message': '配置已导入，引擎正在重启...'}
 
 @app.post("/api/v1/engine/restart")
 async def api_v1_engine_restart():

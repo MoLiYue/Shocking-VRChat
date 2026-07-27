@@ -10,6 +10,8 @@ const webHost = ref('127.0.0.1')
 const logLevel = ref('INFO')
 const msg = ref('')
 const msgErr = ref(false)
+const importMsg = ref('')
+const importErr = ref(false)
 
 async function load() {
   const data = await api('/api/v1/config')
@@ -48,6 +50,40 @@ async function save() {
     }
   } else { msg.value = data.message || '保存失败'; msgErr.value = true }
   setTimeout(() => msg.value = '', 8000)
+}
+
+function exportConfig() {
+  window.open('/api/v1/config/export', '_blank')
+}
+
+const importFileRef = ref<HTMLInputElement | null>(null)
+
+function triggerImport() {
+  importFileRef.value?.click()
+}
+
+async function handleImport(e: Event) {
+  const file = (e.target as HTMLInputElement).files?.[0]
+  if (!file) return
+  const form = new FormData()
+  form.append('file', file)
+  try {
+    const res = await fetch('/api/v1/config/import', { method: 'POST', body: form })
+    const data = await res.json()
+    if (data.success) {
+      importMsg.value = '✓ ' + data.message
+      importErr.value = false
+      setTimeout(() => window.location.reload(), 2000)
+    } else {
+      importMsg.value = '✗ ' + (data.detail || '导入失败')
+      importErr.value = true
+    }
+  } catch (err) {
+    importMsg.value = '✗ 导入失败: ' + err
+    importErr.value = true
+  }
+  if (importFileRef.value) importFileRef.value.value = ''
+  setTimeout(() => importMsg.value = '', 8000)
 }
 
 onMounted(load)
@@ -116,6 +152,17 @@ onMounted(load)
       <button class="btn btn-ghost" @click="load">↺ 重新加载</button>
       <span class="msg" :class="{ err: msgErr }">{{ msg }}</span>
     </div>
+
+    <section class="card" style="margin-top:var(--sp-4)">
+      <h2>配置导入/导出</h2>
+      <p class="hint" style="margin-bottom:var(--sp-3)">导出当前全部配置为 JSON 文件，或从之前导出的文件恢复配置。</p>
+      <div class="ie-bar">
+        <button class="btn" @click="exportConfig">📤 导出配置</button>
+        <button class="btn" @click="triggerImport">📥 导入配置</button>
+        <input ref="importFileRef" type="file" accept=".json" hidden @change="handleImport">
+        <span class="msg" :class="{ err: importErr }">{{ importMsg }}</span>
+      </div>
+    </section>
   </div>
 </template>
 
@@ -128,6 +175,7 @@ onMounted(load)
 .field input, .field select { width: 100%; }
 .hint { font-size: var(--text-xs); color: var(--text-muted); margin-top: var(--sp-1); }
 .save-bar { display: flex; align-items: center; gap: var(--sp-3); margin-top: var(--sp-5); padding: var(--sp-4); background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius-lg); }
+.ie-bar { display: flex; align-items: center; gap: var(--sp-3); flex-wrap: wrap; }
 .msg { font-size: var(--text-sm); color: var(--success); }
 .msg.err { color: var(--danger); }
 @media (max-width: 768px) { .settings-grid { grid-template-columns: 1fr; } }
