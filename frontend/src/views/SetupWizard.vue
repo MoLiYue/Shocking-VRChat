@@ -19,7 +19,7 @@ const saving = ref(false)
 const errMsg = ref('')
 
 const MODES = [
-  { value: 'distance', label: '强度曲线模式', desc: '参数值通过曲线映射到输出强度' },
+  { value: 'distance', label: '距离模式', desc: '根据与触发区域中心的距离控制强度' },
   { value: 'shock', label: '电击模式', desc: '超过阈值触发固定时长电击' },
   { value: 'touch', label: '触摸模式', desc: '对触摸速度/变化率做响应' },
   { value: 'combo', label: '组合模式', desc: '短触 = 电击，持续 = 柔和抚摸' },

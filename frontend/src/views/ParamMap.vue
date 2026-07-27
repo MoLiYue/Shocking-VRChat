@@ -9,7 +9,7 @@ interface Param {
 }
 
 const MODES = [
-  { value: 'distance', label: '强度曲线' },
+  { value: 'distance', label: '距离' },
   { value: 'shock', label: '电击' },
   { value: 'touch', label: '触摸' },
   { value: 'combo', label: '组合' },
