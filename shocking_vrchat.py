@@ -209,11 +209,12 @@ def apply_hot_reloadable_settings(new_settings, new_settings_basic):
     old_settings = copy.deepcopy(SETTINGS)
 
     engine_restart_needed = False
+    ws_restart_needed = False
 
     if new_settings['osc'] != old_settings['osc']:
         engine_restart_needed = True
     if new_settings['ws'] != old_settings['ws']:
-        engine_restart_needed = True
+        ws_restart_needed = True
     if new_settings.get('SERVER_IP') != old_settings.get('SERVER_IP'):
         engine_restart_needed = True
 
@@ -240,9 +241,19 @@ def apply_hot_reloadable_settings(new_settings, new_settings_basic):
     reset_logger()
     DGConnection.refresh_limits_from_settings(SETTINGS)
 
-    if engine_restart_needed:
-        logger.info("[hot-reload] OSC/WS/param config changed, restarting engine...")
-        _schedule_engine_restart()
+    if engine_restart_needed or ws_restart_needed:
+        if ws_restart_needed and not engine_restart_needed:
+            # Only WS config changed: restart WS server only, keep OSC/handlers running
+            logger.info("[hot-reload] WS config changed, restarting WS server only...")
+            _schedule_engine_ws_restart()
+        elif ws_restart_needed and engine_restart_needed:
+            # Both changed: full restart including WS
+            logger.info("[hot-reload] OSC + WS config changed, full engine restart...")
+            _schedule_engine_restart(keep_ws=False)
+        else:
+            # Only OSC/params changed: restart engine but keep WS connections
+            logger.info("[hot-reload] OSC/param config changed, restarting engine (preserving WS connections)...")
+            _schedule_engine_restart(keep_ws=True)
     else:
         for handler in handlers:
             if hasattr(handler, 'refresh_settings'):
@@ -841,12 +852,17 @@ async def api_v1_settings_update(request: Request):
     config_save()
     if restart_needed:
         web_restart = 'web_server' in restart_needed
+        ws_restart = 'ws' in restart_needed
         engine_needs_restart = any(r in restart_needed for r in ('osc', 'ws'))
         async def _delayed_restart():
             await asyncio.sleep(0.5)
             if engine_needs_restart:
-                logger.info("[settings] Restarting engine due to OSC/WS config change...")
-                await engine.restart()
+                if ws_restart:
+                    logger.info("[settings] Restarting engine (WS config changed)...")
+                    await engine.restart(keep_ws=False)
+                else:
+                    logger.info("[settings] Restarting engine (preserving WS connections)...")
+                    await engine.restart(keep_ws=True)
             if web_restart:
                 logger.warning("[settings] Web server port/host changed. Full restart required.")
                 _restart_program()
@@ -861,9 +877,9 @@ async def api_v1_settings_update(request: Request):
 async def api_v1_engine_restart():
     async def _do_restart():
         await asyncio.sleep(0.3)
-        await engine.restart()
+        await engine.restart(keep_ws=True)
     asyncio.create_task(_do_restart())
-    return {'success': True, 'message': '引擎正在重启...'}
+    return {'success': True, 'message': '引擎正在重启（保持设备连接）...'}
 
 @app.get("/api/v1/engine/status")
 async def api_v1_engine_status():
@@ -925,8 +941,8 @@ async def api_v1_params_set(channel: str, request: Request):
     config_save()
     async def _delayed_restart():
         await asyncio.sleep(0.5)
-        logger.info("[params] Restarting engine to apply param changes...")
-        await engine.restart()
+        logger.info("[params] Restarting engine to apply param changes (preserving WS)...")
+        await engine.restart(keep_ws=True)
     asyncio.create_task(_delayed_restart())
     return {'success': True, 'params': validated, 'restarting': True}
 
@@ -1689,6 +1705,8 @@ class Engine:
     """Data processing engine: OSC listener, WebSocket server, command queue, handlers.
     
     Runs as async tasks on the same event loop as Uvicorn (no separate thread).
+    WS server lifecycle is independent of OSC/handlers — hot-reload only restarts
+    what's needed, preserving DG-LAB device connections.
     """
 
     def __init__(self):
@@ -1696,6 +1714,7 @@ class Engine:
         self._tasks: list[asyncio.Task] = []
         self._transport = None
         self._ws_server = None
+        self._ws_running = False
         self._running = False
         self.dispatcher: Dispatcher | None = None
         self.handlers: list = []
@@ -1771,24 +1790,38 @@ class Engine:
             await self._cleanup_tasks()
             return
 
-        # Start DG-LAB WebSocket server
-        try:
-            self._ws_server = await wsserve(wshandler, SETTINGS['ws']["listen_host"], SETTINGS['ws']["listen_port"])
-            logger.success(f'WS Listening: {SETTINGS["ws"]["listen_host"]}:{SETTINGS["ws"]["listen_port"]}')
-        except Exception:
-            logger.error(traceback.format_exc())
-            logger.error("WS服务监听失败，可能存在端口冲突")
-            if self._transport:
-                self._transport.close()
-                self._transport = None
-            await self._cleanup_tasks()
-            return
+        # Start DG-LAB WebSocket server (only if not already running)
+        if not self._ws_running:
+            await self._start_ws_server()
 
         self._running = True
         logger.info("[engine] Started.")
 
-    async def stop(self):
-        """Stop the engine gracefully."""
+    async def _start_ws_server(self):
+        """Start the DG-LAB WebSocket server independently."""
+        try:
+            self._ws_server = await wsserve(wshandler, SETTINGS['ws']["listen_host"], SETTINGS['ws']["listen_port"])
+            self._ws_running = True
+            logger.success(f'WS Listening: {SETTINGS["ws"]["listen_host"]}:{SETTINGS["ws"]["listen_port"]}')
+        except Exception:
+            logger.error(traceback.format_exc())
+            logger.error("WS服务监听失败，可能存在端口冲突")
+
+    async def _stop_ws_server(self):
+        """Stop the DG-LAB WebSocket server."""
+        if self._ws_server:
+            self._ws_server.close()
+            await self._ws_server.wait_closed()
+            self._ws_server = None
+            self._ws_running = False
+            logger.info("[engine] WS server stopped.")
+
+    async def stop(self, *, keep_ws: bool = False):
+        """Stop the engine gracefully.
+        
+        Args:
+            keep_ws: If True, preserve the DG-LAB WebSocket server (device connections stay alive).
+        """
         if not self._running:
             return
 
@@ -1807,11 +1840,11 @@ class Engine:
 
         logger.info("[engine] Stopping...")
 
-        # Close servers
-        if self._ws_server:
-            self._ws_server.close()
-            await self._ws_server.wait_closed()
-            self._ws_server = None
+        # Close WS server only if requested
+        if not keep_ws:
+            await self._stop_ws_server()
+
+        # Close OSC transport
         if self._transport:
             self._transport.close()
             self._transport = None
@@ -1819,7 +1852,7 @@ class Engine:
         # Cancel tasks
         await self._cleanup_tasks()
         self._running = False
-        logger.info("[engine] Stopped.")
+        logger.info(f"[engine] Stopped.{' (WS preserved)' if keep_ws else ''}")
 
     async def _cleanup_tasks(self):
         for t in self._tasks:
@@ -1828,21 +1861,40 @@ class Engine:
             await asyncio.gather(*self._tasks, return_exceptions=True)
         self._tasks = []
 
-    async def restart(self):
-        """Restart the engine."""
-        logger.info("[engine] Restarting...")
-        await self.stop()
+    async def restart(self, *, keep_ws: bool = True):
+        """Restart the engine.
+        
+        Args:
+            keep_ws: If True (default), preserve DG-LAB WebSocket connections.
+                     Only set False when ws port/host config actually changed.
+        """
+        logger.info(f"[engine] Restarting...{' (preserving WS connections)' if keep_ws else ''}")
+        await self.stop(keep_ws=keep_ws)
         await self.start()
+
+    async def restart_ws(self):
+        """Restart only the DG-LAB WebSocket server (when ws config changes)."""
+        logger.info("[engine] Restarting WS server (port/host changed)...")
+        await self._stop_ws_server()
+        await self._start_ws_server()
 
 engine = Engine()
 
-def _schedule_engine_restart():
+def _schedule_engine_restart(*, keep_ws: bool = True):
     """Schedule engine restart from sync context."""
     try:
         loop = asyncio.get_running_loop()
-        loop.create_task(engine.restart())
+        loop.create_task(engine.restart(keep_ws=keep_ws))
     except RuntimeError:
         logger.error("[engine] Cannot schedule restart: no running event loop")
+
+def _schedule_engine_ws_restart():
+    """Schedule WS-only restart from sync context."""
+    try:
+        loop = asyncio.get_running_loop()
+        loop.create_task(engine.restart_ws())
+    except RuntimeError:
+        logger.error("[engine] Cannot schedule WS restart: no running event loop")
 
 @app.on_event("startup")
 async def on_startup():
