@@ -3,17 +3,42 @@ import { ref } from 'vue'
 
 const sidebarOpen = ref(true)
 
-const navItems = [
+interface NavItem {
+  path?: string
+  label: string
+  icon: string
+  children?: NavItem[]
+}
+
+const navItems: NavItem[] = [
   { path: '/dashboard', label: 'Dashboard', icon: '⚡' },
   { path: '/params', label: '参数管理', icon: '🎛' },
   { path: '/strength', label: '强度上限', icon: '🔋' },
   { path: '/overlimit-rules', label: '超限规则', icon: '⚡' },
+  {
+    label: '模式', icon: '🎮',
+    children: [
+      { path: '/mode/shock', label: '电击', icon: '💥' },
+      { path: '/mode/distance', label: '距离', icon: '📏' },
+      { path: '/mode/touch', label: '触摸', icon: '🤚' },
+      { path: '/mode/combo', label: 'Combo', icon: '🔀' },
+      { path: '/mode/curve', label: '强度曲线', icon: '📈' },
+    ],
+  },
   { path: '/wave-test', label: '波形测试', icon: '🧪' },
-  { path: '/curve', label: '强度曲线', icon: '📈' },
-  { path: '/combo', label: 'Combo', icon: '🔀' },
   { path: '/recorder', label: '录制回放', icon: '🎙' },
   { path: '/settings', label: '设置', icon: '⚙' },
 ]
+
+const expandedGroups = ref<Set<string>>(new Set(['模式']))
+
+function toggleGroup(label: string) {
+  if (expandedGroups.value.has(label)) {
+    expandedGroups.value.delete(label)
+  } else {
+    expandedGroups.value.add(label)
+  }
+}
 </script>
 
 <template>
@@ -25,15 +50,41 @@ const navItems = [
         <span class="brand-name gradient-text">Shocking</span>
       </div>
       <nav class="nav">
-        <router-link
-          v-for="item in navItems" :key="item.path"
-          :to="item.path"
-          class="nav-link"
-          active-class="active"
-        >
-          <span class="nav-ico">{{ item.icon }}</span>
-          <span class="nav-txt">{{ item.label }}</span>
-        </router-link>
+        <template v-for="item in navItems" :key="item.label">
+          <!-- Group with children -->
+          <template v-if="item.children">
+            <button
+              class="nav-link nav-group-toggle"
+              :class="{ expanded: expandedGroups.has(item.label) }"
+              @click="toggleGroup(item.label)"
+            >
+              <span class="nav-ico">{{ item.icon }}</span>
+              <span class="nav-txt">{{ item.label }}</span>
+              <span class="nav-arrow">{{ expandedGroups.has(item.label) ? '▾' : '▸' }}</span>
+            </button>
+            <div class="nav-children" v-show="expandedGroups.has(item.label)">
+              <router-link
+                v-for="child in item.children" :key="child.path"
+                :to="child.path!"
+                class="nav-link nav-child"
+                active-class="active"
+              >
+                <span class="nav-ico">{{ child.icon }}</span>
+                <span class="nav-txt">{{ child.label }}</span>
+              </router-link>
+            </div>
+          </template>
+          <!-- Normal link -->
+          <router-link
+            v-else
+            :to="item.path!"
+            class="nav-link"
+            active-class="active"
+          >
+            <span class="nav-ico">{{ item.icon }}</span>
+            <span class="nav-txt">{{ item.label }}</span>
+          </router-link>
+        </template>
       </nav>
       <button class="toggle-btn" @click="sidebarOpen = !sidebarOpen">
         {{ sidebarOpen ? '‹' : '›' }}
@@ -131,6 +182,11 @@ const navItems = [
 .nav-link.active::before { opacity: 0.1; }
 .nav-ico { font-size: 1.1em; width: 24px; text-align: center; flex-shrink: 0; position: relative; z-index: 1; }
 .nav-txt { position: relative; z-index: 1; white-space: nowrap; transition: opacity 200ms; }
+.nav-arrow { margin-left: auto; font-size: 0.7em; color: var(--text-muted); position: relative; z-index: 1; transition: opacity 200ms; }
+.nav-group-toggle { width: 100%; text-align: left; background: none; border: none; cursor: pointer; font: inherit; }
+.nav-children { padding-left: 12px; display: flex; flex-direction: column; gap: 1px; }
+.nav-child { font-size: calc(var(--text-sm) - 0.5px); padding: var(--sp-2) var(--sp-3); }
+.sidebar.closed .nav-arrow { opacity: 0; width: 0; }
 
 .toggle-btn {
   margin: var(--sp-2) var(--sp-3);

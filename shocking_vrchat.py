@@ -1025,6 +1025,58 @@ async def api_v1_params_set(channel: str, request: Request):
     asyncio.create_task(_delayed_restart())
     return {'success': True, 'params': validated, 'restarting': True}
 
+# --- Mode Config ---
+@app.get("/api/v1/mode_config/{channel}/{mode}")
+async def api_v1_mode_config_get(channel: str, mode: str):
+    ch = channel.lower()
+    if ch not in ('a', 'b'):
+        raise HTTPException(400, 'invalid channel')
+    if mode not in ('shock', 'distance', 'touch'):
+        raise HTTPException(400, 'invalid mode, use: shock, distance, touch')
+    cfg = SETTINGS['dglab3'][f'channel_{ch}']['mode_config']
+    mode_cfg = cfg.get(mode, {})
+    trigger = cfg.get('trigger_range', {})
+    return {'config': mode_cfg, 'trigger_range': trigger}
+
+@app.post("/api/v1/mode_config/{channel}/{mode}")
+async def api_v1_mode_config_set(channel: str, mode: str, request: Request):
+    ch = channel.lower()
+    if ch not in ('a', 'b'):
+        raise HTTPException(400, 'invalid channel')
+    if mode not in ('shock', 'distance', 'touch'):
+        raise HTTPException(400, 'invalid mode, use: shock, distance, touch')
+    data = await request.json()
+    cfg = SETTINGS['dglab3'][f'channel_{ch}']['mode_config']
+    mode_cfg = cfg.setdefault(mode, {})
+
+    # Update mode-specific fields
+    if mode == 'shock':
+        for key in ('duration', 'wave_preset', 'wave_scale', 'wave'):
+            if key in data:
+                mode_cfg[key] = data[key]
+    elif mode == 'distance':
+        for key in ('freq_ms', 'wave_preset', 'wave_scale', 'texture_floor',
+                    'wave_window_ops', 'wave_sample_step', 'wave_advance_samples',
+                    'wave_envelope_curve'):
+            if key in data:
+                mode_cfg[key] = data[key]
+    elif mode == 'touch':
+        for key in ('wave_preset', 'wave_scale', 'n_derivative', 'texture_floor',
+                    'wave_window_ops', 'wave_sample_step', 'wave_advance_samples',
+                    'wave_envelope_curve'):
+            if key in data:
+                mode_cfg[key] = data[key]
+
+    # Update trigger_range if provided
+    if 'trigger_range' in data:
+        cfg.setdefault('trigger_range', {}).update(data['trigger_range'])
+
+    for handler in handlers:
+        if hasattr(handler, 'refresh_settings'):
+            handler.refresh_settings()
+    config_save()
+    return {'success': True}
+
 # --- Combo ---
 @app.get("/api/v1/combo/{channel}")
 async def api_v1_combo_get(channel: str):

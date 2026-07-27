@@ -8,8 +8,11 @@ const router = createRouter({
   routes: [
     { path: '/', redirect: '/dashboard' },
     { path: '/dashboard', component: () => import('./views/Dashboard.vue') },
-    { path: '/curve', component: () => import('./views/CurveEditor.vue') },
-    { path: '/combo', component: () => import('./views/ComboEditor.vue') },
+    { path: '/mode/shock', component: () => import('./views/ModeShock.vue') },
+    { path: '/mode/distance', component: () => import('./views/ModeDistance.vue') },
+    { path: '/mode/touch', component: () => import('./views/ModeTouch.vue') },
+    { path: '/mode/curve', component: () => import('./views/CurveEditor.vue') },
+    { path: '/mode/combo', component: () => import('./views/ComboEditor.vue') },
     { path: '/params', component: () => import('./views/ParamMap.vue') },
     { path: '/recorder', component: () => import('./views/Recorder.vue') },
     { path: '/setup', component: () => import('./views/SetupWizard.vue') },
@@ -17,6 +20,9 @@ const router = createRouter({
     { path: '/strength', component: () => import('./views/StrengthLimit.vue') },
     { path: '/overlimit-rules', component: () => import('./views/OverlimitRules.vue') },
     { path: '/wave-test', component: () => import('./views/WaveTest.vue') },
+    // Legacy redirects
+    { path: '/curve', redirect: '/mode/curve' },
+    { path: '/combo', redirect: '/mode/combo' },
   ],
 })
 
