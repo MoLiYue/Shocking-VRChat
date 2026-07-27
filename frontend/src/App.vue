@@ -22,7 +22,6 @@ const navItems: NavItem[] = [
       { path: '/mode/distance', label: '距离', icon: '📏' },
       { path: '/mode/touch', label: '触摸', icon: '🤚' },
       { path: '/mode/combo', label: 'Combo', icon: '🔀' },
-      { path: '/mode/curve', label: '强度曲线', icon: '📈' },
     ],
   },
   { path: '/wave-test', label: '波形测试', icon: '🧪' },

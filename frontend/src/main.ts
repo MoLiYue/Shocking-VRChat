@@ -11,7 +11,6 @@ const router = createRouter({
     { path: '/mode/shock', component: () => import('./views/ModeShock.vue') },
     { path: '/mode/distance', component: () => import('./views/ModeDistance.vue') },
     { path: '/mode/touch', component: () => import('./views/ModeTouch.vue') },
-    { path: '/mode/curve', component: () => import('./views/CurveEditor.vue') },
     { path: '/mode/combo', component: () => import('./views/ComboEditor.vue') },
     { path: '/params', component: () => import('./views/ParamMap.vue') },
     { path: '/recorder', component: () => import('./views/Recorder.vue') },
@@ -21,8 +20,9 @@ const router = createRouter({
     { path: '/overlimit-rules', component: () => import('./views/OverlimitRules.vue') },
     { path: '/wave-test', component: () => import('./views/WaveTest.vue') },
     // Legacy redirects
-    { path: '/curve', redirect: '/mode/curve' },
+    { path: '/curve', redirect: '/mode/distance' },
     { path: '/combo', redirect: '/mode/combo' },
+    { path: '/mode/curve', redirect: '/mode/distance' },
   ],
 })
 
