@@ -134,6 +134,7 @@ SETTINGS = {
             'host': '223.5.5.5',
             'port': 80,
         },
+        'github_mirror': '',  # e.g. 'https://mirror.ghproxy.com/' for China mainland
     },
 }
 DEFAULT_SETTINGS_BASIC = copy.deepcopy(SETTINGS_BASIC)
@@ -852,6 +853,12 @@ async def api_v1_settings_update(request: Request):
     if 'log_level' in data:
         SETTINGS['log_level'] = data['log_level']
         reset_logger()
+    if 'github_mirror' in data:
+        SETTINGS.setdefault('general', {})['github_mirror'] = data['github_mirror'].strip()
+        # Clear update cache so next check uses new mirror
+        global _update_cache, _update_cache_time
+        _update_cache = {}
+        _update_cache_time = 0
     config_save()
     if restart_needed:
         web_restart = 'web_server' in restart_needed
@@ -970,6 +977,18 @@ async def api_v1_engine_status():
 _update_cache: dict = {}
 _update_cache_time = 0.0
 
+def _get_github_mirror() -> str:
+    """Get configured GitHub mirror prefix (empty string = direct)."""
+    return (SETTINGS.get('general', {}).get('github_mirror') or '').strip().rstrip('/')
+
+def _apply_mirror(url: str) -> str:
+    """Apply GitHub mirror proxy to a URL if configured."""
+    mirror = _get_github_mirror()
+    if not mirror:
+        return url
+    # Proxy format: mirror_prefix/original_url
+    return f'{mirror}/{url}'
+
 @app.get("/api/v1/update/check")
 async def api_v1_update_check():
     """Check GitHub releases for a newer version."""
@@ -981,9 +1000,10 @@ async def api_v1_update_check():
         return _update_cache
 
     try:
-        url = f'https://api.github.com/repos/{GITHUB_REPO}/releases/latest'
+        api_url = f'https://api.github.com/repos/{GITHUB_REPO}/releases/latest'
+        url = _apply_mirror(api_url)
         req = urllib.request.Request(url, headers={'Accept': 'application/vnd.github.v3+json', 'User-Agent': 'ShockingVRChat'})
-        with urllib.request.urlopen(req, timeout=10) as resp:
+        with urllib.request.urlopen(req, timeout=15) as resp:
             data = json.loads(resp.read().decode())
     except Exception as e:
         return {'current': APP_VERSION, 'latest': None, 'update_available': False, 'error': str(e)}
@@ -1015,6 +1035,7 @@ async def api_v1_update_check():
         'release_name': data.get('name', ''),
         'release_notes': data.get('body', '')[:2000],
         'published_at': data.get('published_at', ''),
+        'github_mirror': _get_github_mirror(),
     }
     _update_cache_time = time.time()
     return _update_cache
@@ -1043,8 +1064,9 @@ async def api_v1_update_apply():
     zip_path = os.path.join(tmp_dir, 'update.zip')
 
     try:
-        logger.info(f"[update] Downloading: {download_url}")
-        req = urllib.request.Request(download_url, headers={'User-Agent': 'ShockingVRChat'})
+        actual_url = _apply_mirror(download_url)
+        logger.info(f"[update] Downloading: {actual_url}")
+        req = urllib.request.Request(actual_url, headers={'User-Agent': 'ShockingVRChat'})
         with urllib.request.urlopen(req, timeout=120) as resp:
             with open(zip_path, 'wb') as f:
                 shutil.copyfileobj(resp, f)

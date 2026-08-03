@@ -7,6 +7,7 @@ const oscHost = ref('127.0.0.1')
 const wsPort = ref(28846)
 const webPort = ref(8800)
 const webHost = ref('127.0.0.1')
+const githubMirror = ref('')
 const logLevel = ref('INFO')
 const msg = ref('')
 const msgErr = ref(false)
@@ -22,6 +23,7 @@ async function load() {
   webPort.value = adv.web_server?.listen_port || 8800
   webHost.value = adv.web_server?.listen_host || '127.0.0.1'
   logLevel.value = adv.log_level || 'INFO'
+  githubMirror.value = adv.general?.github_mirror || ''
 }
 
 async function save() {
@@ -30,6 +32,7 @@ async function save() {
     ws: { listen_port: wsPort.value },
     web_server: { listen_port: webPort.value, listen_host: webHost.value },
     log_level: logLevel.value,
+    github_mirror: githubMirror.value,
   })
   if (data.success) {
     if (data.restart_needed?.length) {
@@ -196,6 +199,21 @@ onMounted(() => { checkUpdate() })
           <p class="hint">DEBUG 可用于诊断问题，日常使用 INFO 即可。</p>
         </div>
       </section>
+
+      <section class="card">
+        <h2>GitHub 加速</h2>
+        <div class="field">
+          <label>镜像代理</label>
+          <input type="text" v-model="githubMirror" placeholder="留空 = 直连 GitHub">
+          <p class="hint">中国大陆用户建议填写代理地址加速更新下载。</p>
+          <div class="mirror-presets">
+            <button class="preset-tag" @click="githubMirror = ''">直连</button>
+            <button class="preset-tag" @click="githubMirror = 'https://mirror.ghproxy.com'">ghproxy</button>
+            <button class="preset-tag" @click="githubMirror = 'https://ghfast.top'">ghfast</button>
+            <button class="preset-tag" @click="githubMirror = 'https://gh-proxy.com'">gh-proxy</button>
+          </div>
+        </div>
+      </section>
     </div>
 
     <div class="save-bar">
@@ -267,5 +285,8 @@ onMounted(() => { checkUpdate() })
 .update-value.has-update { color: var(--accent); font-weight: 600; }
 .update-badge { display: inline-block; margin-left: var(--sp-2); padding: 1px 8px; border-radius: 99px; background: rgba(139,92,246,0.15); color: var(--accent); font-size: var(--text-xs); font-weight: 600; }
 .update-notes { font-size: var(--text-xs); color: var(--text-muted); max-width: 400px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mirror-presets { display: flex; gap: var(--sp-2); margin-top: var(--sp-2); flex-wrap: wrap; }
+.preset-tag { padding: 2px 10px; border: 1px solid var(--border); border-radius: 99px; background: transparent; color: var(--text-muted); font-size: var(--text-xs); cursor: pointer; transition: all var(--transition); }
+.preset-tag:hover { border-color: var(--accent); color: var(--accent); background: rgba(139,92,246,0.06); }
 @media (max-width: 768px) { .settings-grid { grid-template-columns: 1fr; } }
 </style>
