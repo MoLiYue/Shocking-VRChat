@@ -3,77 +3,62 @@ import { ref } from 'vue'
 import { apiPost } from '@/api'
 
 const step = ref(0)
-const totalSteps = 4
+const totalSteps = 3
+const saving = ref(false)
+const done = ref(false)
+const errMsg = ref('')
+const safetyConfirmed = ref(false)
+
+// Config state
+const scene = ref('')  // 'pcs', 'lms', 'custom'
+const sameAB = ref(true)
 const modeA = ref('distance')
 const modeB = ref('distance')
-const paramsA = ref<string[]>(['/avatar/parameters/pcs/contact/enterPass'])
-const paramsB = ref<string[]>(['/avatar/parameters/pcs/contact/enterPass'])
-const customA = ref('')
-const customB = ref('')
-const strengthA = ref(100)
-const strengthB = ref(100)
-const oscPort = ref(9001)
-const oscHost = ref('127.0.0.1')
-const done = ref(false)
-const saving = ref(false)
-const errMsg = ref('')
+const strengthA = ref(20)
+const strengthB = ref(20)
+const customParams = ref('')
+
+const SCENES = [
+  { id: 'pcs', name: 'PCS (Poiyomi Contact System)', desc: '最常用，触碰模型身体触发', icon: '🤚', params: ['/avatar/parameters/pcs/contact/enterPass'] },
+  { id: 'pcs_multi', name: 'PCS 多部位', desc: '不同身体部位分别触发 A/B 通道', icon: '👐', params: ['/avatar/parameters/pcs/sps/pussy', '/avatar/parameters/pcs/sps/ass'] },
+  { id: 'lms', name: 'LMS (Lewd Motion System)', desc: '通过 LMS 系统触发', icon: '💋', params: ['/avatar/parameters/lms-penis-proximityA*'] },
+  { id: 'custom', name: '自定义参数', desc: '手动输入 OSC 参数路径', icon: '⌨️', params: [] },
+]
 
 const MODES = [
-  { value: 'distance', label: '距离模式', desc: '根据与触发区域中心的距离控制强度' },
-  { value: 'shock', label: '电击模式', desc: '超过阈值触发固定时长电击' },
-  { value: 'touch', label: '触摸模式', desc: '对触摸速度/变化率做响应' },
-  { value: 'combo', label: '组合模式', desc: '短触 = 电击，持续 = 柔和抚摸' },
-  { value: 'boost', label: '强度增减模式', desc: '按住 +N，松开恢复' },
+  { value: 'distance', label: '距离', desc: '越近越强，适合被摸' },
+  { value: 'shock', label: '电击', desc: '触碰就来一下，刺激' },
+  { value: 'touch', label: '触摸', desc: '根据摸的速度来，适合抚摸' },
+  { value: 'combo', label: '组合', desc: '短碰=电击，持续=温柔' },
 ]
 
-const COMMON_PARAMS = [
-  { path: '/avatar/parameters/pcs/contact/enterPass', desc: 'PCS 入口（最常用）' },
-  { path: '/avatar/parameters/pcs/contact/proximityA', desc: 'PCS 接近A' },
-  { path: '/avatar/parameters/pcs/contact/proximityB', desc: 'PCS 接近B' },
-  { path: '/avatar/parameters/pcs/sps/pussy', desc: 'PCS 指定部位' },
-  { path: '/avatar/parameters/pcs/sps/ass', desc: 'PCS 指定部位' },
-  { path: '/avatar/parameters/pcs/sps/boobs', desc: 'PCS 指定部位' },
-  { path: '/avatar/parameters/pcs/sps/mouth', desc: 'PCS 指定部位' },
-  { path: '/avatar/parameters/pcs/smash-intensity', desc: 'PCS smash 强度' },
-  { path: '/avatar/parameters/lms-penis-proximityA*', desc: 'LMS 1.2' },
-  { path: '/avatar/parameters/lms/contact/proximity', desc: 'LMS 1.3' },
-]
-
-function toggleParam(list: string[], path: string) {
-  const idx = list.indexOf(path)
-  if (idx >= 0) list.splice(idx, 1)
-  else list.push(path)
+function getSelectedParams(): { a: string[]; b: string[] } {
+  const selected = SCENES.find(s => s.id === scene.value)
+  if (scene.value === 'custom') {
+    const lines = customParams.value.split('\n').map(l => l.trim()).filter(l => l.startsWith('/'))
+    return { a: lines, b: sameAB.value ? lines : lines }
+  }
+  if (scene.value === 'pcs_multi') {
+    return {
+      a: ['/avatar/parameters/pcs/sps/pussy', '/avatar/parameters/pcs/sps/boobs'],
+      b: ['/avatar/parameters/pcs/sps/ass', '/avatar/parameters/pcs/sps/mouth'],
+    }
+  }
+  const params = selected?.params || []
+  return { a: params, b: sameAB.value ? params : params }
 }
 
-function addCustomA() {
-  const v = customA.value.trim()
-  if (v && v.startsWith('/') && !paramsA.value.includes(v)) { paramsA.value.push(v) }
-  customA.value = ''
-}
-
-function addCustomB() {
-  const v = customB.value.trim()
-  if (v && v.startsWith('/') && !paramsB.value.includes(v)) { paramsB.value.push(v) }
-  customB.value = ''
+function canProceed(): boolean {
+  if (step.value === 0) return safetyConfirmed.value
+  if (step.value === 1) return !!scene.value
+  return true
 }
 
 async function waitForBackend() {
-  // 1. Wait for old server to die (will get connection refused)
-  let oldDied = false
   for (let i = 0; i < 20; i++) {
     await new Promise(r => setTimeout(r, 300))
-    try {
-      await fetch('/api/v1/status')
-    } catch {
-      oldDied = true
-      break
-    }
+    try { await fetch('/api/v1/status') } catch { break }
   }
-  if (!oldDied) {
-    // Old server didn't die, maybe restart didn't happen. Just redirect anyway.
-    return
-  }
-  // 2. Wait for new server to come up
   for (let i = 0; i < 30; i++) {
     await new Promise(r => setTimeout(r, 500))
     try {
@@ -85,19 +70,17 @@ async function waitForBackend() {
 
 async function save() {
   saving.value = true; errMsg.value = ''
+  const { a, b } = getSelectedParams()
   try {
     const data = await apiPost('/api/v1/setup', {
-      channel_a: { mode: modeA.value, strength_limit: strengthA.value, avatar_params: paramsA.value },
-      channel_b: { mode: modeB.value, strength_limit: strengthB.value, avatar_params: paramsB.value },
-      osc: { listen_port: oscPort.value, listen_host: oscHost.value },
+      channel_a: { mode: modeA.value, strength_limit: strengthA.value, avatar_params: a },
+      channel_b: { mode: sameAB.value ? modeA.value : modeB.value, strength_limit: sameAB.value ? strengthA.value : strengthB.value, avatar_params: b },
     })
     if (data.success) {
       done.value = true
-      // Backend will restart, wait for it to come back then redirect
       await waitForBackend()
       window.location.href = '/dashboard'
-    }
-    else errMsg.value = data.message || '保存失败'
+    } else { errMsg.value = data.message || '保存失败' }
   } catch (e: any) { errMsg.value = e.message }
   finally { saving.value = false }
 }
@@ -109,105 +92,108 @@ async function save() {
       <div class="wizard-header">
         <span class="wizard-logo">⚡</span>
         <h1 class="gradient-text">Shocking VRChat</h1>
-        <p class="wizard-sub">首次配置向导</p>
+        <p class="wizard-sub">首次配置向导 · 3步完成</p>
       </div>
 
       <!-- Progress -->
       <div class="progress">
-        <div class="progress-dot" v-for="i in totalSteps" :key="i" :class="{ active: step === i-1, done: step > i-1 }"></div>
+        <div class="progress-step" v-for="i in totalSteps" :key="i" :class="{ active: step === i-1, done: step > i-1 }">
+          <div class="progress-dot">{{ step > i-1 ? '✓' : i }}</div>
+          <span class="progress-label">{{ ['安全确认', '选择场景', '确认完成'][i-1] }}</span>
+        </div>
       </div>
 
-      <!-- Step 0: Mode -->
+      <!-- Step 0: Safety -->
       <div v-if="step === 0" class="step">
-        <h2>选择工作模式</h2>
-        <div class="mode-section">
-          <label>通道 A</label>
-          <div class="mode-grid">
-            <div v-for="m in MODES" :key="m.value" class="mode-option" :class="{selected: modeA === m.value}" @click="modeA = m.value">
-              <div class="mode-name">{{ m.label }}</div>
-              <div class="mode-desc">{{ m.desc }}</div>
-            </div>
-          </div>
+        <h2>⚠️ 安全须知确认</h2>
+        <div class="safety-box">
+          <p><strong>使用前请确认：</strong></p>
+          <ul>
+            <li>你没有心脏起搏器或体内电子/金属植入物</li>
+            <li>你没有癫痫、心脏病等心脑血管疾病</li>
+            <li>电极不会放在胸部、头部、颈部</li>
+            <li>同一部位连续使用不超过 30 分钟</li>
+            <li>你知道如何使用逃生通道（按设备肩键归零）</li>
+          </ul>
+          <p class="safety-link">完整安全须知请阅读: <a href="https://github.com/VRChatNext/Shocking-VRChat#%E5%AE%89%E5%85%A8%E9%A1%BB%E7%9F%A5" target="_blank">GitHub README</a></p>
         </div>
-        <div class="mode-section">
-          <label>通道 B</label>
-          <div class="mode-grid">
-            <div v-for="m in MODES" :key="m.value" class="mode-option" :class="{selected: modeB === m.value}" @click="modeB = m.value">
-              <div class="mode-name">{{ m.label }}</div>
-              <div class="mode-desc">{{ m.desc }}</div>
-            </div>
-          </div>
-        </div>
+        <label class="confirm-check" @click="safetyConfirmed = !safetyConfirmed">
+          <input type="checkbox" v-model="safetyConfirmed">
+          <span>我已阅读并理解安全须知，自愿承担使用风险</span>
+        </label>
       </div>
 
-      <!-- Step 1: Params -->
+      <!-- Step 1: Scene -->
       <div v-if="step === 1" class="step">
-        <h2>选择 OSC 参数</h2>
-        <div class="param-tabs">
-          <span class="param-tab-label">通道 A</span>
-        </div>
-        <div class="param-list">
-          <div v-for="p in COMMON_PARAMS" :key="p.path" class="param-item" :class="{checked: paramsA.includes(p.path)}" @click="toggleParam(paramsA, p.path)">
-            <span class="check">{{ paramsA.includes(p.path) ? '✓' : '' }}</span>
-            <span class="param-path">{{ p.path }}</span>
-            <span class="param-desc">{{ p.desc }}</span>
+        <h2>你的模型用什么触发？</h2>
+        <div class="scene-grid">
+          <div v-for="s in SCENES" :key="s.id" class="scene-card" :class="{selected: scene === s.id}" @click="scene = s.id">
+            <span class="scene-icon">{{ s.icon }}</span>
+            <div class="scene-text">
+              <div class="scene-name">{{ s.name }}</div>
+              <div class="scene-desc">{{ s.desc }}</div>
+            </div>
           </div>
-        </div>
-        <div class="custom-add">
-          <input v-model="customA" placeholder="/avatar/parameters/..." @keyup.enter="addCustomA()">
-          <button class="btn btn-ghost" @click="addCustomA()">添加</button>
         </div>
 
-        <div class="param-tabs" style="margin-top:var(--sp-5)">
-          <span class="param-tab-label">通道 B</span>
+        <div v-if="scene === 'custom'" class="custom-section">
+          <label>输入 OSC 参数路径（每行一个）</label>
+          <textarea v-model="customParams" rows="3" placeholder="/avatar/parameters/..."></textarea>
         </div>
-        <div class="param-list">
-          <div v-for="p in COMMON_PARAMS" :key="p.path" class="param-item" :class="{checked: paramsB.includes(p.path)}" @click="toggleParam(paramsB, p.path)">
-            <span class="check">{{ paramsB.includes(p.path) ? '✓' : '' }}</span>
-            <span class="param-path">{{ p.path }}</span>
-            <span class="param-desc">{{ p.desc }}</span>
+
+        <div class="mode-section" v-if="scene">
+          <h3>工作模式</h3>
+          <div class="mode-row">
+            <div v-for="m in MODES" :key="m.value" class="mode-chip" :class="{selected: modeA === m.value}" @click="modeA = m.value">
+              {{ m.label }}
+              <span class="mode-chip-desc">{{ m.desc }}</span>
+            </div>
           </div>
-        </div>
-        <div class="custom-add">
-          <input v-model="customB" placeholder="/avatar/parameters/..." @keyup.enter="addCustomB()">
-          <button class="btn btn-ghost" @click="addCustomB()">添加</button>
+          <label class="same-check" v-if="scene !== 'pcs_multi'">
+            <input type="checkbox" v-model="sameAB">
+            <span>A/B 通道使用相同配置</span>
+          </label>
+          <div v-if="!sameAB && scene !== 'pcs_multi'" class="mode-row" style="margin-top:var(--sp-3)">
+            <span class="ch-label">通道 B:</span>
+            <div v-for="m in MODES" :key="m.value" class="mode-chip sm" :class="{selected: modeB === m.value}" @click="modeB = m.value">
+              {{ m.label }}
+            </div>
+          </div>
         </div>
       </div>
 
-      <!-- Step 2: Strength -->
+      <!-- Step 2: Strength + Confirm -->
       <div v-if="step === 2" class="step">
-        <h2>强度限制</h2>
-        <div class="field">
-          <label>通道 A 上限: <strong>{{ strengthA }}</strong></label>
-          <input type="range" v-model.number="strengthA" min="0" max="200">
-          <p class="hint">取该值与 APP 内设置的较小值</p>
+        <h2>初始强度</h2>
+        <div class="strength-section">
+          <div class="field">
+            <label>{{ sameAB ? '强度上限' : '通道 A 强度' }}: <strong class="accent">{{ strengthA }}</strong> / 200</label>
+            <input type="range" v-model.number="strengthA" min="0" max="200" step="1">
+            <p class="hint">建议从低值开始（20~40），后续可在「强度设置」随时调整。</p>
+          </div>
+          <div class="field" v-if="!sameAB">
+            <label>通道 B 强度: <strong class="accent">{{ strengthB }}</strong> / 200</label>
+            <input type="range" v-model.number="strengthB" min="0" max="200" step="1">
+          </div>
         </div>
-        <div class="field">
-          <label>通道 B 上限: <strong>{{ strengthB }}</strong></label>
-          <input type="range" v-model.number="strengthB" min="0" max="200">
-        </div>
-      </div>
 
-      <!-- Step 3: OSC -->
-      <div v-if="step === 3" class="step">
-        <h2>OSC 端口</h2>
-        <div class="field">
-          <label>监听端口</label>
-          <input type="number" v-model.number="oscPort" min="1024" max="65535">
-          <p class="hint">VRChat 默认 9001。有面捕冲突时修改，并配合 osc-repeater。</p>
+        <div class="summary-card">
+          <h3>配置摘要</h3>
+          <div class="summary-row"><span>场景:</span><span>{{ SCENES.find(s => s.id === scene)?.name || '自定义' }}</span></div>
+          <div class="summary-row"><span>模式:</span><span>{{ MODES.find(m => m.value === modeA)?.label }}{{ !sameAB ? ' / ' + MODES.find(m => m.value === modeB)?.label : '' }}</span></div>
+          <div class="summary-row"><span>强度:</span><span>{{ strengthA }}{{ !sameAB ? ' / ' + strengthB : '' }}</span></div>
         </div>
-        <div class="field">
-          <label>监听地址</label>
-          <input type="text" v-model="oscHost">
-          <p class="hint">同一台电脑保持 127.0.0.1，VRChat 在其他设备改为 0.0.0.0</p>
-        </div>
+
+        <p class="final-hint">保存后程序将重启并跳转到 Dashboard。<br>之后可在 Web 界面的各页面中随时修改所有设置。</p>
       </div>
 
       <!-- Nav -->
       <div class="wizard-nav">
         <button class="btn btn-ghost" v-if="step > 0" @click="step--">← 上一步</button>
         <div class="spacer"></div>
-        <button class="btn btn-primary" v-if="step < totalSteps - 1" @click="step++">下一步 →</button>
+        <button class="btn btn-primary" v-if="step < totalSteps - 1" :disabled="!canProceed()" @click="step++">
+          下一步 →
+        </button>
         <button class="btn btn-primary" v-if="step === totalSteps - 1" :disabled="saving" @click="save">
           {{ saving ? '保存中...' : '✓ 保存并启动' }}
         </button>
@@ -229,64 +215,79 @@ async function save() {
 <style scoped>
 .wizard-page { display: flex; align-items: center; justify-content: center; min-height: 80vh; }
 .wizard-card {
-  width: 100%; max-width: 580px;
+  width: 100%; max-width: 600px;
   background: var(--bg-card);
   backdrop-filter: var(--blur);
   border: 1px solid var(--border);
   border-radius: var(--radius-xl);
   padding: var(--sp-8);
 }
-.wizard-header { text-align: center; margin-bottom: var(--sp-5); }
+.wizard-header { text-align: center; margin-bottom: var(--sp-4); }
 .wizard-logo { font-size: 2em; filter: drop-shadow(0 0 10px rgba(139,92,246,0.5)); }
 .wizard-header h1 { font-size: var(--text-2xl); margin-top: var(--sp-2); }
 .wizard-sub { color: var(--text-muted); font-size: var(--text-sm); margin-top: var(--sp-1); }
 
-.progress { display: flex; justify-content: center; gap: var(--sp-2); margin-bottom: var(--sp-6); }
-.progress-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--border); transition: all var(--transition); }
-.progress-dot.active { background: var(--accent); box-shadow: 0 0 10px rgba(139,92,246,0.5); transform: scale(1.2); }
-.progress-dot.done { background: var(--success); }
+/* Progress */
+.progress { display: flex; justify-content: center; gap: var(--sp-5); margin-bottom: var(--sp-6); }
+.progress-step { display: flex; flex-direction: column; align-items: center; gap: var(--sp-1); }
+.progress-dot { width: 28px; height: 28px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: var(--text-xs); font-weight: 700; background: var(--bg-tertiary); color: var(--text-muted); border: 2px solid var(--border); transition: all var(--transition); }
+.progress-step.active .progress-dot { background: var(--accent); color: #fff; border-color: var(--accent); box-shadow: 0 0 12px rgba(139,92,246,0.4); }
+.progress-step.done .progress-dot { background: var(--success); color: #fff; border-color: var(--success); }
+.progress-label { font-size: 10px; color: var(--text-muted); }
+.progress-step.active .progress-label { color: var(--accent); }
 
-.step h2 { font-size: var(--text-xl); margin-bottom: var(--sp-4); }
+.step h2 { font-size: var(--text-lg); margin-bottom: var(--sp-4); }
 
-/* Mode selection */
-.mode-section { margin-bottom: var(--sp-4); }
-.mode-section > label { display: block; font-size: var(--text-sm); color: var(--text-secondary); margin-bottom: var(--sp-2); font-weight: 600; }
-.mode-grid { display: flex; flex-direction: column; gap: var(--sp-2); }
-.mode-option {
-  padding: var(--sp-3) var(--sp-4);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  cursor: pointer;
-  transition: all var(--transition);
-}
-.mode-option:hover { border-color: var(--border-hover); }
-.mode-option.selected { border-color: var(--accent); background: rgba(139,92,246,0.08); box-shadow: var(--glow-sm); }
-.mode-name { font-size: var(--text-sm); font-weight: 600; }
-.mode-desc { font-size: var(--text-xs); color: var(--text-muted); margin-top: 2px; }
+/* Safety */
+.safety-box { background: rgba(251,191,36,0.06); border: 1px solid rgba(251,191,36,0.25); border-radius: var(--radius-md); padding: var(--sp-4); margin-bottom: var(--sp-4); font-size: var(--text-sm); color: var(--text-secondary); line-height: 1.8; }
+.safety-box ul { padding-left: var(--sp-4); margin: var(--sp-2) 0; }
+.safety-box strong { color: var(--warning); }
+.safety-link { margin-top: var(--sp-2); font-size: var(--text-xs); color: var(--text-muted); }
+.safety-link a { color: var(--accent); }
+.confirm-check { display: flex; align-items: center; gap: var(--sp-2); cursor: pointer; font-size: var(--text-sm); color: var(--text-secondary); padding: var(--sp-3); border: 1px solid var(--border); border-radius: var(--radius-md); transition: all var(--transition); }
+.confirm-check:hover { border-color: var(--accent); }
+.confirm-check input { accent-color: var(--accent); }
 
-/* Params */
-.param-tab-label { font-size: var(--text-sm); font-weight: 600; color: var(--text-secondary); }
-.param-list { max-height: 200px; overflow-y: auto; border: 1px solid var(--border); border-radius: var(--radius-md); margin-top: var(--sp-2); }
-.param-item {
-  display: flex; align-items: center; gap: var(--sp-2);
-  padding: var(--sp-2) var(--sp-3);
-  cursor: pointer;
-  font-size: var(--text-xs);
-  transition: background var(--transition);
-}
-.param-item:hover { background: rgba(139,92,246,0.04); }
-.param-item.checked { background: rgba(139,92,246,0.08); }
-.check { width: 16px; color: var(--accent); font-weight: 700; }
-.param-path { font-family: var(--font-mono); color: var(--text-secondary); flex: 1; }
-.param-desc { color: var(--text-muted); }
-.custom-add { display: flex; gap: var(--sp-2); margin-top: var(--sp-2); }
-.custom-add input { flex: 1; font-family: var(--font-mono); font-size: var(--text-xs); }
+/* Scenes */
+.scene-grid { display: flex; flex-direction: column; gap: var(--sp-2); margin-bottom: var(--sp-4); }
+.scene-card { display: flex; align-items: center; gap: var(--sp-3); padding: var(--sp-3) var(--sp-4); border: 1px solid var(--border); border-radius: var(--radius-md); cursor: pointer; transition: all var(--transition); }
+.scene-card:hover { border-color: var(--border-hover); }
+.scene-card.selected { border-color: var(--accent); background: rgba(139,92,246,0.08); box-shadow: var(--glow-sm); }
+.scene-icon { font-size: 1.5em; flex-shrink: 0; }
+.scene-name { font-size: var(--text-sm); font-weight: 600; }
+.scene-desc { font-size: var(--text-xs); color: var(--text-muted); margin-top: 1px; }
 
-/* Fields */
-.field { margin-bottom: var(--sp-5); }
+.custom-section { margin-bottom: var(--sp-4); }
+.custom-section label { display: block; font-size: var(--text-sm); color: var(--text-muted); margin-bottom: var(--sp-2); }
+.custom-section textarea { width: 100%; font-family: var(--font-mono); font-size: var(--text-xs); resize: vertical; }
+
+/* Mode */
+.mode-section { margin-top: var(--sp-4); padding-top: var(--sp-4); border-top: 1px solid var(--border); }
+.mode-section h3 { font-size: var(--text-sm); color: var(--text-secondary); margin-bottom: var(--sp-2); }
+.mode-row { display: flex; gap: var(--sp-2); flex-wrap: wrap; align-items: center; }
+.mode-chip { padding: var(--sp-2) var(--sp-3); border: 1px solid var(--border); border-radius: var(--radius-md); cursor: pointer; font-size: var(--text-sm); font-weight: 500; transition: all var(--transition); position: relative; }
+.mode-chip:hover { border-color: var(--border-hover); }
+.mode-chip.selected { border-color: var(--accent); background: rgba(139,92,246,0.1); color: var(--accent); }
+.mode-chip-desc { display: none; }
+.mode-chip.selected .mode-chip-desc { display: block; font-size: var(--text-xs); font-weight: 400; color: var(--text-muted); margin-top: 2px; }
+.mode-chip.sm { font-size: var(--text-xs); padding: var(--sp-1) var(--sp-2); }
+.ch-label { font-size: var(--text-xs); color: var(--text-muted); }
+.same-check { display: flex; align-items: center; gap: var(--sp-2); margin-top: var(--sp-3); font-size: var(--text-xs); color: var(--text-muted); cursor: pointer; }
+.same-check input { accent-color: var(--accent); }
+
+/* Strength */
+.strength-section { margin-bottom: var(--sp-4); }
+.field { margin-bottom: var(--sp-4); }
 .field label { display: block; font-size: var(--text-sm); color: var(--text-secondary); margin-bottom: var(--sp-2); }
-.field input { width: 100%; }
-.hint { font-size: var(--text-xs); color: var(--text-muted); margin-top: var(--sp-2); }
+.field input[type="range"] { width: 100%; accent-color: var(--accent); }
+.hint { font-size: var(--text-xs); color: var(--text-muted); margin-top: var(--sp-1); }
+.accent { color: var(--accent); }
+
+.summary-card { background: var(--bg-tertiary); border-radius: var(--radius-md); padding: var(--sp-4); margin-bottom: var(--sp-3); }
+.summary-card h3 { font-size: var(--text-sm); margin-bottom: var(--sp-2); color: var(--text-secondary); }
+.summary-row { display: flex; justify-content: space-between; font-size: var(--text-sm); padding: var(--sp-1) 0; color: var(--text-secondary); }
+.summary-row span:last-child { color: var(--text); font-weight: 500; }
+.final-hint { font-size: var(--text-xs); color: var(--text-muted); text-align: center; line-height: 1.8; }
 
 /* Nav */
 .wizard-nav { display: flex; align-items: center; margin-top: var(--sp-6); }
