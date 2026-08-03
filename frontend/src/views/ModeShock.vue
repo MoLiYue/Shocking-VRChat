@@ -1,7 +1,10 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { api, apiPost } from '@/api'
+import { useI18n } from '@/i18n'
 import WavePreview from '@/components/WavePreview.vue'
+
+const { t } = useI18n()
 
 const ch = ref<'a' | 'b'>('a')
 const duration = ref(2)
@@ -34,7 +37,7 @@ async function save() {
     wave_scale: waveScale.value,
     trigger_range: { bottom: triggerBottom.value, top: triggerTop.value },
   })
-  msg.value = data.success ? '✓ 已保存' : '✗ 保存失败'
+  msg.value = data.success ? t('common.saved') : t('common.saveFailed')
   setTimeout(() => msg.value = '', 3000)
 }
 
@@ -44,57 +47,57 @@ onMounted(() => { loadPresets(); load() })
 
 <template>
   <div>
-    <h1 class="gradient-text" style="font-size:var(--text-2xl);margin-bottom:var(--sp-2)">⚡ 电击模式</h1>
-    <p class="page-desc">触发后电击固定时长。被持续触碰时电到触碰离开后延续该时长。</p>
+    <h1 class="gradient-text" style="font-size:var(--text-2xl);margin-bottom:var(--sp-2)">{{ t('modeShock.title') }}</h1>
+    <p class="page-desc">{{ t('modeShock.desc') }}</p>
 
     <div class="ch-tabs">
-      <button :class="{ active: ch === 'a' }" @click="switchCh('a')">通道 A</button>
-      <button :class="{ active: ch === 'b' }" @click="switchCh('b')">通道 B</button>
+      <button :class="{ active: ch === 'a' }" @click="switchCh('a')">{{ t('common.channelA') }}</button>
+      <button :class="{ active: ch === 'b' }" @click="switchCh('b')">{{ t('common.channelB') }}</button>
     </div>
 
     <div class="grid">
       <section class="card">
-        <h2>电击参数</h2>
+        <h2>{{ t('modeShock.params') }}</h2>
         <div class="field">
-          <label>电击时长: {{ duration.toFixed(1) }}s</label>
+          <label>{{ t('modeShock.duration') }}: {{ duration.toFixed(1) }}{{ t('modeShock.durationUnit') }}</label>
           <input type="range" v-model.number="duration" min="0.5" max="10" step="0.1">
-          <p class="hint">触发后持续输出的秒数。</p>
+          <p class="hint">{{ t('modeShock.durationHint') }}</p>
         </div>
         <div class="field">
-          <label>波形预设</label>
+          <label>{{ t('common.wavePreset') }}</label>
           <select v-model="wavePreset">
-            <option value="">默认电击波</option>
+            <option value="">{{ t('modeShock.presetDefault') }}</option>
             <option v-for="p in presets" :key="p" :value="p">{{ p }}</option>
           </select>
         </div>
         <div class="field">
-          <label>波形强度: {{ (waveScale * 100).toFixed(0) }}%</label>
+          <label>{{ t('common.waveScale') }}: {{ (waveScale * 100).toFixed(0) }}%</label>
           <input type="range" v-model.number="waveScale" min="0" max="1" step="0.05">
-          <p class="hint">波形纹理的强度系数，不影响通道设定强度。</p>
+          <p class="hint">{{ t('modeShock.scaleHint') }}</p>
         </div>
         <div class="field" v-if="wavePreset">
-          <label>波形预览</label>
+          <label>{{ t('modeShock.preview') }}</label>
           <WavePreview
             :preset-name="wavePreset"
             :wave-scale="waveScale"
             :display-duration="duration"
             :height="100"
           />
-          <p class="hint">显示电击期间的波形纹理。宽度 = 电击时长。</p>
+          <p class="hint">{{ t('modeShock.previewHint') }}</p>
         </div>
       </section>
 
       <section class="card">
-        <h2>触发阈值</h2>
+        <h2>{{ t('common.triggerRange') }}</h2>
         <div class="field">
-          <label>下界 (bottom): {{ triggerBottom.toFixed(2) }}</label>
+          <label>{{ t('common.triggerBottom') }}: {{ triggerBottom.toFixed(2) }}</label>
           <input type="range" v-model.number="triggerBottom" min="0" max="0.9" step="0.01">
-          <p class="hint">OSC 值超过此值时触发电击。</p>
+          <p class="hint">{{ t('modeShock.bottomHint') }}</p>
         </div>
         <div class="field">
-          <label>上界 (top): {{ triggerTop.toFixed(2) }}</label>
+          <label>{{ t('common.triggerTop') }}: {{ triggerTop.toFixed(2) }}</label>
           <input type="range" v-model.number="triggerTop" min="0.1" max="1" step="0.01">
-          <p class="hint">Shock 模式下此值被忽略。</p>
+          <p class="hint">{{ t('modeShock.topHint') }}</p>
         </div>
         <div class="visual">
           <div class="bar">
@@ -107,8 +110,8 @@ onMounted(() => { loadPresets(); load() })
     </div>
 
     <div class="save-bar">
-      <button class="btn btn-primary" @click="save">💾 保存</button>
-      <button class="btn btn-ghost" @click="load">↺ 重载</button>
+      <button class="btn btn-primary" @click="save">💾 {{ t('common.save') }}</button>
+      <button class="btn btn-ghost" @click="load">↺ {{ t('common.reload') }}</button>
       <span class="msg">{{ msg }}</span>
     </div>
   </div>

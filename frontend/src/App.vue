@@ -1,6 +1,8 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, computed } from 'vue'
+import { useI18n } from '@/i18n'
 
+const { t, locale, setLocale } = useI18n()
 const sidebarOpen = ref(true)
 
 interface NavItem {
@@ -10,26 +12,30 @@ interface NavItem {
   children?: NavItem[]
 }
 
-const navItems: NavItem[] = [
-  { path: '/dashboard', label: 'Dashboard', icon: '⚡' },
-  { path: '/params', label: '参数管理', icon: '🎛' },
-  { path: '/strength', label: '强度上限', icon: '🔋' },
-  { path: '/overlimit-rules', label: '超限规则', icon: '⚡' },
+const navItems = computed<NavItem[]>(() => [
+  { path: '/dashboard', label: t('nav.dashboard'), icon: '⚡' },
+  { path: '/params', label: t('nav.params'), icon: '🎛' },
+  { path: '/strength', label: t('nav.strength'), icon: '🔋' },
+  { path: '/overlimit-rules', label: t('nav.overlimit'), icon: '⚡' },
   {
-    label: '模式', icon: '🎮',
+    label: t('nav.modes'), icon: '🎮',
     children: [
-      { path: '/mode/shock', label: '电击', icon: '💥' },
-      { path: '/mode/distance', label: '距离', icon: '📏' },
-      { path: '/mode/touch', label: '触摸', icon: '🤚' },
-      { path: '/mode/combo', label: 'Combo', icon: '🔀' },
+      { path: '/mode/shock', label: t('nav.modeShock'), icon: '💥' },
+      { path: '/mode/distance', label: t('nav.modeDistance'), icon: '📏' },
+      { path: '/mode/touch', label: t('nav.modeTouch'), icon: '🤚' },
+      { path: '/mode/combo', label: t('nav.modeCombo'), icon: '🔀' },
     ],
   },
-  { path: '/wave-test', label: '波形测试', icon: '🧪' },
-  { path: '/recorder', label: '录制回放', icon: '🎙' },
-  { path: '/settings', label: '设置', icon: '⚙' },
-]
+  { path: '/wave-test', label: t('nav.waveTest'), icon: '🧪' },
+  { path: '/recorder', label: t('nav.recorder'), icon: '🎙' },
+  { path: '/settings', label: t('nav.settings'), icon: '⚙' },
+])
 
-const expandedGroups = ref<Set<string>>(new Set(['模式']))
+const expandedGroups = ref<Set<string>>(new Set())
+
+// Auto-expand modes group
+expandedGroups.value.add('模式')
+expandedGroups.value.add('Modes')
 
 function toggleGroup(label: string) {
   if (expandedGroups.value.has(label)) {
@@ -85,6 +91,10 @@ function toggleGroup(label: string) {
           </router-link>
         </template>
       </nav>
+      <div class="lang-switcher">
+        <button class="lang-btn" :class="{ active: locale === 'zh' }" @click="setLocale('zh')">中</button>
+        <button class="lang-btn" :class="{ active: locale === 'en' }" @click="setLocale('en')">EN</button>
+      </div>
       <button class="toggle-btn" @click="sidebarOpen = !sidebarOpen">
         {{ sidebarOpen ? '‹' : '›' }}
       </button>
@@ -199,6 +209,11 @@ function toggleGroup(label: string) {
   transition: all var(--transition);
 }
 .toggle-btn:hover { color: var(--text); border-color: var(--border-hover); }
+
+.lang-switcher { display: flex; gap: 4px; padding: var(--sp-2) var(--sp-3); justify-content: center; }
+.lang-btn { padding: 2px 8px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: transparent; color: var(--text-muted); cursor: pointer; font-size: 11px; font-weight: 600; transition: all var(--transition); }
+.lang-btn.active { border-color: var(--accent); color: var(--accent); background: rgba(139,92,246,0.1); }
+.lang-btn:hover { border-color: var(--border-hover); color: var(--text); }
 
 /* Main content */
 .main {

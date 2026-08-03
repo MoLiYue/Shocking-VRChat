@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { api, apiPost } from '@/api'
+import { useI18n } from '@/i18n'
 import WavePreview from '@/components/WavePreview.vue'
 
+const { t } = useI18n()
 const ch = ref<'a' | 'b'>('a')
 const wavePreset = ref('')
 const waveScale = ref(1.0)
@@ -49,7 +51,7 @@ async function save() {
     wave_envelope_curve: envelopeCurve.value,
     trigger_range: { bottom: triggerBottom.value, top: triggerTop.value },
   })
-  msg.value = data.success ? '✓ 已保存' : '✗ 保存失败'
+  msg.value = data.success ? t('common.saved') : t('common.saveFailed')
   setTimeout(() => msg.value = '', 3000)
 }
 
@@ -59,12 +61,12 @@ onMounted(() => { loadPresets(); load() })
 
 <template>
   <div>
-    <h1 class="gradient-text" style="font-size:var(--text-2xl);margin-bottom:var(--sp-2)">🤚 触摸模式</h1>
-    <p class="page-desc">根据触摸动作的变化率控制波形强度。适合持续抚摸场景。</p>
+    <h1 class="gradient-text" style="font-size:var(--text-2xl);margin-bottom:var(--sp-2)">{{ t('modeTouch.title') }}</h1>
+    <p class="page-desc">{{ t('modeTouch.desc') }}</p>
 
     <div class="ch-tabs">
-      <button :class="{ active: ch === 'a' }" @click="switchCh('a')">通道 A</button>
-      <button :class="{ active: ch === 'b' }" @click="switchCh('b')">通道 B</button>
+      <button :class="{ active: ch === 'a' }" @click="switchCh('a')">{{ t('common.channelA') }}</button>
+      <button :class="{ active: ch === 'b' }" @click="switchCh('b')">{{ t('common.channelB') }}</button>
     </div>
 
     <div class="grid">
