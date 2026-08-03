@@ -1,6 +1,9 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { api, apiPost } from '@/api'
+import { useI18n } from '@/i18n'
+
+const { t } = useI18n()
 
 interface Rule {
   name: string
@@ -78,8 +81,8 @@ onMounted(load)
 
 <template>
   <div>
-    <h1 class="gradient-text" style="font-size:var(--text-2xl);margin-bottom:var(--sp-2)">超限规则</h1>
-    <p class="page-desc">定义多层级超限规则。当 OSC 参数满足条件时，对应通道的强度上限临时提升到规则设定的值。多条规则同时满足时取最大值。</p>
+    <h1 class="gradient-text" style="font-size:var(--text-2xl);margin-bottom:var(--sp-2)">{{ t('overlimit.title') }}</h1>
+    <p class="page-desc">{{ t('overlimit.desc') }}</p>
 
     <div class="status-bar">
       <span class="status-label">当前生效超限:</span>

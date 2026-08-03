@@ -1,7 +1,10 @@
 <script setup lang="ts">
 import { ref, onMounted, watch, nextTick } from 'vue'
 import { api, apiPost, apiDelete } from '@/api'
+import { useI18n } from '@/i18n'
 import WavePreview from '@/components/WavePreview.vue'
+
+const { t } = useI18n()
 
 // --- Distance config state ---
 const ch = ref<'a' | 'b'>('a')
@@ -69,7 +72,7 @@ async function saveDistance() {
     wave_envelope_curve: envelopeCurve.value,
     trigger_range: { bottom: triggerBottom.value, top: triggerTop.value },
   })
-  distMsg.value = data.success ? '✓ 已保存' : '✗ 保存失败'
+  distMsg.value = data.success ? t('common.saved') : t('common.saveFailed')
   setTimeout(() => distMsg.value = '', 3000)
 }
 
@@ -105,8 +108,8 @@ async function loadCurveList() {
 function hasCurve(key: string): boolean { return key in configuredCurves.value }
 
 function paramLabel(key: string): string {
-  if (key === 'channel_a') return '通道 A 默认'
-  if (key === 'channel_b') return '通道 B 默认'
+  if (key === 'channel_a') return t('common.channelA') + ' ' + t('common.default')
+  if (key === 'channel_b') return t('common.channelB') + ' ' + t('common.default')
   return key.replace('/avatar/parameters/', '')
 }
 
@@ -123,7 +126,7 @@ async function loadCurve() {
 async function saveCurve() {
   if (!activeParam.value) return
   const data = await apiPost(`/api/v1/curve/${encodeURIComponent(activeParam.value)}`, { points: points.value })
-  curveMsg.value = data.success ? '✓ 已保存' : '保存失败'
+  curveMsg.value = data.success ? t('common.saved') : t('common.saveFailed')
   await loadCurveList()
   setTimeout(() => curveMsg.value = '', 3000)
 }
@@ -131,7 +134,7 @@ async function saveCurve() {
 async function deleteCurve() {
   if (!activeParam.value) return
   await apiDelete(`/api/v1/curve/${encodeURIComponent(activeParam.value)}`)
-  curveMsg.value = '已恢复为默认曲线'
+  curveMsg.value = t('modeDistance.curveResetDone')
   await loadCurveList()
   loadCurve()
   setTimeout(() => curveMsg.value = '', 3000)
@@ -287,42 +290,42 @@ onMounted(() => {
 
 <template>
   <div>
-    <h1 class="gradient-text" style="font-size:var(--text-2xl);margin-bottom:var(--sp-2)">📏 距离模式</h1>
-    <p class="page-desc">根据与触发区域中心的距离线性控制波形强度。越接近中心越强。强度曲线可自定义映射关系。</p>
+    <h1 class="gradient-text" style="font-size:var(--text-2xl);margin-bottom:var(--sp-2)">{{ t('modeDistance.title') }}</h1>
+    <p class="page-desc">{{ t('modeDistance.desc') }}</p>
 
     <div class="ch-tabs">
-      <button :class="{ active: ch === 'a' }" @click="switchCh('a')">通道 A</button>
-      <button :class="{ active: ch === 'b' }" @click="switchCh('b')">通道 B</button>
+      <button :class="{ active: ch === 'a' }" @click="switchCh('a')">{{ t('common.channelA') }}</button>
+      <button :class="{ active: ch === 'b' }" @click="switchCh('b')">{{ t('common.channelB') }}</button>
     </div>
 
     <!-- Distance Config -->
     <div class="grid">
       <section class="card">
-        <h2>波形参数</h2>
+        <h2>{{ t('modeDistance.waveParams') }}</h2>
         <div class="field">
-          <label>波形预设</label>
+          <label>{{ t('common.wavePreset') }}</label>
           <select v-model="wavePreset">
-            <option value="">默认（实时生成）</option>
+            <option value="">{{ t('modeDistance.presetNone') }}</option>
             <option v-for="p in presets" :key="p" :value="p">{{ p }}</option>
           </select>
-          <p class="hint">选择预设波形纹理。不选则按频率实时生成。</p>
+          <p class="hint">{{ t('modeDistance.presetHint') }}</p>
         </div>
         <div class="field">
-          <label>波形强度: {{ (waveScale * 100).toFixed(0) }}%</label>
+          <label>{{ t('common.waveScale') }}: {{ (waveScale * 100).toFixed(0) }}%</label>
           <input type="range" v-model.number="waveScale" min="0" max="1" step="0.05">
         </div>
         <div class="field">
-          <label>纹理底噪: {{ (textureFloor * 100).toFixed(0) }}%</label>
+          <label>{{ t('common.textureFloor') }}: {{ (textureFloor * 100).toFixed(0) }}%</label>
           <input type="range" v-model.number="textureFloor" min="0" max="0.5" step="0.01">
-          <p class="hint">波形低谷的最小强度，0 表示允许完全静默。</p>
+          <p class="hint">{{ t('modeDistance.floorHint') }}</p>
         </div>
         <div class="field">
-          <label>实时频率间隔: {{ freqMs }}ms</label>
+          <label>{{ t('modeDistance.freqMs') }}: {{ freqMs }}ms</label>
           <input type="range" v-model.number="freqMs" min="10" max="240" step="5">
-          <p class="hint">无预设时使用的固定脉冲间隔。</p>
+          <p class="hint">{{ t('modeDistance.freqMsHint') }}</p>
         </div>
         <div class="field" v-if="wavePreset">
-          <label>波形预览</label>
+          <label>{{ t('modeShock.preview') }}</label>
           <WavePreview
             :preset-name="wavePreset"
             :wave-scale="waveScale"
@@ -333,16 +336,16 @@ onMounted(() => {
       </section>
 
       <section class="card">
-        <h2>触发阈值</h2>
+        <h2>{{ t('common.triggerRange') }}</h2>
         <div class="field">
-          <label>下界 (bottom): {{ triggerBottom.toFixed(2) }}</label>
+          <label>{{ t('common.triggerBottom') }}: {{ triggerBottom.toFixed(2) }}</label>
           <input type="range" v-model.number="triggerBottom" min="0" max="0.9" step="0.01">
-          <p class="hint">OSC 值低于此值视为 0%（不输出）。</p>
+          <p class="hint">{{ t('modeDistance.bottomHint') }}</p>
         </div>
         <div class="field">
-          <label>上界 (top): {{ triggerTop.toFixed(2) }}</label>
+          <label>{{ t('common.triggerTop') }}: {{ triggerTop.toFixed(2) }}</label>
           <input type="range" v-model.number="triggerTop" min="0.1" max="1" step="0.01">
-          <p class="hint">OSC 值达到此值视为 100%（最大强度）。</p>
+          <p class="hint">{{ t('modeDistance.topHint') }}</p>
         </div>
         <div class="visual">
           <div class="bar">
@@ -354,24 +357,24 @@ onMounted(() => {
 
         <div style="margin-top:var(--sp-4)">
           <button class="btn btn-sm" @click="showAdvanced = !showAdvanced">
-            {{ showAdvanced ? '▾ 收起高级' : '▸ 高级参数' }}
+            {{ showAdvanced ? '▾' : '▸' }} {{ t('common.advanced') }}
           </button>
         </div>
         <template v-if="showAdvanced">
           <div class="field" style="margin-top:var(--sp-3)">
-            <label>窗口大小: {{ windowOps }} ops</label>
+            <label>{{ t('modeDistance.windowSize') }}: {{ windowOps }} ops</label>
             <input type="range" v-model.number="windowOps" min="1" max="16" step="1">
           </div>
           <div class="field">
-            <label>采样步进: {{ sampleStep.toFixed(2) }}</label>
+            <label>{{ t('modeDistance.sampleStep') }}: {{ sampleStep.toFixed(2) }}</label>
             <input type="range" v-model.number="sampleStep" min="0.25" max="4" step="0.25">
           </div>
           <div class="field">
-            <label>窗口推进: {{ advanceSamples.toFixed(1) }}</label>
+            <label>{{ t('modeDistance.windowAdvance') }}: {{ advanceSamples.toFixed(1) }}</label>
             <input type="range" v-model.number="advanceSamples" min="1" max="16" step="0.5">
           </div>
           <div class="field">
-            <label>包络曲线</label>
+            <label>{{ t('modeDistance.envelope') }}</label>
             <select v-model="envelopeCurve">
               <option value="smoothstep">smoothstep</option>
               <option value="linear">linear</option>
@@ -384,25 +387,25 @@ onMounted(() => {
     </div>
 
     <div class="save-bar">
-      <button class="btn btn-primary" @click="saveDistance">💾 保存距离配置</button>
-      <button class="btn btn-ghost" @click="loadDistance">↺ 重载</button>
+      <button class="btn btn-primary" @click="saveDistance">{{ t('modeDistance.saveDistance') }}</button>
+      <button class="btn btn-ghost" @click="loadDistance">{{ t('common.reload') }}</button>
       <span class="msg">{{ distMsg }}</span>
     </div>
 
     <!-- Curve Editor Section -->
     <div class="section-divider"></div>
-    <h2 class="gradient-text" style="font-size:var(--text-xl);margin-bottom:var(--sp-2)">📈 强度曲线</h2>
-    <p class="page-desc">自定义 OSC 参数值到输出强度的映射关系 · 点击添加 · 拖拽移动 · 右键删除</p>
+    <h2 class="gradient-text" style="font-size:var(--text-xl);margin-bottom:var(--sp-2)">{{ t('modeDistance.curveTitle') }}</h2>
+    <p class="page-desc">{{ t('modeDistance.curveDesc') }}</p>
 
     <div class="param-selector">
-      <label>参数:</label>
+      <label>{{ t('modeDistance.curveParam') }}:</label>
       <select v-model="activeParam" @change="loadCurve()">
         <option v-for="p in paramList" :key="p" :value="p">
           {{ paramLabel(p) }}{{ hasCurve(p) ? ' ●' : '' }}
         </option>
       </select>
       <span class="curve-status" v-if="activeParam">
-        {{ hasCurve(activeParam) ? '自定义' : '默认' }}
+        {{ hasCurve(activeParam) ? t('modeDistance.curveCustom') : t('modeDistance.curveDefault') }}
       </span>
     </div>
 
@@ -421,13 +424,13 @@ onMounted(() => {
 
       <div class="side-panel">
         <div class="card">
-          <h3>预设</h3>
+          <h3>{{ t('modeDistance.curvePresets') }}</h3>
           <div class="preset-grid">
             <button v-for="(_, name) in PRESETS" :key="name" class="preset-btn" @click="applyPreset(name)">{{ name }}</button>
           </div>
         </div>
         <div class="card">
-          <h3>控制点 ({{ points.length }})</h3>
+          <h3>{{ t('modeDistance.curvePoints') }} ({{ points.length }})</h3>
           <div class="point-list">
             <div v-for="(p, i) in points" :key="i" class="pt-row">
               <span class="pt-idx">{{ i }}</span>
@@ -437,9 +440,9 @@ onMounted(() => {
           </div>
         </div>
         <div class="actions">
-          <button class="btn btn-primary" @click="saveCurve">保存曲线</button>
-          <button class="btn btn-ghost" @click="loadCurve">重载</button>
-          <button class="btn btn-danger" @click="deleteCurve">恢复默认</button>
+          <button class="btn btn-primary" @click="saveCurve">{{ t('modeDistance.curveSave') }}</button>
+          <button class="btn btn-ghost" @click="loadCurve">{{ t('common.reload') }}</button>
+          <button class="btn btn-danger" @click="deleteCurve">{{ t('modeDistance.curveReset') }}</button>
         </div>
         <div v-if="curveMsg" class="msg-text">{{ curveMsg }}</div>
       </div>

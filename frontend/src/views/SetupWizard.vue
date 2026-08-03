@@ -1,6 +1,9 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { apiPost } from '@/api'
+import { useI18n } from '@/i18n'
+
+const { t } = useI18n()
 
 const step = ref(0)
 const totalSteps = 2
@@ -18,17 +21,17 @@ const strengthB = ref(20)
 const customParams = ref('')
 
 const SCENES = [
-  { id: 'pcs', name: 'PCS (Poiyomi Contact System)', desc: '最常用，触碰模型身体触发', icon: '🤚', params: ['/avatar/parameters/pcs/contact/enterPass'] },
-  { id: 'pcs_multi', name: 'PCS 多部位', desc: '不同身体部位分别触发 A/B 通道', icon: '👐', params: ['/avatar/parameters/pcs/sps/pussy', '/avatar/parameters/pcs/sps/ass'] },
-  { id: 'lms', name: 'LMS (Lewd Motion System)', desc: '通过 LMS 系统触发', icon: '💋', params: ['/avatar/parameters/lms-penis-proximityA*'] },
-  { id: 'custom', name: '自定义参数', desc: '手动输入 OSC 参数路径', icon: '⌨️', params: [] },
+  { id: 'pcs', tKey: 'PCS', icon: '🤚', params: ['/avatar/parameters/pcs/contact/enterPass'] },
+  { id: 'pcs_multi', tKey: 'PCSMulti', icon: '👐', params: ['/avatar/parameters/pcs/sps/pussy', '/avatar/parameters/pcs/sps/ass'] },
+  { id: 'lms', tKey: 'LMS', icon: '💋', params: ['/avatar/parameters/lms-penis-proximityA*'] },
+  { id: 'custom', tKey: 'Custom', icon: '⌨️', params: [] },
 ]
 
 const MODES = [
-  { value: 'distance', label: '距离', desc: '越近越强，适合被摸' },
-  { value: 'shock', label: '电击', desc: '触碰就来一下，刺激' },
-  { value: 'touch', label: '触摸', desc: '根据摸的速度来，适合抚摸' },
-  { value: 'combo', label: '组合', desc: '短碰=电击，持续=温柔' },
+  { value: 'distance', tKey: 'Distance' },
+  { value: 'shock', tKey: 'Shock' },
+  { value: 'touch', tKey: 'Touch' },
+  { value: 'combo', tKey: 'Combo' },
 ]
 
 function getSelectedParams(): { a: string[]; b: string[] } {
@@ -90,51 +93,51 @@ async function save() {
       <div class="wizard-header">
         <span class="wizard-logo">⚡</span>
         <h1 class="gradient-text">Shocking VRChat</h1>
-        <p class="wizard-sub">首次配置向导 · 2步完成</p>
+        <p class="wizard-sub">{{ t('setup.title') }} · {{ t('setup.subtitle') }}</p>
       </div>
 
       <!-- Progress -->
       <div class="progress">
         <div class="progress-step" v-for="i in totalSteps" :key="i" :class="{ active: step === i-1, done: step > i-1 }">
           <div class="progress-dot">{{ step > i-1 ? '✓' : i }}</div>
-          <span class="progress-label">{{ ['选择场景', '确认完成'][i-1] }}</span>
+          <span class="progress-label">{{ [t('setup.stepScene'), t('setup.stepConfirm')][i-1] }}</span>
         </div>
       </div>
 
       <!-- Step 0: Scene -->
       <div v-if="step === 0" class="step">
-        <h2>你的模型用什么触发？</h2>
+        <h2>{{ t('setup.sceneTitle') }}</h2>
         <div class="scene-grid">
           <div v-for="s in SCENES" :key="s.id" class="scene-card" :class="{selected: scene === s.id}" @click="scene = s.id">
             <span class="scene-icon">{{ s.icon }}</span>
             <div class="scene-text">
-              <div class="scene-name">{{ s.name }}</div>
-              <div class="scene-desc">{{ s.desc }}</div>
+              <div class="scene-name">{{ t('setup.scene' + s.tKey) }}</div>
+              <div class="scene-desc">{{ t('setup.scene' + s.tKey + 'Desc') }}</div>
             </div>
           </div>
         </div>
 
         <div v-if="scene === 'custom'" class="custom-section">
-          <label>输入 OSC 参数路径（每行一个）</label>
+          <label>{{ t('setup.customLabel') }}</label>
           <textarea v-model="customParams" rows="3" placeholder="/avatar/parameters/..."></textarea>
         </div>
 
         <div class="mode-section" v-if="scene">
-          <h3>工作模式</h3>
+          <h3>{{ t('setup.modeTitle') }}</h3>
           <div class="mode-row">
             <div v-for="m in MODES" :key="m.value" class="mode-chip" :class="{selected: modeA === m.value}" @click="modeA = m.value">
-              {{ m.label }}
-              <span class="mode-chip-desc">{{ m.desc }}</span>
+              {{ t('setup.mode' + m.tKey) }}
+              <span class="mode-chip-desc">{{ t('setup.mode' + m.tKey + 'Desc') }}</span>
             </div>
           </div>
           <label class="same-check" v-if="scene !== 'pcs_multi'">
             <input type="checkbox" v-model="sameAB">
-            <span>A/B 通道使用相同配置</span>
+            <span>{{ t('setup.sameAB') }}</span>
           </label>
           <div v-if="!sameAB && scene !== 'pcs_multi'" class="mode-row" style="margin-top:var(--sp-3)">
-            <span class="ch-label">通道 B:</span>
+            <span class="ch-label">{{ t('common.channelB') }}:</span>
             <div v-for="m in MODES" :key="m.value" class="mode-chip sm" :class="{selected: modeB === m.value}" @click="modeB = m.value">
-              {{ m.label }}
+              {{ t('setup.mode' + m.tKey) }}
             </div>
           </div>
         </div>
@@ -142,12 +145,12 @@ async function save() {
 
       <!-- Step 1: Strength + Confirm -->
       <div v-if="step === 1" class="step">
-        <h2>初始强度</h2>
+        <h2>{{ t('setup.strengthTitle') }}</h2>
         <div class="strength-section">
           <div class="field">
             <label>{{ sameAB ? '强度上限' : '通道 A 强度' }}: <strong class="accent">{{ strengthA }}</strong> / 200</label>
             <input type="range" v-model.number="strengthA" min="0" max="200" step="1">
-            <p class="hint">建议从低值开始（20~40），后续可在「强度设置」随时调整。</p>
+            <p class="hint">{{ t('setup.strengthHint') }}</p>
           </div>
           <div class="field" v-if="!sameAB">
             <label>通道 B 强度: <strong class="accent">{{ strengthB }}</strong> / 200</label>
@@ -156,13 +159,13 @@ async function save() {
         </div>
 
         <div class="summary-card">
-          <h3>配置摘要</h3>
-          <div class="summary-row"><span>场景:</span><span>{{ SCENES.find(s => s.id === scene)?.name || '自定义' }}</span></div>
-          <div class="summary-row"><span>模式:</span><span>{{ MODES.find(m => m.value === modeA)?.label }}{{ !sameAB ? ' / ' + MODES.find(m => m.value === modeB)?.label : '' }}</span></div>
-          <div class="summary-row"><span>强度:</span><span>{{ strengthA }}{{ !sameAB ? ' / ' + strengthB : '' }}</span></div>
+          <h3>{{ t('setup.summary') }}</h3>
+          <div class="summary-row"><span>{{ t('setup.summaryScene') }}:</span><span>{{ SCENES.find(s => s.id === scene)?.tKey ? t('setup.scene' + SCENES.find(s => s.id === scene)!.tKey) : t('setup.sceneCustom') }}</span></div>
+          <div class="summary-row"><span>{{ t('setup.summaryMode') }}:</span><span>{{ t('setup.mode' + (MODES.find(m => m.value === modeA)?.tKey || 'Distance')) }}{{ !sameAB ? ' / ' + t('setup.mode' + (MODES.find(m => m.value === modeB)?.tKey || 'Distance')) : '' }}</span></div>
+          <div class="summary-row"><span>{{ t('setup.summaryStrength') }}:</span><span>{{ strengthA }}{{ !sameAB ? ' / ' + strengthB : '' }}</span></div>
         </div>
 
-        <p class="final-hint">保存后程序将重启并跳转到 Dashboard。<br>之后可在 Web 界面的各页面中随时修改所有设置。</p>
+        <p class="final-hint">{{ t('setup.finalHint') }}</p>
       </div>
 
       <!-- Nav -->
@@ -173,7 +176,7 @@ async function save() {
           下一步 →
         </button>
         <button class="btn btn-primary" v-if="step === totalSteps - 1" :disabled="saving" @click="save">
-          {{ saving ? '保存中...' : '✓ 保存并启动' }}
+          {{ saving ? t('setup.saving') : '✓ ' + t('setup.saveAndStart') }}
         </button>
       </div>
       <div v-if="errMsg" class="err">{{ errMsg }}</div>
@@ -184,8 +187,8 @@ async function save() {
   <div class="wizard-page" v-else>
     <div class="wizard-card done-card">
       <div class="done-icon">✓</div>
-      <h2 class="gradient-text">配置完成！</h2>
-      <p>正在跳转到 Dashboard...</p>
+      <h2 class="gradient-text">{{ t('setup.doneTitle') }}</h2>
+      <p>{{ t('setup.doneMsg') }}</p>
     </div>
   </div>
 </template>

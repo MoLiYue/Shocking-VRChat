@@ -1,6 +1,9 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { api, apiPost } from '@/api'
+import { useI18n } from '@/i18n'
+
+const { t } = useI18n()
 
 const channel = ref<'A' | 'B' | 'AB'>('A')
 const strength = ref(50)
@@ -267,15 +270,15 @@ function triggerImport() {
       const resp = await fetch('/api/v1/wave_presets/import', { method: 'POST', body: formData })
       const data = await resp.json()
       if (data.result === 'OK') {
-        importMsg.value = `✓ 导入成功: ${data.name} (${data.ops} ops)`
+        importMsg.value = `${t('waveTest.importSuccess')}: ${data.name} (${data.ops} ops)`
         await loadPresets()
         preset.value = data.name
         await loadPreview()
       } else {
-        importMsg.value = `✗ ${data.error || '导入失败'}`
+        importMsg.value = `${t('waveTest.importFailed')}: ${data.error || ''}`
       }
     } catch (err: any) {
-      importMsg.value = `✗ ${err.message || '请求失败'}`
+      importMsg.value = `${t('waveTest.importFailed')}: ${err.message || ''}`
     }
     setTimeout(() => { importMsg.value = '' }, 5000)
   }
@@ -476,8 +479,8 @@ onUnmounted(() => {
 
 <template>
   <div>
-    <h1 class="gradient-text" style="font-size:var(--text-2xl);margin-bottom:var(--sp-2)">波形测试</h1>
-    <p class="page-desc">持续循环播放波形到设备，实时调节强度和缩放观察体感差异。</p>
+    <h1 class="gradient-text" style="font-size:var(--text-2xl);margin-bottom:var(--sp-2)">{{ t('waveTest.title') }}</h1>
+    <p class="page-desc">{{ t('waveTest.desc') }}</p>
 
     <div class="wave-display">
       <div class="wave-header">
@@ -534,20 +537,20 @@ onUnmounted(() => {
               <option value="">默认电击波</option>
               <option v-for="p in presets" :key="p" :value="p">{{ p.replace(/^pulse-/, '').replace(/-\d+$/, '') }}</option>
             </select>
-            <button class="btn btn-sm" @click="triggerImport">📁 导入</button>
+            <button class="btn btn-sm" @click="triggerImport">{{ t('waveTest.import') }}</button>
           </div>
           <p class="import-msg" v-if="importMsg">{{ importMsg }}</p>
         </div>
 
         <div class="control-bar">
-          <button v-if="!playing" class="btn btn-primary btn-lg" @click="start">▶ 开始播放</button>
-          <button v-else class="btn btn-danger btn-lg" @click="stop">⏹ 停止</button>
+          <button v-if="!playing" class="btn btn-primary btn-lg" @click="start">{{ t('waveTest.start') }}</button>
+          <button v-else class="btn btn-danger btn-lg" @click="stop">{{ t('waveTest.stop') }}</button>
           <span class="msg" v-if="msg">{{ msg }}</span>
         </div>
       </section>
 
       <section class="card">
-        <h2>预设预览</h2>
+        <h2>{{ t('waveTest.previewTitle') }}</h2>
         <div class="preview-container" v-if="preset">
           <div class="preview-info">{{ previewInfo }}</div>
           <canvas ref="previewCanvasRef" class="preview-canvas"></canvas>

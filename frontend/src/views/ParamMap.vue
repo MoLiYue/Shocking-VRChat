@@ -1,6 +1,9 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { api, apiPost } from '@/api'
+import { useI18n } from '@/i18n'
+
+const { t } = useI18n()
 
 interface Param {
   path: string
@@ -59,7 +62,7 @@ function addParam() {
   } else if (!path.startsWith(PARAM_PREFIX)) {
     // Has a leading / but not the standard prefix - use as-is
   }
-  if (params.value.some(p => p.path === path)) { showMsg('参数已存在', true); return }
+  if (params.value.some(p => p.path === path)) { showMsg(t('params.paramExists'), true); return }
   params.value.push({ path, mode: newMode.value, enabled: true })
   newPath.value = ''
   dirty.value = true
@@ -111,12 +114,12 @@ async function save() {
     strength_limit: strengthLimit.value,
   })
   if (data.success) {
-    showMsg('已保存，正在重启生效...', false)
+    showMsg(t('params.savedRestarting'), false)
     dirty.value = false
     // Wait for restart then reload
     await waitForRestart()
     loadChannel()
-    showMsg('已生效', false)
+    showMsg(t('params.applied'), false)
   } else {
     showMsg(data.message || '保存失败', true)
   }
@@ -127,49 +130,53 @@ function showMsg(text: string, err: boolean) {
   setTimeout(() => msg.value = '', 5000)
 }
 
-function modeLabel(mode: string) { return MODES.find(m => m.value === mode)?.label || mode }
+function modeLabel(mode: string) {
+  const key = 'params.mode' + mode.charAt(0).toUpperCase() + mode.slice(1)
+  const translated = t(key)
+  return translated !== key ? translated : mode
+}
 
 onMounted(loadChannel)
 </script>
 
 <template>
   <div>
-    <h1>🗂 参数管理</h1>
-    <p class="subtitle">管理 OSC 监听参数，配置每个参数的工作模式</p>
+    <h1>{{ t('params.title') }}</h1>
+    <p class="subtitle">{{ t('params.desc') }}</p>
 
     <div class="tabs">
-      <button :class="{active: activeChannel === 'a'}" @click="switchChannel('a')">Channel A</button>
-      <button :class="{active: activeChannel === 'b'}" @click="switchChannel('b')">Channel B</button>
-      <span v-if="dirty" class="dirty-badge">● 未保存</span>
+      <button :class="{active: activeChannel === 'a'}" @click="switchChannel('a')">{{ t('common.channelA') }}</button>
+      <button :class="{active: activeChannel === 'b'}" @click="switchChannel('b')">{{ t('common.channelB') }}</button>
+      <span v-if="dirty" class="dirty-badge">● {{ t('common.unsaved') }}</span>
     </div>
 
     <!-- Channel settings -->
     <div class="card settings-row">
       <div class="setting">
-        <label>默认模式</label>
+        <label>{{ t('params.defaultMode') }}</label>
         <select v-model="defaultMode" @change="dirty = true">
-          <option v-for="m in MODES" :key="m.value" :value="m.value">{{ m.label }}</option>
+          <option v-for="m in MODES" :key="m.value" :value="m.value">{{ modeLabel(m.value) }}</option>
         </select>
       </div>
       <div class="setting">
-        <label>强度上限</label>
+        <label>{{ t('params.strengthLimit') }}</label>
         <input type="number" v-model.number="strengthLimit" min="0" max="200" @change="dirty = true">
       </div>
     </div>
 
     <!-- Param list -->
     <div class="card">
-      <h2>参数列表 ({{ params.filter(p => p.enabled).length }}/{{ params.length }} 启用)</h2>
+      <h2>{{ t('params.paramList') }} ({{ params.filter(p => p.enabled).length }}/{{ params.length }} {{ t('params.colEnabled') }})</h2>
       <table>
         <thead>
-          <tr><th style="width:40px">启用</th><th>OSC 参数路径</th><th>模式</th><th style="width:100px">操作</th></tr>
+          <tr><th style="width:40px">{{ t('params.colEnabled') }}</th><th>{{ t('params.colPath') }}</th><th>{{ t('params.colMode') }}</th><th style="width:100px">{{ t('params.colActions') }}</th></tr>
         </thead>
         <tbody>
           <tr v-for="(p, i) in params" :key="i" :class="{'editing': editIndex === i, 'disabled-row': !p.enabled}">
             <template v-if="editIndex === i">
               <td><input type="checkbox" v-model="p.enabled" @change="dirty = true"></td>
               <td><input v-model="editPath" class="edit-input" placeholder="/avatar/parameters/..."></td>
-              <td><select v-model="editMode" class="edit-select"><option v-for="m in MODES" :key="m.value" :value="m.value">{{ m.label }}</option></select></td>
+              <td><select v-model="editMode" class="edit-select"><option v-for="m in MODES" :key="m.value" :value="m.value">{{ modeLabel(m.value) }}</option></select></td>
               <td class="actions"><button class="act-btn save" @click="confirmEdit">✓</button><button class="act-btn cancel" @click="cancelEdit">✕</button></td>
             </template>
             <template v-else>
@@ -179,29 +186,29 @@ onMounted(loadChannel)
               <td class="actions"><button class="act-btn edit" @click="startEdit(i)">✎</button><button class="act-btn del" @click="removeParam(i)">🗑</button></td>
             </template>
           </tr>
-          <tr v-if="!params.length"><td colspan="4" class="empty">暂无参数，请在下方添加</td></tr>
+          <tr v-if="!params.length"><td colspan="4" class="empty">{{ t('params.noParams') }}</td></tr>
         </tbody>
       </table>
     </div>
 
     <!-- Add new param -->
     <div class="card add-row">
-      <h2>添加参数</h2>
+      <h2>{{ t('params.addTitle') }}</h2>
       <div class="add-form">
         <span class="prefix-label">/avatar/parameters/</span>
         <input v-model="newPath" placeholder="pcs/contact/enterPass" class="add-input" @keyup.enter="addParam">
         <select v-model="newMode" class="add-select">
-          <option v-for="m in MODES" :key="m.value" :value="m.value">{{ m.label }}</option>
+          <option v-for="m in MODES" :key="m.value" :value="m.value">{{ modeLabel(m.value) }}</option>
         </select>
         <button class="btn btn-green" @click="addParam">+ 添加</button>
       </div>
-      <p class="hint">前缀自动添加。支持通配符 *，如 pcs/sps/*</p>
+      <p class="hint">{{ t('params.addHint') }}</p>
     </div>
 
     <!-- Save -->
     <div class="save-bar">
-      <button class="btn btn-green" :disabled="!dirty" @click="save">💾 保存配置</button>
-      <button class="btn btn-gray" @click="loadChannel">↺ 撤销更改</button>
+      <button class="btn btn-green" :disabled="!dirty" @click="save">{{ t('params.saveConfig') }}</button>
+      <button class="btn btn-gray" @click="loadChannel">{{ t('params.undoChanges') }}</button>
       <span :class="['msg', msgErr ? 'err' : '']">{{ msg }}</span>
     </div>
   </div>

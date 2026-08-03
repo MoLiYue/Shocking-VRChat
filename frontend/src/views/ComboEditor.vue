@@ -1,6 +1,9 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { api, apiPost } from '@/api'
+import { useI18n } from '@/i18n'
+
+const { t } = useI18n()
 
 const activeChannel = ref<'a' | 'b'>('a')
 const switchDuration = ref(0.3)
@@ -51,34 +54,34 @@ onMounted(() => { loadPresets(); loadCombo() })
 
 <template>
   <div>
-    <h1>⚡ Combo 模式配置</h1>
-    <p style="color:var(--muted);margin:8px 0 16px;font-size:0.85em">短触发 → Shock (一激灵) · 持续触摸 → Touch (柔和)</p>
+    <h1>{{ t('combo.title') }}</h1>
+    <p style="color:var(--muted);margin:8px 0 16px;font-size:0.85em">{{ t('combo.desc') }}</p>
 
     <div class="tabs">
-      <button :class="{active: activeChannel === 'a'}" @click="switchChannel('a')">Channel A</button>
-      <button :class="{active: activeChannel === 'b'}" @click="switchChannel('b')">Channel B</button>
+      <button :class="{active: activeChannel === 'a'}" @click="switchChannel('a')">{{ t('common.channelA') }}</button>
+      <button :class="{active: activeChannel === 'b'}" @click="switchChannel('b')">{{ t('common.channelB') }}</button>
     </div>
 
     <div class="grid">
       <div class="card">
-        <h2>组合逻辑</h2>
-        <label>切换时长: {{ switchDuration.toFixed(2) }}s</label>
+        <h2>{{ t('combo.switchDuration') }}</h2>
+        <label>{{ t('combo.switchDuration') }}: {{ switchDuration.toFixed(2) }}s</label>
         <input type="range" v-model.number="switchDuration" min="0.1" max="1.5" step="0.05">
 
-        <h2 style="margin-top:16px">Shock 参数</h2>
-        <label>持续时长: {{ shockDuration.toFixed(1) }}s</label>
+        <h2 style="margin-top:16px">{{ t('combo.shockParams') }}</h2>
+        <label>{{ t('combo.shockDuration') }}: {{ shockDuration.toFixed(1) }}s</label>
         <input type="range" v-model.number="shockDuration" min="0.5" max="5" step="0.1">
         <label>波形预设</label>
         <select v-model="shockPreset"><option value="">默认</option><option v-for="p in presets" :key="p" :value="p">{{ p }}</option></select>
         <label>波形强度: {{ shockScale.toFixed(2) }}</label>
         <input type="range" v-model.number="shockScale" min="0" max="1" step="0.05">
 
-        <h2 style="margin-top:16px">Touch 参数</h2>
+        <h2 style="margin-top:16px">{{ t('combo.touchParams') }}</h2>
         <label>波形预设</label>
         <select v-model="touchPreset"><option value="">默认</option><option v-for="p in presets" :key="p" :value="p">{{ p }}</option></select>
         <label>波形强度: {{ touchScale.toFixed(2) }}</label>
         <input type="range" v-model.number="touchScale" min="0" max="1" step="0.05">
-        <label>导数阶数</label>
+        <label>{{ t('combo.derivative') }}</label>
         <select v-model.number="touchDerivative">
           <option :value="0">0 - 距离</option>
           <option :value="1">1 - 速度</option>
@@ -87,14 +90,14 @@ onMounted(() => { loadPresets(); loadCombo() })
         </select>
 
         <div class="actions" style="margin-top:16px">
-          <button class="btn btn-green" @click="saveCombo">保存</button>
-          <button class="btn btn-gray" @click="loadCombo">重载</button>
+          <button class="btn btn-green" @click="saveCombo">{{ t('common.save') }}</button>
+          <button class="btn btn-gray" @click="loadCombo">{{ t('common.reload') }}</button>
         </div>
         <div v-if="msg" class="msg">{{ msg }}</div>
       </div>
 
       <div class="card">
-        <h2>行为示意</h2>
+        <h2>{{ t('combo.behavior') }}</h2>
         <div class="diagram">
           <div class="phase phase-shock">⚡ Shock<br>一激灵</div>
           <div class="divider">{{ switchDuration.toFixed(2) }}s</div>

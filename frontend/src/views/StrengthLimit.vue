@@ -1,6 +1,9 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { api, apiPost } from '@/api'
+import { useI18n } from '@/i18n'
+
+const { t } = useI18n()
 
 const limitA = ref(5)
 const limitB = ref(5)
@@ -27,10 +30,10 @@ async function save() {
     overlimit_b: overlimitB.value,
   })
   if (data.success) {
-    msg.value = '✓ 已保存'
+    msg.value = t('common.saved')
     msgType.value = 'ok'
   } else {
-    msg.value = '✗ 保存失败'
+    msg.value = t('common.saveFailed')
     msgType.value = 'err'
   }
   if (saveTimer) clearTimeout(saveTimer)
@@ -65,19 +68,19 @@ onMounted(load)
 
 <template>
   <div>
-    <h1 class="gradient-text" style="font-size:var(--text-2xl);margin-bottom:var(--sp-2)">强度设置</h1>
-    <p class="page-desc">设置郊狼输出的最大强度。调节后自动保存并实时生效。</p>
+    <h1 class="gradient-text" style="font-size:var(--text-2xl);margin-bottom:var(--sp-2)">{{ t('strength.title') }}</h1>
+    <p class="page-desc">{{ t('strength.desc') }}</p>
 
     <div class="recommend-banner">
       <span class="recommend-icon">💡</span>
-      <span>推荐将强度设置为 <strong>200</strong>（设备允许的最大值），然后通过郊狼 APP 内的被控设置调节实际体验上限。初始默认值为 <strong>5</strong>，请根据自身承受能力逐步提高。</span>
+      <span v-html="t('strength.recommend', { max: '<strong>200</strong>', default: '<strong>5</strong>' })"></span>
     </div>
 
     <div class="limit-grid">
       <section class="card">
-        <h2>通道 A</h2>
+        <h2>{{ t('common.channelA') }}</h2>
         <div class="field">
-          <label>强度 (0–200)</label>
+          <label>{{ t('strength.strengthLabel') }}</label>
           <div class="slider-row">
             <input type="range" v-model.number="limitA" min="0" max="200" step="1" @input="onInput">
           </div>
@@ -91,7 +94,7 @@ onMounted(load)
           </div>
         </div>
         <div class="field" style="margin-top:var(--sp-4)">
-          <label>超限额度 (0–200)</label>
+          <label>{{ t('strength.overlimitLabel') }}</label>
           <div class="slider-row">
             <input type="range" v-model.number="overlimitA" min="0" max="200" step="1" @input="onInput">
           </div>
@@ -100,14 +103,14 @@ onMounted(load)
             <input type="number" v-model.number="overlimitA" min="0" max="200" class="num-input" @input="onInput">
             <button class="adj-btn" @click="adj('overlimitA', 1)">+</button>
           </div>
-          <p class="hint">超限规则触发时，最大值可提升到: <strong>{{ overlimitA }}</strong></p>
+          <p class="hint">{{ t('strength.overlimitHint') }} <strong>{{ overlimitA }}</strong></p>
         </div>
       </section>
 
       <section class="card">
-        <h2>通道 B</h2>
+        <h2>{{ t('common.channelB') }}</h2>
         <div class="field">
-          <label>强度 (0–200)</label>
+          <label>{{ t('strength.strengthLabel') }}</label>
           <div class="slider-row">
             <input type="range" v-model.number="limitB" min="0" max="200" step="1" @input="onInput">
           </div>
@@ -121,7 +124,7 @@ onMounted(load)
           </div>
         </div>
         <div class="field" style="margin-top:var(--sp-4)">
-          <label>超限额度 (0–200)</label>
+          <label>{{ t('strength.overlimitLabel') }}</label>
           <div class="slider-row">
             <input type="range" v-model.number="overlimitB" min="0" max="200" step="1" @input="onInput">
           </div>
@@ -130,7 +133,7 @@ onMounted(load)
             <input type="number" v-model.number="overlimitB" min="0" max="200" class="num-input" @input="onInput">
             <button class="adj-btn" @click="adj('overlimitB', 1)">+</button>
           </div>
-          <p class="hint">超限规则触发时，最大值可提升到: <strong>{{ overlimitB }}</strong></p>
+          <p class="hint">{{ t('strength.overlimitHint') }} <strong>{{ overlimitB }}</strong></p>
         </div>
       </section>
     </div>
@@ -140,19 +143,19 @@ onMounted(load)
     </div>
 
     <div class="info-card card">
-      <h3>工作原理</h3>
+      <h3>{{ t('strength.infoTitle') }}</h3>
       <ul>
-        <li>实际输出强度 = <code>min(本页设置的上限, 郊狼APP被控设置的上限)</code></li>
-        <li>程序根据 OSC 参数在 0 ~ 上限 之间线性输出波形强度</li>
-        <li>如果郊狼 APP 内设置的上限低于此值，以 APP 设置为准</li>
-        <li>修改后立即生效，无需重启程序或重新连接设备</li>
+        <li><code>{{ t('strength.info1') }}</code></li>
+        <li>{{ t('strength.info2') }}</li>
+        <li>{{ t('strength.info3') }}</li>
+        <li>{{ t('strength.info4') }}</li>
       </ul>
-      <h3 style="margin-top:var(--sp-4)">超限规则</h3>
+      <h3 style="margin-top:var(--sp-4)">{{ t('strength.overlimitTitle') }}</h3>
       <ul>
-        <li>在 <router-link to="/overlimit-rules">超限规则</router-link> 页面中配置条件规则</li>
-        <li>当 OSC 参数满足规则条件时，对应通道的强度临时提升到规则设定的值</li>
-        <li>本页的"超限额度"作为默认回退值（当旧的单参数触发超限时使用）</li>
-        <li>推荐使用超限规则页面进行更灵活的多层级配置</li>
+        <li><router-link to="/overlimit-rules">{{ t('strength.overlimit1') }}</router-link></li>
+        <li>{{ t('strength.overlimit2') }}</li>
+        <li>{{ t('strength.overlimit3') }}</li>
+        <li>{{ t('strength.overlimit4') }}</li>
       </ul>
     </div>
   </div>

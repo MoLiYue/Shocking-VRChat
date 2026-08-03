@@ -2,6 +2,9 @@
 import { ref, onMounted, onUnmounted } from 'vue'
 import { api, apiPost, apiDelete, apiPut } from '@/api'
 import QrCode from '@/components/QrCode.vue'
+import { useI18n } from '@/i18n'
+
+const { t } = useI18n()
 
 // --- State ---
 const connected = ref(false)
@@ -268,17 +271,17 @@ onUnmounted(() => {
       <div class="stat-card" :class="connected ? 'stat-on' : ''">
         <span class="stat-dot" :class="connected ? 'on' : ''"></span>
         <div>
-          <div class="stat-val">{{ connected ? `${deviceCount} 台已连接` : '等待连接' }}</div>
-          <div class="stat-sub">郊狼设备</div>
+          <div class="stat-val">{{ connected ? t('dashboard.deviceCount', { count: deviceCount }) : t('dashboard.disconnected') }}</div>
+          <div class="stat-sub">{{ t('dashboard.deviceStatus') }}</div>
         </div>
       </div>
       <div class="stat-card">
         <span class="stat-icon">📡</span>
-        <div><div class="stat-val">{{ oscStatus || '-' }}</div><div class="stat-sub">OSC 监听</div></div>
+        <div><div class="stat-val">{{ oscStatus || '-' }}</div><div class="stat-sub">OSC</div></div>
       </div>
       <div class="stat-card">
         <span class="stat-icon">⏱</span>
-        <div><div class="stat-val">{{ lastTrigger }}</div><div class="stat-sub">最近触发</div></div>
+        <div><div class="stat-val">{{ lastTrigger }}</div><div class="stat-sub">{{ t('dashboard.lastTrigger') }}</div></div>
       </div>
     </div>
 
@@ -287,7 +290,7 @@ onUnmounted(() => {
       <div class="col">
         <!-- Channels -->
         <section class="card">
-          <h2>设备状态</h2>
+          <h2>{{ t('dashboard.deviceStatus') }}</h2>
           <div class="ch-row" v-for="ch in (['A', 'B'] as const)" :key="ch">
             <div class="ch-head"><span class="ch-name">{{ ch }}</span><strong>{{ strength[ch] }} / 200</strong></div>
             <div class="bar-track"><div class="bar-fill" :class="'bar-' + ch.toLowerCase()" :style="{width: barPct(ch) + '%'}"></div></div>
@@ -296,7 +299,7 @@ onUnmounted(() => {
 
         <!-- OSC Feed -->
         <section class="card">
-          <h2>OSC 触发</h2>
+          <h2>{{ t('dashboard.oscEvents') }}</h2>
           <div class="osc-feed">
             <div class="osc-row" v-for="(e, i) in oscEvents" :key="i">
               <span class="badge" :class="'b-' + e.channel.toLowerCase()">{{ e.channel }}</span>
@@ -305,13 +308,13 @@ onUnmounted(() => {
               <span class="osc-val">{{ e.value }}</span>
               <span class="osc-time">{{ timeStr(e.time) }}</span>
             </div>
-            <div v-if="!oscEvents.length" class="empty">等待数据...</div>
+            <div v-if="!oscEvents.length" class="empty">{{ t('dashboard.noEvents') }}</div>
           </div>
         </section>
 
         <!-- Wave visualization -->
         <section class="card">
-          <h2>实时波形</h2>
+          <h2>{{ t('dashboard.waveform') }}</h2>
           <div class="wave-dual">
             <div class="wave-channel">
               <div class="wave-ch-label">A</div>
@@ -326,10 +329,10 @@ onUnmounted(() => {
 
         <!-- Logs -->
         <section class="card">
-          <h2>日志</h2>
+          <h2>{{ t('dashboard.logs') }}</h2>
           <div class="log-area">
             <div v-for="(l, i) in logs" :key="i" class="log-line" :class="l.level">{{ l.text }}</div>
-            <div v-if="!logs.length" class="empty">暂无日志</div>
+            <div v-if="!logs.length" class="empty">{{ t('dashboard.noLogs') }}</div>
           </div>
         </section>
       </div>
@@ -338,25 +341,25 @@ onUnmounted(() => {
       <div class="col">
         <!-- QR -->
         <section class="card">
-          <h2>连接二维码</h2>
+          <h2>{{ t('dashboard.qrTitle') }}</h2>
           <QrCode :content="qrContent" :size="240" />
           <div class="qr-text">{{ qrContent }}</div>
         </section>
 
         <!-- Profiles -->
         <section class="card">
-          <h2>场景预设</h2>
+          <h2>{{ t('dashboard.profiles') }}</h2>
           <div class="profile-list">
             <div class="profile-item" v-for="p in profiles" :key="p">
               <span class="profile-name">{{ p }}</span>
               <button class="btn-sm load" @click="loadProfile(p)">▶</button>
               <button class="btn-sm del" @click="deleteProfile(p)">✕</button>
             </div>
-            <div v-if="!profiles.length" class="empty">无预设</div>
+            <div v-if="!profiles.length" class="empty">{{ t('dashboard.noProfiles') }}</div>
           </div>
           <div class="profile-add">
-            <input type="text" v-model="profileName" placeholder="新预设名" @keyup.enter="saveProfile">
-            <button class="btn btn-primary" @click="saveProfile">保存当前</button>
+            <input type="text" v-model="profileName" :placeholder="t('dashboard.newProfileName')" @keyup.enter="saveProfile">
+            <button class="btn btn-primary" @click="saveProfile">{{ t('dashboard.saveCurrent') }}</button>
           </div>
           <div v-if="profileMsg" class="profile-msg">{{ profileMsg }}</div>
         </section>

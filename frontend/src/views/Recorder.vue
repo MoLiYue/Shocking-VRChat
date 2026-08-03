@@ -1,6 +1,9 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted } from 'vue'
 import { api, apiPost, apiDelete } from '@/api'
+import { useI18n } from '@/i18n'
+
+const { t } = useI18n()
 
 const recActive = ref(false)
 const recCount = ref(0)
@@ -118,7 +121,7 @@ onUnmounted(() => timers.forEach(clearInterval))
 
 <template>
   <div>
-    <h1 class="gradient-text" style="font-size:var(--text-2xl);margin-bottom:var(--sp-5)">OSC 录制 / 回放</h1>
+    <h1 class="gradient-text" style="font-size:var(--text-2xl);margin-bottom:var(--sp-5)">{{ t('recorder.title') }}</h1>
 
     <div class="top-grid">
       <!-- Recording -->

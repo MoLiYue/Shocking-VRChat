@@ -1,6 +1,9 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { api, apiPost } from '@/api'
+import { useI18n } from '@/i18n'
+
+const { t } = useI18n()
 
 const oscPort = ref(9001)
 const oscHost = ref('127.0.0.1')
@@ -36,7 +39,7 @@ async function save() {
   })
   if (data.success) {
     if (data.restart_needed?.length) {
-      msg.value = '已保存，程序正在重启... 请稍候刷新页面。'
+      msg.value = t('settings.savedRestarting')
       msgErr.value = false
       // If web port changed, redirect to new port after delay
       const newPort = webPort.value
@@ -51,7 +54,7 @@ async function save() {
     } else {
       msg.value = data.message; msgErr.value = false
     }
-  } else { msg.value = data.message || '保存失败'; msgErr.value = true }
+  } else { msg.value = data.message || t('common.saveFailed'); msgErr.value = true }
   setTimeout(() => msg.value = '', 8000)
 }
 
@@ -78,11 +81,11 @@ async function handleImport(e: Event) {
       importErr.value = false
       setTimeout(() => window.location.reload(), 2000)
     } else {
-      importMsg.value = '✗ ' + (data.detail || '导入失败')
+      importMsg.value = '✗ ' + (data.detail || t('settings.importFailed'))
       importErr.value = true
     }
   } catch (err) {
-    importMsg.value = '✗ 导入失败: ' + err
+    importMsg.value = t('settings.importFailed') + ': ' + err
     importErr.value = true
   }
   if (importFileRef.value) importFileRef.value.value = ''
@@ -105,36 +108,36 @@ async function checkUpdate() {
     const data = await api('/api/v1/update/check')
     updateInfo.value = data
     if (data.error) {
-      updateMsg.value = '检查失败: ' + data.error
+      updateMsg.value = data.error
       updateErr.value = true
     }
   } catch (e) {
-    updateMsg.value = '检查失败'
+    updateMsg.value = t('settings.updateFailed')
     updateErr.value = true
   }
   updateChecking.value = false
 }
 
 async function applyUpdate() {
-  if (!confirm('确定要更新？程序将下载新版本并自动重启。')) return
+  if (!confirm(t('settings.updateConfirm'))) return
   updateApplying.value = true
-  updateMsg.value = '正在下载更新...'
+  updateMsg.value = t('settings.updateDownloading')
   updateErr.value = false
   try {
     const res = await fetch('/api/v1/update/apply', { method: 'POST' })
     const data = await res.json()
     if (data.success) {
-      updateMsg.value = '✓ ' + data.message + ' 页面将在几秒后自动刷新...'
+      updateMsg.value = '✓ ' + data.message + ' ' + t('settings.updateDone')
       updateErr.value = false
       // Wait and reload
       setTimeout(() => window.location.reload(), 8000)
     } else {
-      updateMsg.value = '✗ ' + (data.detail || data.message || '更新失败')
+      updateMsg.value = '✗ ' + (data.detail || data.message || t('settings.updateFailed'))
       updateErr.value = true
       updateApplying.value = false
     }
   } catch (e) {
-    updateMsg.value = '✗ 更新失败: ' + e
+    updateMsg.value = t('settings.updateFailed') + ': ' + e
     updateErr.value = true
     updateApplying.value = false
   }
@@ -145,69 +148,69 @@ onMounted(() => { checkUpdate() })
 
 <template>
   <div>
-    <h1 class="gradient-text" style="font-size:var(--text-2xl);margin-bottom:var(--sp-2)">设置</h1>
-    <p class="page-desc">服务端口和日志配置。网络端口变更需重启程序生效。</p>
+    <h1 class="gradient-text" style="font-size:var(--text-2xl);margin-bottom:var(--sp-2)">{{ t('settings.title') }}</h1>
+    <p class="page-desc">{{ t('settings.desc') }}</p>
 
     <div class="settings-grid">
       <section class="card">
-        <h2>OSC 监听</h2>
+        <h2>{{ t('settings.oscTitle') }}</h2>
         <div class="field">
-          <label>端口</label>
+          <label>{{ t('settings.oscPort') }}</label>
           <input type="number" v-model.number="oscPort" min="1024" max="65535">
-          <p class="hint">VRChat 默认发送到 9001。有面捕冲突时修改。</p>
+          <p class="hint">{{ t('settings.oscPortHint') }}</p>
         </div>
         <div class="field">
-          <label>地址</label>
+          <label>{{ t('settings.oscHost') }}</label>
           <input type="text" v-model="oscHost">
-          <p class="hint">127.0.0.1 = 仅本机。0.0.0.0 = 接受外部。</p>
+          <p class="hint">{{ t('settings.oscHostHint') }}</p>
         </div>
       </section>
 
       <section class="card">
-        <h2>WebSocket（郊狼连接）</h2>
+        <h2>{{ t('settings.wsTitle') }}</h2>
         <div class="field">
-          <label>端口</label>
+          <label>{{ t('settings.wsPort') }}</label>
           <input type="number" v-model.number="wsPort" min="1024" max="65535">
-          <p class="hint">郊狼 APP 扫码连接使用此端口。</p>
+          <p class="hint">{{ t('settings.wsPortHint') }}</p>
         </div>
       </section>
 
       <section class="card">
-        <h2>Web 服务器</h2>
+        <h2>{{ t('settings.webTitle') }}</h2>
         <div class="field">
-          <label>端口</label>
+          <label>{{ t('settings.webPort') }}</label>
           <input type="number" v-model.number="webPort" min="1024" max="65535">
-          <p class="hint">当前页面的 HTTP 服务端口。</p>
+          <p class="hint">{{ t('settings.webPortHint') }}</p>
         </div>
         <div class="field">
-          <label>地址</label>
+          <label>{{ t('settings.webHost') }}</label>
           <input type="text" v-model="webHost">
-          <p class="hint">0.0.0.0 可从其他设备打开网页。</p>
+          <p class="hint">{{ t('settings.webHostHint') }}</p>
         </div>
       </section>
 
       <section class="card">
-        <h2>日志</h2>
+        <h2>{{ t('settings.logTitle') }}</h2>
         <div class="field">
-          <label>日志等级</label>
+          <label>{{ t('settings.logLevel') }}</label>
           <select v-model="logLevel">
             <option value="DEBUG">DEBUG</option>
             <option value="INFO">INFO</option>
             <option value="WARNING">WARNING</option>
             <option value="ERROR">ERROR</option>
           </select>
-          <p class="hint">DEBUG 可用于诊断问题，日常使用 INFO 即可。</p>
+          <p class="hint">{{ t('settings.logLevelHint') }}</p>
         </div>
       </section>
 
       <section class="card">
-        <h2>GitHub 加速</h2>
+        <h2>{{ t('settings.githubTitle') }}</h2>
         <div class="field">
-          <label>镜像代理</label>
+          <label>{{ t('settings.githubMirror') }}</label>
           <input type="text" v-model="githubMirror" placeholder="留空 = 直连 GitHub">
-          <p class="hint">中国大陆用户建议填写代理地址加速更新下载。</p>
+          <p class="hint">{{ t('settings.githubMirrorHint') }}</p>
           <div class="mirror-presets">
-            <button class="preset-tag" @click="githubMirror = ''">直连</button>
+            <button class="preset-tag" @click="githubMirror = ''">{{ t('settings.githubDirect') }}</button>
             <button class="preset-tag" @click="githubMirror = 'https://mirror.ghproxy.com'">ghproxy</button>
             <button class="preset-tag" @click="githubMirror = 'https://ghfast.top'">ghfast</button>
             <button class="preset-tag" @click="githubMirror = 'https://gh-proxy.com'">gh-proxy</button>
@@ -217,49 +220,49 @@ onMounted(() => { checkUpdate() })
     </div>
 
     <div class="save-bar">
-      <button class="btn btn-primary" @click="save">💾 保存设置</button>
-      <button class="btn btn-ghost" @click="load">↺ 重新加载</button>
+      <button class="btn btn-primary" @click="save">{{ t('settings.saveSettings') }}</button>
+      <button class="btn btn-ghost" @click="load">{{ t('settings.reloadSettings') }}</button>
       <span class="msg" :class="{ err: msgErr }">{{ msg }}</span>
     </div>
 
     <section class="card" style="margin-top:var(--sp-4)">
-      <h2>配置导入/导出</h2>
-      <p class="hint" style="margin-bottom:var(--sp-3)">导出当前全部配置为 JSON 文件，或从之前导出的文件恢复配置。</p>
+      <h2>{{ t('settings.configTitle') }}</h2>
+      <p class="hint" style="margin-bottom:var(--sp-3)">{{ t('settings.configDesc') }}</p>
       <div class="ie-bar">
-        <button class="btn" @click="exportConfig">📤 导出配置</button>
-        <button class="btn" @click="triggerImport">📥 导入配置</button>
+        <button class="btn" @click="exportConfig">{{ t('settings.exportConfig') }}</button>
+        <button class="btn" @click="triggerImport">{{ t('settings.importConfig') }}</button>
         <input ref="importFileRef" type="file" accept=".json" hidden @change="handleImport">
         <span class="msg" :class="{ err: importErr }">{{ importMsg }}</span>
       </div>
     </section>
 
     <section class="card" style="margin-top:var(--sp-4)">
-      <h2>软件更新</h2>
+      <h2>{{ t('settings.updateTitle') }}</h2>
       <div class="update-info">
         <div class="update-row">
-          <span class="update-label">当前版本:</span>
+          <span class="update-label">{{ t('settings.updateCurrent') }}:</span>
           <span class="update-value">{{ updateInfo?.current || '...' }}</span>
         </div>
         <div class="update-row">
-          <span class="update-label">最新版本:</span>
+          <span class="update-label">{{ t('settings.updateLatest') }}:</span>
           <span class="update-value" :class="{ 'has-update': updateInfo?.update_available }">
-            {{ updateInfo?.latest || (updateChecking ? '检查中...' : '未知') }}
-            <span v-if="updateInfo?.update_available" class="update-badge">有更新</span>
+            {{ updateInfo?.latest || (updateChecking ? t('settings.checking') : t('settings.unknown')) }}
+            <span v-if="updateInfo?.update_available" class="update-badge">{{ t('settings.updateAvailable') }}</span>
           </span>
         </div>
         <div v-if="updateInfo?.release_name && updateInfo?.update_available" class="update-row">
-          <span class="update-label">更新内容:</span>
+          <span class="update-label">{{ t('settings.updateNotes') }}:</span>
           <span class="update-value update-notes">{{ updateInfo.release_name }}</span>
         </div>
       </div>
       <div class="ie-bar" style="margin-top:var(--sp-3)">
-        <button class="btn" @click="checkUpdate" :disabled="updateChecking">🔄 检查更新</button>
+        <button class="btn" @click="checkUpdate" :disabled="updateChecking">{{ t('settings.updateCheck') }}</button>
         <button
           v-if="updateInfo?.update_available"
           class="btn btn-primary"
           @click="applyUpdate"
           :disabled="updateApplying"
-        >⬇️ {{ updateApplying ? '更新中...' : '下载并更新' }}</button>
+        >{{ updateApplying ? t('settings.updateApplying') : t('settings.updateApply') }}</button>
         <span class="msg" :class="{ err: updateErr }">{{ updateMsg }}</span>
       </div>
     </section>
