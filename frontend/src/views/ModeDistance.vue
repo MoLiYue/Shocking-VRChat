@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, watch, nextTick } from 'vue'
 import { api, apiPost, apiDelete } from '@/api'
+import WavePreview from '@/components/WavePreview.vue'
 
 // --- Distance config state ---
 const ch = ref<'a' | 'b'>('a')
@@ -319,6 +320,15 @@ onMounted(() => {
           <label>实时频率间隔: {{ freqMs }}ms</label>
           <input type="range" v-model.number="freqMs" min="10" max="240" step="5">
           <p class="hint">无预设时使用的固定脉冲间隔。</p>
+        </div>
+        <div class="field" v-if="wavePreset">
+          <label>波形预览</label>
+          <WavePreview
+            :preset-name="wavePreset"
+            :wave-scale="waveScale"
+            :texture-floor="textureFloor"
+            :height="90"
+          />
         </div>
       </section>
 

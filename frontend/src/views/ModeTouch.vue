@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { api, apiPost } from '@/api'
+import WavePreview from '@/components/WavePreview.vue'
 
 const ch = ref<'a' | 'b'>('a')
 const wavePreset = ref('')
@@ -94,6 +95,15 @@ onMounted(() => { loadPresets(); load() })
           <label>纹理底噪: {{ (textureFloor * 100).toFixed(0) }}%</label>
           <input type="range" v-model.number="textureFloor" min="0" max="0.5" step="0.01">
           <p class="hint">波形低谷的最小强度。</p>
+        </div>
+        <div class="field" v-if="wavePreset">
+          <label>波形预览</label>
+          <WavePreview
+            :preset-name="wavePreset"
+            :wave-scale="waveScale"
+            :texture-floor="textureFloor"
+            :height="90"
+          />
         </div>
       </section>
 

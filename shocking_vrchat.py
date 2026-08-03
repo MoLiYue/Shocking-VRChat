@@ -1467,6 +1467,22 @@ async def api_v1_wave_presets():
     lib = WavePresetLibrary()
     return {'presets': list(lib.presets.keys())}
 
+@app.get("/api/v1/wave_presets/{preset_name}/samples")
+async def api_v1_wave_preset_samples(preset_name: str):
+    """Get raw waveform samples for visualization."""
+    from srv.wave_preset import WavePresetLibrary
+    lib = WavePresetLibrary()
+    preset = lib.get(preset_name)
+    if not preset:
+        raise HTTPException(404, 'preset not found')
+    return {
+        'name': preset_name,
+        'texture_samples': preset.get('texture_samples', []),
+        'strength_samples': preset.get('strength_samples', []),
+        'freq_samples': preset.get('freq_samples', []),
+        'num_ops': len(preset.get('ops', [])),
+    }
+
 @app.get("/api/v1/wave_presets/{preset_name}/preview")
 async def api_v1_wave_preset_preview(preset_name: str):
     from srv.wave_preset import WavePresetLibrary

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { api, apiPost } from '@/api'
+import WavePreview from '@/components/WavePreview.vue'
 
 const ch = ref<'a' | 'b'>('a')
 const duration = ref(2)
@@ -70,6 +71,16 @@ onMounted(() => { loadPresets(); load() })
           <label>波形强度: {{ (waveScale * 100).toFixed(0) }}%</label>
           <input type="range" v-model.number="waveScale" min="0" max="1" step="0.05">
           <p class="hint">波形纹理的强度系数，不影响通道设定强度。</p>
+        </div>
+        <div class="field" v-if="wavePreset">
+          <label>波形预览</label>
+          <WavePreview
+            :preset-name="wavePreset"
+            :wave-scale="waveScale"
+            :display-duration="duration"
+            :height="100"
+          />
+          <p class="hint">显示电击期间的波形纹理。宽度 = 电击时长。</p>
         </div>
       </section>
 
