@@ -3,11 +3,10 @@ import { ref } from 'vue'
 import { apiPost } from '@/api'
 
 const step = ref(0)
-const totalSteps = 3
+const totalSteps = 2
 const saving = ref(false)
 const done = ref(false)
 const errMsg = ref('')
-const safetyConfirmed = ref(false)
 
 // Config state
 const scene = ref('')  // 'pcs', 'lms', 'custom'
@@ -49,8 +48,7 @@ function getSelectedParams(): { a: string[]; b: string[] } {
 }
 
 function canProceed(): boolean {
-  if (step.value === 0) return safetyConfirmed.value
-  if (step.value === 1) return !!scene.value
+  if (step.value === 0) return !!scene.value
   return true
 }
 
@@ -92,39 +90,19 @@ async function save() {
       <div class="wizard-header">
         <span class="wizard-logo">⚡</span>
         <h1 class="gradient-text">Shocking VRChat</h1>
-        <p class="wizard-sub">首次配置向导 · 3步完成</p>
+        <p class="wizard-sub">首次配置向导 · 2步完成</p>
       </div>
 
       <!-- Progress -->
       <div class="progress">
         <div class="progress-step" v-for="i in totalSteps" :key="i" :class="{ active: step === i-1, done: step > i-1 }">
           <div class="progress-dot">{{ step > i-1 ? '✓' : i }}</div>
-          <span class="progress-label">{{ ['安全确认', '选择场景', '确认完成'][i-1] }}</span>
+          <span class="progress-label">{{ ['选择场景', '确认完成'][i-1] }}</span>
         </div>
       </div>
 
-      <!-- Step 0: Safety -->
+      <!-- Step 0: Scene -->
       <div v-if="step === 0" class="step">
-        <h2>⚠️ 安全须知确认</h2>
-        <div class="safety-box">
-          <p><strong>使用前请确认：</strong></p>
-          <ul>
-            <li>你没有心脏起搏器或体内电子/金属植入物</li>
-            <li>你没有癫痫、心脏病等心脑血管疾病</li>
-            <li>电极不会放在胸部、头部、颈部</li>
-            <li>同一部位连续使用不超过 30 分钟</li>
-            <li>你知道如何使用逃生通道（按设备肩键归零）</li>
-          </ul>
-          <p class="safety-link">完整安全须知请阅读: <a href="https://github.com/VRChatNext/Shocking-VRChat#%E5%AE%89%E5%85%A8%E9%A1%BB%E7%9F%A5" target="_blank">GitHub README</a></p>
-        </div>
-        <label class="confirm-check" @click="safetyConfirmed = !safetyConfirmed">
-          <input type="checkbox" v-model="safetyConfirmed">
-          <span>我已阅读并理解安全须知，自愿承担使用风险</span>
-        </label>
-      </div>
-
-      <!-- Step 1: Scene -->
-      <div v-if="step === 1" class="step">
         <h2>你的模型用什么触发？</h2>
         <div class="scene-grid">
           <div v-for="s in SCENES" :key="s.id" class="scene-card" :class="{selected: scene === s.id}" @click="scene = s.id">
@@ -162,8 +140,8 @@ async function save() {
         </div>
       </div>
 
-      <!-- Step 2: Strength + Confirm -->
-      <div v-if="step === 2" class="step">
+      <!-- Step 1: Strength + Confirm -->
+      <div v-if="step === 1" class="step">
         <h2>初始强度</h2>
         <div class="strength-section">
           <div class="field">
@@ -237,16 +215,6 @@ async function save() {
 .progress-step.active .progress-label { color: var(--accent); }
 
 .step h2 { font-size: var(--text-lg); margin-bottom: var(--sp-4); }
-
-/* Safety */
-.safety-box { background: rgba(251,191,36,0.06); border: 1px solid rgba(251,191,36,0.25); border-radius: var(--radius-md); padding: var(--sp-4); margin-bottom: var(--sp-4); font-size: var(--text-sm); color: var(--text-secondary); line-height: 1.8; }
-.safety-box ul { padding-left: var(--sp-4); margin: var(--sp-2) 0; }
-.safety-box strong { color: var(--warning); }
-.safety-link { margin-top: var(--sp-2); font-size: var(--text-xs); color: var(--text-muted); }
-.safety-link a { color: var(--accent); }
-.confirm-check { display: flex; align-items: center; gap: var(--sp-2); cursor: pointer; font-size: var(--text-sm); color: var(--text-secondary); padding: var(--sp-3); border: 1px solid var(--border); border-radius: var(--radius-md); transition: all var(--transition); }
-.confirm-check:hover { border-color: var(--accent); }
-.confirm-check input { accent-color: var(--accent); }
 
 /* Scenes */
 .scene-grid { display: flex; flex-direction: column; gap: var(--sp-2); margin-bottom: var(--sp-4); }
