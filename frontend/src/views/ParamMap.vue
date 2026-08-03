@@ -22,6 +22,7 @@ const defaultMode = ref('distance')
 const strengthLimit = ref(100)
 const newPath = ref('')
 const newMode = ref('distance')
+const PARAM_PREFIX = '/avatar/parameters/'
 const editIndex = ref<number | null>(null)
 const editPath = ref('')
 const editMode = ref('')
@@ -50,9 +51,15 @@ function switchChannel(ch: 'a' | 'b') {
 }
 
 function addParam() {
-  const path = newPath.value.trim()
+  let path = newPath.value.trim()
   if (!path) return
-  if (!path.startsWith('/')) { showMsg('路径必须以 / 开头', true); return }
+  // Auto-prepend prefix if user didn't include it
+  if (!path.startsWith('/')) {
+    path = PARAM_PREFIX + path
+  } else if (!path.startsWith(PARAM_PREFIX)) {
+    // Has a leading / but not the standard prefix - use as-is
+  }
+  if (params.value.some(p => p.path === path)) { showMsg('参数已存在', true); return }
   params.value.push({ path, mode: newMode.value, enabled: true })
   newPath.value = ''
   dirty.value = true
@@ -167,7 +174,7 @@ onMounted(loadChannel)
             </template>
             <template v-else>
               <td><input type="checkbox" v-model="p.enabled" @change="dirty = true"></td>
-              <td class="path" :class="{'path-disabled': !p.enabled}">{{ p.path }}</td>
+              <td class="path" :class="{'path-disabled': !p.enabled}"><span class="path-prefix">{{ p.path.startsWith('/avatar/parameters/') ? '/avatar/parameters/' : '' }}</span>{{ p.path.startsWith('/avatar/parameters/') ? p.path.slice(19) : p.path }}</td>
               <td><span class="mode-badge" :class="[('mode-' + p.mode), {'badge-disabled': !p.enabled}]">{{ modeLabel(p.mode) }}</span></td>
               <td class="actions"><button class="act-btn edit" @click="startEdit(i)">✎</button><button class="act-btn del" @click="removeParam(i)">🗑</button></td>
             </template>
@@ -181,13 +188,14 @@ onMounted(loadChannel)
     <div class="card add-row">
       <h2>添加参数</h2>
       <div class="add-form">
-        <input v-model="newPath" placeholder="/avatar/parameters/pcs/contact/enterPass" class="add-input" @keyup.enter="addParam">
+        <span class="prefix-label">/avatar/parameters/</span>
+        <input v-model="newPath" placeholder="pcs/contact/enterPass" class="add-input" @keyup.enter="addParam">
         <select v-model="newMode" class="add-select">
           <option v-for="m in MODES" :key="m.value" :value="m.value">{{ m.label }}</option>
         </select>
         <button class="btn btn-green" @click="addParam">+ 添加</button>
       </div>
-      <p class="hint">支持通配符 *，如 /avatar/parameters/Shock/*</p>
+      <p class="hint">前缀自动添加。支持通配符 *，如 pcs/sps/*</p>
     </div>
 
     <!-- Save -->
@@ -213,6 +221,7 @@ table { width: 100%; border-collapse: collapse; }
 th { text-align: left; font-size: var(--text-xs); color: var(--text-muted); padding: var(--sp-2) var(--sp-3); border-bottom: 1px solid var(--border-subtle); }
 td { padding: var(--sp-3); font-size: var(--text-sm); border-bottom: 1px solid var(--border-subtle); vertical-align: middle; }
 .path { font-family: var(--font-mono); color: var(--text-secondary); word-break: break-all; }
+.path-prefix { color: var(--text-muted); opacity: 0.5; }
 .mode-badge { display: inline-block; padding: 2px 10px; border-radius: 99px; font-size: var(--text-xs); font-weight: 600; }
 .mode-distance { background: var(--info-surface); color: var(--info); }
 .mode-shock { background: var(--danger-surface); color: var(--danger); }
@@ -232,7 +241,8 @@ td { padding: var(--sp-3); font-size: var(--text-sm); border-bottom: 1px solid v
 .edit-input, .edit-select { padding: var(--sp-2); border: 1px solid var(--accent); border-radius: var(--radius-sm); background: var(--bg-elevated); color: var(--text); font-family: var(--font-mono); font-size: var(--text-sm); width: 100%; }
 .add-row { margin-top: var(--sp-4); }
 .add-form { display: flex; gap: var(--sp-2); align-items: center; }
-.add-input { flex: 1; padding: var(--sp-2) var(--sp-3); border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--bg-elevated); color: var(--text); font-family: var(--font-mono); font-size: var(--text-sm); }
+.prefix-label { font-family: var(--font-mono); font-size: var(--text-xs); color: var(--text-muted); white-space: nowrap; background: var(--bg-tertiary); padding: var(--sp-2) var(--sp-2); border-radius: var(--radius-sm) 0 0 var(--radius-sm); border: 1px solid var(--border); border-right: none; }
+.add-input { flex: 1; padding: var(--sp-2) var(--sp-3); border: 1px solid var(--border); border-radius: 0 var(--radius-md) var(--radius-md) 0; background: var(--bg-elevated); color: var(--text); font-family: var(--font-mono); font-size: var(--text-sm); }
 .add-select { width: 120px; }
 .hint { font-size: var(--text-xs); color: var(--text-muted); margin-top: var(--sp-2); }
 .save-bar { display: flex; align-items: center; gap: var(--sp-3); margin-top: var(--sp-4); padding: var(--sp-3) var(--sp-4); background: var(--surface); border-radius: var(--radius-md); border: 1px solid var(--border-subtle); }
