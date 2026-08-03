@@ -156,19 +156,32 @@ function meterAndDraw(now: number) {
     const dt = now - lastFrame
     const samplesOwed = dt / SLOT_MS
     // Channel A
+    debtA += samplesOwed
     if (pendingA.length > 0) {
-      debtA += samplesOwed
       const n = Math.min(Math.floor(debtA), pendingA.length)
       if (n > 0) { bufferA.push(...pendingA.splice(0, n)); debtA -= n }
-      if (bufferA.length > DISPLAY_SLOTS * 2) bufferA = bufferA.slice(-DISPLAY_SLOTS * 2)
+    } else {
+      // No incoming data: push empty slots to scroll out old waveform
+      const n = Math.floor(debtA)
+      if (n > 0) {
+        for (let i = 0; i < n; i++) bufferA.push({ s: 0, f: 0 })
+        debtA -= n
+      }
     }
+    if (bufferA.length > DISPLAY_SLOTS * 2) bufferA = bufferA.slice(-DISPLAY_SLOTS * 2)
     // Channel B
+    debtB += samplesOwed
     if (pendingB.length > 0) {
-      debtB += samplesOwed
       const n = Math.min(Math.floor(debtB), pendingB.length)
       if (n > 0) { bufferB.push(...pendingB.splice(0, n)); debtB -= n }
-      if (bufferB.length > DISPLAY_SLOTS * 2) bufferB = bufferB.slice(-DISPLAY_SLOTS * 2)
+    } else {
+      const n = Math.floor(debtB)
+      if (n > 0) {
+        for (let i = 0; i < n; i++) bufferB.push({ s: 0, f: 0 })
+        debtB -= n
+      }
     }
+    if (bufferB.length > DISPLAY_SLOTS * 2) bufferB = bufferB.slice(-DISPLAY_SLOTS * 2)
   } else {
     // First frame: dump all
     if (pendingA.length) { bufferA.push(...pendingA.splice(0)); debtA = 0 }

@@ -378,26 +378,38 @@ function animLoop(now: number) {
     const samplesOwed = dt / SLOT_MS
 
     // Channel A
+    sampleDebtA += samplesOwed
     if (pendingQueueA.length > 0) {
-      sampleDebtA += samplesOwed
       const toRelease = Math.min(Math.floor(sampleDebtA), pendingQueueA.length)
       if (toRelease > 0) {
         rtBufferA.push(...pendingQueueA.splice(0, toRelease))
         sampleDebtA -= toRelease
-        if (rtBufferA.length > DISPLAY_SLOTS * 2) rtBufferA = rtBufferA.slice(-DISPLAY_SLOTS * 2)
+      }
+    } else {
+      const n = Math.floor(sampleDebtA)
+      if (n > 0) {
+        for (let i = 0; i < n; i++) rtBufferA.push({ s: 0, f: 0 })
+        sampleDebtA -= n
       }
     }
+    if (rtBufferA.length > DISPLAY_SLOTS * 2) rtBufferA = rtBufferA.slice(-DISPLAY_SLOTS * 2)
 
     // Channel B
+    sampleDebtB += samplesOwed
     if (pendingQueueB.length > 0) {
-      sampleDebtB += samplesOwed
       const toRelease = Math.min(Math.floor(sampleDebtB), pendingQueueB.length)
       if (toRelease > 0) {
         rtBufferB.push(...pendingQueueB.splice(0, toRelease))
         sampleDebtB -= toRelease
-        if (rtBufferB.length > DISPLAY_SLOTS * 2) rtBufferB = rtBufferB.slice(-DISPLAY_SLOTS * 2)
+      }
+    } else {
+      const n = Math.floor(sampleDebtB)
+      if (n > 0) {
+        for (let i = 0; i < n; i++) rtBufferB.push({ s: 0, f: 0 })
+        sampleDebtB -= n
       }
     }
+    if (rtBufferB.length > DISPLAY_SLOTS * 2) rtBufferB = rtBufferB.slice(-DISPLAY_SLOTS * 2)
   } else {
     // First frame: dump initial batch
     if (pendingQueueA.length > 0) {
