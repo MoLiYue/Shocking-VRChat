@@ -27,23 +27,37 @@ async function save() {
     overlimit_b: overlimitB.value,
   })
   if (data.success) {
-    msg.value = '✓ 已保存并立即生效'
+    msg.value = '✓ 已保存'
     msgType.value = 'ok'
   } else {
-    msg.value = '保存失败'
+    msg.value = '✗ 保存失败'
     msgType.value = 'err'
   }
   if (saveTimer) clearTimeout(saveTimer)
-  saveTimer = setTimeout(() => msg.value = '', 3000)
+  saveTimer = setTimeout(() => msg.value = '', 2000)
 }
 
-function onInput() {
-  limitA.value = Math.max(0, Math.min(200, limitA.value))
-  limitB.value = Math.max(0, Math.min(200, limitB.value))
-  overlimitA.value = Math.max(0, Math.min(200, overlimitA.value))
-  overlimitB.value = Math.max(0, Math.min(200, overlimitB.value))
+function schedSave() {
   if (saveTimer) clearTimeout(saveTimer)
-  saveTimer = setTimeout(save, 500)
+  saveTimer = setTimeout(save, 300)
+}
+
+function clamp(val: number) { return Math.max(0, Math.min(200, val)) }
+
+function onInput() {
+  limitA.value = clamp(limitA.value)
+  limitB.value = clamp(limitB.value)
+  overlimitA.value = clamp(overlimitA.value)
+  overlimitB.value = clamp(overlimitB.value)
+  schedSave()
+}
+
+function adj(target: 'limitA' | 'limitB' | 'overlimitA' | 'overlimitB', delta: number) {
+  if (target === 'limitA') limitA.value = clamp(limitA.value + delta)
+  else if (target === 'limitB') limitB.value = clamp(limitB.value + delta)
+  else if (target === 'overlimitA') overlimitA.value = clamp(overlimitA.value + delta)
+  else if (target === 'overlimitB') overlimitB.value = clamp(overlimitB.value + delta)
+  schedSave()
 }
 
 onMounted(load)
@@ -52,7 +66,7 @@ onMounted(load)
 <template>
   <div>
     <h1 class="gradient-text" style="font-size:var(--text-2xl);margin-bottom:var(--sp-2)">强度设置</h1>
-    <p class="page-desc">设置郊狼输出的最大强度。调节后实时生效，无需重启。</p>
+    <p class="page-desc">设置郊狼输出的最大强度。调节后自动保存并实时生效。</p>
 
     <div class="recommend-banner">
       <span class="recommend-icon">💡</span>
@@ -66,7 +80,11 @@ onMounted(load)
           <label>强度 (0–200)</label>
           <div class="slider-row">
             <input type="range" v-model.number="limitA" min="0" max="200" step="1" @input="onInput">
+          </div>
+          <div class="value-row">
+            <button class="adj-btn" @click="adj('limitA', -1)">−</button>
             <input type="number" v-model.number="limitA" min="0" max="200" class="num-input" @input="onInput">
+            <button class="adj-btn" @click="adj('limitA', 1)">+</button>
           </div>
           <div class="bar-wrap">
             <div class="bar-fill" :style="{ width: (limitA / 200 * 100) + '%' }"></div>
@@ -76,9 +94,13 @@ onMounted(load)
           <label>超限额度 (0–200)</label>
           <div class="slider-row">
             <input type="range" v-model.number="overlimitA" min="0" max="200" step="1" @input="onInput">
-            <input type="number" v-model.number="overlimitA" min="0" max="200" class="num-input" @input="onInput">
           </div>
-          <p class="hint">超限规则触发时，最大值可提升到此额度（绝对值）: <strong>{{ overlimitA }}</strong></p>
+          <div class="value-row">
+            <button class="adj-btn" @click="adj('overlimitA', -1)">−</button>
+            <input type="number" v-model.number="overlimitA" min="0" max="200" class="num-input" @input="onInput">
+            <button class="adj-btn" @click="adj('overlimitA', 1)">+</button>
+          </div>
+          <p class="hint">超限规则触发时，最大值可提升到: <strong>{{ overlimitA }}</strong></p>
         </div>
       </section>
 
@@ -88,7 +110,11 @@ onMounted(load)
           <label>强度 (0–200)</label>
           <div class="slider-row">
             <input type="range" v-model.number="limitB" min="0" max="200" step="1" @input="onInput">
+          </div>
+          <div class="value-row">
+            <button class="adj-btn" @click="adj('limitB', -1)">−</button>
             <input type="number" v-model.number="limitB" min="0" max="200" class="num-input" @input="onInput">
+            <button class="adj-btn" @click="adj('limitB', 1)">+</button>
           </div>
           <div class="bar-wrap">
             <div class="bar-fill" :style="{ width: (limitB / 200 * 100) + '%' }"></div>
@@ -98,16 +124,18 @@ onMounted(load)
           <label>超限额度 (0–200)</label>
           <div class="slider-row">
             <input type="range" v-model.number="overlimitB" min="0" max="200" step="1" @input="onInput">
-            <input type="number" v-model.number="overlimitB" min="0" max="200" class="num-input" @input="onInput">
           </div>
-          <p class="hint">超限规则触发时，最大值可提升到此额度（绝对值）: <strong>{{ overlimitB }}</strong></p>
+          <div class="value-row">
+            <button class="adj-btn" @click="adj('overlimitB', -1)">−</button>
+            <input type="number" v-model.number="overlimitB" min="0" max="200" class="num-input" @input="onInput">
+            <button class="adj-btn" @click="adj('overlimitB', 1)">+</button>
+          </div>
+          <p class="hint">超限规则触发时，最大值可提升到: <strong>{{ overlimitB }}</strong></p>
         </div>
       </section>
     </div>
 
-    <div class="save-bar">
-      <button class="btn btn-primary" @click="save">💾 立即保存</button>
-      <button class="btn btn-ghost" @click="load">↺ 重新加载</button>
+    <div class="status-bar" v-if="msg">
       <span class="msg" :class="{ ok: msgType === 'ok', err: msgType === 'err' }">{{ msg }}</span>
     </div>
 
@@ -138,14 +166,30 @@ onMounted(load)
 .limit-grid { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-4); margin-bottom: var(--sp-4); }
 .field { margin-bottom: 0; }
 .field label { display: block; font-size: var(--text-sm); color: var(--text-secondary); margin-bottom: var(--sp-2); font-weight: 500; }
-.slider-row { display: flex; align-items: center; gap: var(--sp-3); }
+.slider-row { display: flex; align-items: center; gap: var(--sp-2); }
 .slider-row input[type="range"] { flex: 1; accent-color: var(--accent); }
-.num-input { width: 72px; text-align: center; font-variant-numeric: tabular-nums; }
+.value-row { display: flex; align-items: center; justify-content: center; gap: var(--sp-2); margin-top: var(--sp-2); }
+.adj-btn {
+  width: 32px; height: 32px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-elevated);
+  color: var(--text-secondary);
+  font-size: var(--text-lg);
+  font-weight: 600;
+  cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  transition: all var(--transition);
+  user-select: none;
+}
+.adj-btn:hover { border-color: var(--accent); color: var(--accent); background: rgba(139,92,246,0.08); }
+.adj-btn:active { transform: scale(0.92); }
+.num-input { width: 64px; text-align: center; font-variant-numeric: tabular-nums; font-size: var(--text-base); font-weight: 600; }
 .bar-wrap { margin-top: var(--sp-2); height: 6px; background: var(--bg-tertiary); border-radius: 3px; overflow: hidden; }
 .bar-fill { height: 100%; background: linear-gradient(90deg, var(--accent), var(--accent-hover)); border-radius: 3px; transition: width 0.15s ease; }
-.hint { font-size: var(--text-xs); color: var(--text-muted); margin-top: var(--sp-1); }
+.hint { font-size: var(--text-xs); color: var(--text-muted); margin-top: var(--sp-2); }
 .hint strong { color: var(--accent); }
-.save-bar { display: flex; align-items: center; gap: var(--sp-3); margin-bottom: var(--sp-5); padding: var(--sp-4); background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius-lg); }
+.status-bar { margin-bottom: var(--sp-4); padding: var(--sp-2) var(--sp-4); background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius-md); text-align: center; }
 .msg { font-size: var(--text-sm); color: var(--text-muted); transition: color 0.2s; }
 .msg.ok { color: var(--success); }
 .msg.err { color: var(--danger); }
