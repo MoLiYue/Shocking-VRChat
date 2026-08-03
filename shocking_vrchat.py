@@ -43,6 +43,8 @@ app = FastAPI(docs_url=None, redoc_url=None)
 WAVE_HISTORY_SAMPLE_MS = 25
 
 CONFIG_FILE_VERSION  = 'v0.2'
+APP_VERSION = '0.5.0'  # Semantic version of the application
+GITHUB_REPO = 'VRChatNext/Shocking-VRChat'
 CONFIG_FILENAME = f'settings-advanced-{CONFIG_FILE_VERSION}.yaml'
 CONFIG_FILENAME_BASIC = f'settings-{CONFIG_FILE_VERSION}.yaml'
 CONFIG_HOT_RELOAD_INTERVAL = 1.0
@@ -963,6 +965,148 @@ async def api_v1_engine_restart():
 @app.get("/api/v1/engine/status")
 async def api_v1_engine_status():
     return {'running': engine.running}
+
+# --- Auto Update ---
+_update_cache: dict = {}
+_update_cache_time = 0.0
+
+@app.get("/api/v1/update/check")
+async def api_v1_update_check():
+    """Check GitHub releases for a newer version."""
+    import urllib.request
+    global _update_cache, _update_cache_time
+
+    # Cache for 5 minutes
+    if _update_cache and (time.time() - _update_cache_time) < 300:
+        return _update_cache
+
+    try:
+        url = f'https://api.github.com/repos/{GITHUB_REPO}/releases/latest'
+        req = urllib.request.Request(url, headers={'Accept': 'application/vnd.github.v3+json', 'User-Agent': 'ShockingVRChat'})
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data = json.loads(resp.read().decode())
+    except Exception as e:
+        return {'current': APP_VERSION, 'latest': None, 'update_available': False, 'error': str(e)}
+
+    latest_tag = data.get('tag_name', '')
+    latest_ver = latest_tag.lstrip('v')
+    update_available = _version_newer(latest_ver, APP_VERSION)
+
+    # Find download URL for the onedir zip
+    download_url = None
+    assets = data.get('assets', [])
+    for asset in assets:
+        name = asset.get('name', '')
+        if 'windows_x64.zip' in name and 'onefile' not in name:
+            download_url = asset.get('browser_download_url')
+            break
+    if not download_url:
+        for asset in assets:
+            if asset.get('name', '').endswith('.zip'):
+                download_url = asset.get('browser_download_url')
+                break
+
+    _update_cache = {
+        'current': APP_VERSION,
+        'latest': latest_ver,
+        'latest_tag': latest_tag,
+        'update_available': update_available,
+        'download_url': download_url,
+        'release_name': data.get('name', ''),
+        'release_notes': data.get('body', '')[:2000],
+        'published_at': data.get('published_at', ''),
+    }
+    _update_cache_time = time.time()
+    return _update_cache
+
+@app.post("/api/v1/update/apply")
+async def api_v1_update_apply():
+    """Download and apply the latest update. Replaces files and restarts."""
+    import urllib.request
+    import zipfile
+    import shutil
+    import tempfile
+
+    # Only works for frozen (packaged) builds
+    if not getattr(sys, 'frozen', False):
+        raise HTTPException(400, '仅打包版本支持自动更新，开发环境请使用 git pull')
+
+    check = await api_v1_update_check()
+    if not check.get('update_available'):
+        return {'success': False, 'message': '当前已是最新版本'}
+    download_url = check.get('download_url')
+    if not download_url:
+        raise HTTPException(400, '未找到可下载的更新文件')
+
+    exe_dir = get_exe_dir()
+    tmp_dir = tempfile.mkdtemp(prefix='svrc_update_')
+    zip_path = os.path.join(tmp_dir, 'update.zip')
+
+    try:
+        logger.info(f"[update] Downloading: {download_url}")
+        req = urllib.request.Request(download_url, headers={'User-Agent': 'ShockingVRChat'})
+        with urllib.request.urlopen(req, timeout=120) as resp:
+            with open(zip_path, 'wb') as f:
+                shutil.copyfileobj(resp, f)
+        logger.info(f"[update] Downloaded to {zip_path}")
+
+        # Extract
+        extract_dir = os.path.join(tmp_dir, 'extracted')
+        with zipfile.ZipFile(zip_path, 'r') as zf:
+            zf.extractall(extract_dir)
+
+        # Find the actual content dir (might be nested)
+        contents = os.listdir(extract_dir)
+        if len(contents) == 1 and os.path.isdir(os.path.join(extract_dir, contents[0])):
+            source_dir = os.path.join(extract_dir, contents[0])
+        else:
+            source_dir = extract_dir
+
+        # Write update script that replaces files after this process exits
+        bat_path = os.path.join(tmp_dir, 'apply_update.bat')
+        with open(bat_path, 'w', encoding='utf-8') as f:
+            f.write('@echo off\n')
+            f.write('echo Waiting for process to exit...\n')
+            f.write('timeout /t 3 /nobreak >nul\n')
+            f.write(f'xcopy /s /y /q "{source_dir}\\*" "{exe_dir}\\"\n')
+            f.write(f'echo Update complete. Starting...\n')
+            f.write(f'start "" "{os.path.join(exe_dir, "shocking_vrchat.exe")}"\n')
+            f.write(f'rmdir /s /q "{tmp_dir}"\n')
+            f.write('exit\n')
+
+        # Launch the update script and exit
+        logger.info("[update] Launching update script and exiting...")
+        import subprocess
+        subprocess.Popen(
+            ['cmd', '/c', bat_path],
+            creationflags=0x00000008,  # DETACHED_PROCESS
+            close_fds=True,
+        )
+
+        # Schedule shutdown
+        async def _shutdown():
+            await asyncio.sleep(0.5)
+            os._exit(0)
+        asyncio.create_task(_shutdown())
+
+        return {'success': True, 'message': '更新下载完成，正在应用更新并重启...'}
+
+    except Exception as e:
+        logger.error(f"[update] Failed: {e}")
+        # Cleanup
+        try:
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+        except:
+            pass
+        raise HTTPException(500, f'更新失败: {e}')
+
+def _version_newer(latest: str, current: str) -> bool:
+    """Check if latest version is newer than current (semver comparison)."""
+    try:
+        def parse(v): return tuple(int(x) for x in v.split('.')[:3])
+        return parse(latest) > parse(current)
+    except (ValueError, IndexError):
+        return False
 
 def _restart_program():
     """Restart the current process. Works on both Windows and Linux."""

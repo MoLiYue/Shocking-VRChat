@@ -87,6 +87,57 @@ async function handleImport(e: Event) {
 }
 
 onMounted(load)
+
+// --- Update check ---
+const updateInfo = ref<any>(null)
+const updateChecking = ref(false)
+const updateApplying = ref(false)
+const updateMsg = ref('')
+const updateErr = ref(false)
+
+async function checkUpdate() {
+  updateChecking.value = true
+  updateMsg.value = ''
+  try {
+    const data = await api('/api/v1/update/check')
+    updateInfo.value = data
+    if (data.error) {
+      updateMsg.value = '检查失败: ' + data.error
+      updateErr.value = true
+    }
+  } catch (e) {
+    updateMsg.value = '检查失败'
+    updateErr.value = true
+  }
+  updateChecking.value = false
+}
+
+async function applyUpdate() {
+  if (!confirm('确定要更新？程序将下载新版本并自动重启。')) return
+  updateApplying.value = true
+  updateMsg.value = '正在下载更新...'
+  updateErr.value = false
+  try {
+    const res = await fetch('/api/v1/update/apply', { method: 'POST' })
+    const data = await res.json()
+    if (data.success) {
+      updateMsg.value = '✓ ' + data.message + ' 页面将在几秒后自动刷新...'
+      updateErr.value = false
+      // Wait and reload
+      setTimeout(() => window.location.reload(), 8000)
+    } else {
+      updateMsg.value = '✗ ' + (data.detail || data.message || '更新失败')
+      updateErr.value = true
+      updateApplying.value = false
+    }
+  } catch (e) {
+    updateMsg.value = '✗ 更新失败: ' + e
+    updateErr.value = true
+    updateApplying.value = false
+  }
+}
+
+onMounted(() => { checkUpdate() })
 </script>
 
 <template>
@@ -163,6 +214,37 @@ onMounted(load)
         <span class="msg" :class="{ err: importErr }">{{ importMsg }}</span>
       </div>
     </section>
+
+    <section class="card" style="margin-top:var(--sp-4)">
+      <h2>软件更新</h2>
+      <div class="update-info">
+        <div class="update-row">
+          <span class="update-label">当前版本:</span>
+          <span class="update-value">{{ updateInfo?.current || '...' }}</span>
+        </div>
+        <div class="update-row">
+          <span class="update-label">最新版本:</span>
+          <span class="update-value" :class="{ 'has-update': updateInfo?.update_available }">
+            {{ updateInfo?.latest || (updateChecking ? '检查中...' : '未知') }}
+            <span v-if="updateInfo?.update_available" class="update-badge">有更新</span>
+          </span>
+        </div>
+        <div v-if="updateInfo?.release_name && updateInfo?.update_available" class="update-row">
+          <span class="update-label">更新内容:</span>
+          <span class="update-value update-notes">{{ updateInfo.release_name }}</span>
+        </div>
+      </div>
+      <div class="ie-bar" style="margin-top:var(--sp-3)">
+        <button class="btn" @click="checkUpdate" :disabled="updateChecking">🔄 检查更新</button>
+        <button
+          v-if="updateInfo?.update_available"
+          class="btn btn-primary"
+          @click="applyUpdate"
+          :disabled="updateApplying"
+        >⬇️ {{ updateApplying ? '更新中...' : '下载并更新' }}</button>
+        <span class="msg" :class="{ err: updateErr }">{{ updateMsg }}</span>
+      </div>
+    </section>
   </div>
 </template>
 
@@ -178,5 +260,12 @@ onMounted(load)
 .ie-bar { display: flex; align-items: center; gap: var(--sp-3); flex-wrap: wrap; }
 .msg { font-size: var(--text-sm); color: var(--success); }
 .msg.err { color: var(--danger); }
+.update-info { display: flex; flex-direction: column; gap: var(--sp-2); }
+.update-row { display: flex; align-items: center; gap: var(--sp-2); font-size: var(--text-sm); }
+.update-label { color: var(--text-muted); min-width: 80px; }
+.update-value { color: var(--text-secondary); }
+.update-value.has-update { color: var(--accent); font-weight: 600; }
+.update-badge { display: inline-block; margin-left: var(--sp-2); padding: 1px 8px; border-radius: 99px; background: rgba(139,92,246,0.15); color: var(--accent); font-size: var(--text-xs); font-weight: 600; }
+.update-notes { font-size: var(--text-xs); color: var(--text-muted); max-width: 400px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 @media (max-width: 768px) { .settings-grid { grid-template-columns: 1fr; } }
 </style>
