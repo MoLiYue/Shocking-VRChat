@@ -197,6 +197,24 @@ class DGConnection():
             conn.strength_limit['B'] = limit_b
             conn.overlimit_max['A'] = overlimit_a
             conn.overlimit_max['B'] = overlimit_b
+        # Push new limits to devices immediately
+        import asyncio
+        try:
+            loop = asyncio.get_running_loop()
+            loop.create_task(cls._apply_limits_to_devices())
+        except RuntimeError:
+            pass  # No event loop running (e.g. during init)
+
+    @classmethod
+    async def _apply_limits_to_devices(cls):
+        """Push current strength limits to all connected devices."""
+        for conn in WS_CONNECTIONS:
+            conn: cls
+            for ch in ['A', 'B']:
+                limit = conn.get_upper_strength(ch)
+                # Only push if device is connected (strength_max > 0) and not manually zeroed
+                if conn.strength_max[ch] > 0 and conn.strength[ch] != 0:
+                    await conn.set_strength(ch, mode='2', value=limit, force=True)
 
     @classmethod
     async def broadcast_strength_adjust(cls, channel='A', mode='1', value=0):
