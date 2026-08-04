@@ -479,7 +479,7 @@ onUnmounted(() => {
 
 <template>
   <div>
-    <h1 class="gradient-text" style="font-size:var(--text-2xl);margin-bottom:var(--sp-2)">{{ t('waveTest.title') }}</h1>
+    <h1 class="gradient-text page-title">{{ t('waveTest.title') }}</h1>
     <p class="page-desc">{{ t('waveTest.desc') }}</p>
 
     <div class="wave-display">
@@ -537,7 +537,7 @@ onUnmounted(() => {
               <option value="">{{ t('waveTest.presetDefault') }}</option>
               <option v-for="p in presets" :key="p" :value="p">{{ p.replace(/^pulse-/, '').replace(/-\d+$/, '') }}</option>
             </select>
-            <button class="btn btn-sm" @click="triggerImport">{{ t('waveTest.import') }}</button>
+            <button class="btn btn-ghost btn-sm" @click="triggerImport">{{ t('waveTest.import') }}</button>
           </div>
           <p class="import-msg" v-if="importMsg">{{ importMsg }}</p>
         </div>
@@ -567,7 +567,6 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
-.page-desc { color: var(--text-muted); font-size: var(--text-sm); margin-bottom: var(--sp-4); }
 .wave-display { margin-bottom: var(--sp-4); background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius-lg); overflow: hidden; }
 .wave-header { display: flex; justify-content: space-between; align-items: center; padding: var(--sp-3) var(--sp-4); border-bottom: 1px solid var(--border); }
 .wave-title { font-size: var(--text-sm); color: var(--text-secondary); font-weight: 500; }
@@ -591,17 +590,12 @@ onUnmounted(() => {
 .hint { font-size: var(--text-xs); color: var(--text-muted); margin-top: var(--sp-1); }
 .preset-row { display: flex; gap: var(--sp-2); align-items: center; }
 .preset-row select { flex: 1; }
-.btn-sm { padding: var(--sp-1) var(--sp-3); font-size: var(--text-xs); border: 1px solid var(--border); border-radius: var(--radius-sm); background: transparent; color: var(--text-secondary); cursor: pointer; white-space: nowrap; transition: all 0.15s; }
-.btn-sm:hover { border-color: var(--accent); color: var(--accent); }
 .import-msg { font-size: var(--text-xs); margin-top: var(--sp-1); color: var(--text-secondary); }
 .channel-tabs { display: flex; gap: var(--sp-2); }
 .channel-tabs button { padding: var(--sp-2) var(--sp-5); border: 1px solid var(--border); border-radius: var(--radius-full); background: transparent; color: var(--text-muted); cursor: pointer; font-size: var(--text-sm); font-weight: 500; transition: all 0.15s; }
 .channel-tabs button.active { border-color: var(--accent); color: var(--accent); background: rgba(139,92,246,0.08); }
 .channel-tabs button:disabled { opacity: 0.5; cursor: not-allowed; }
 .control-bar { display: flex; align-items: center; gap: var(--sp-3); margin-top: var(--sp-4); }
-.btn-lg { padding: var(--sp-3) var(--sp-6); font-size: var(--text-base); }
-.btn-danger { background: var(--danger); border-color: var(--danger); color: white; }
-.btn-danger:hover { opacity: 0.9; }
 .msg { font-size: var(--text-sm); color: var(--warning); }
 .preview-container { display: flex; flex-direction: column; gap: var(--sp-2); }
 .preview-info { font-size: var(--text-xs); color: var(--text-secondary); padding: var(--sp-2) var(--sp-3); background: rgba(139,92,246,0.05); border-radius: var(--radius-sm); }

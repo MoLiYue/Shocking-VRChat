@@ -75,7 +75,7 @@ onMounted(() => { loadPresets(); load() })
 
 <template>
   <div>
-    <h1 class="gradient-text" style="font-size:var(--text-2xl);margin-bottom:var(--sp-2)">{{ t('modeTouch.title') }}</h1>
+    <h1 class="gradient-text page-title">{{ t('modeTouch.title') }}</h1>
     <p class="page-desc">{{ t('modeTouch.desc') }}</p>
 
     <div class="ch-tabs">
@@ -187,7 +187,6 @@ onMounted(() => { loadPresets(); load() })
 </template>
 
 <style scoped>
-.page-desc { color: var(--text-muted); font-size: var(--text-sm); margin-bottom: var(--sp-4); }
 .ch-tabs { display: flex; gap: var(--sp-2); margin-bottom: var(--sp-4); }
 .ch-tabs button { padding: var(--sp-2) var(--sp-4); border: 1px solid var(--border); border-radius: var(--radius-md); background: transparent; color: var(--text-muted); cursor: pointer; font-size: var(--text-sm); }
 .ch-tabs button.active { border-color: var(--accent); color: var(--accent); background: rgba(139,92,246,0.08); }

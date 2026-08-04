@@ -54,10 +54,10 @@ onMounted(() => { loadPresets(); loadCombo() })
 
 <template>
   <div>
-    <h1>{{ t('combo.title') }}</h1>
-    <p style="color:var(--muted);margin:8px 0 16px;font-size:0.85em">{{ t('combo.desc') }}</p>
+    <h1 class="gradient-text page-title">{{ t('combo.title') }}</h1>
+    <p class="page-desc">{{ t('combo.desc') }}</p>
 
-    <div class="tabs">
+    <div class="ch-tabs">
       <button :class="{active: activeChannel === 'a'}" @click="switchChannel('a')">{{ t('common.channelA') }}</button>
       <button :class="{active: activeChannel === 'b'}" @click="switchChannel('b')">{{ t('common.channelB') }}</button>
     </div>
@@ -65,35 +65,49 @@ onMounted(() => { loadPresets(); loadCombo() })
     <div class="grid">
       <div class="card">
         <h2>{{ t('combo.switchDuration') }}</h2>
-        <label>{{ t('combo.switchDuration') }}: {{ switchDuration.toFixed(2) }}s</label>
-        <input type="range" v-model.number="switchDuration" min="0.1" max="1.5" step="0.05">
-
-        <h2 style="margin-top:16px">{{ t('combo.shockParams') }}</h2>
-        <label>{{ t('combo.shockDuration') }}: {{ shockDuration.toFixed(1) }}s</label>
-        <input type="range" v-model.number="shockDuration" min="0.5" max="5" step="0.1">
-        <label>{{ t('common.wavePreset') }}</label>
-        <select v-model="shockPreset"><option value="">{{ t('common.default') }}</option><option v-for="p in presets" :key="p" :value="p">{{ p }}</option></select>
-        <label>{{ t('common.waveScale') }}: {{ shockScale.toFixed(2) }}</label>
-        <input type="range" v-model.number="shockScale" min="0" max="1" step="0.05">
-
-        <h2 style="margin-top:16px">{{ t('combo.touchParams') }}</h2>
-        <label>{{ t('common.wavePreset') }}</label>
-        <select v-model="touchPreset"><option value="">{{ t('common.default') }}</option><option v-for="p in presets" :key="p" :value="p">{{ p }}</option></select>
-        <label>{{ t('common.waveScale') }}: {{ touchScale.toFixed(2) }}</label>
-        <input type="range" v-model.number="touchScale" min="0" max="1" step="0.05">
-        <label>{{ t('combo.derivative') }}</label>
-        <select v-model.number="touchDerivative">
-          <option :value="0">{{ t('combo.deriv0') }}</option>
-          <option :value="1">{{ t('combo.deriv1') }}</option>
-          <option :value="2">{{ t('combo.deriv2') }}</option>
-          <option :value="3">{{ t('combo.deriv3') }}</option>
-        </select>
-
-        <div class="actions" style="margin-top:16px">
-          <button class="btn btn-green" @click="saveCombo">{{ t('common.save') }}</button>
-          <button class="btn btn-gray" @click="loadCombo">{{ t('common.reload') }}</button>
+        <div class="field">
+          <label>{{ t('combo.switchDuration') }}: {{ switchDuration.toFixed(2) }}s</label>
+          <input type="range" v-model.number="switchDuration" min="0.1" max="1.5" step="0.05">
         </div>
-        <div v-if="msg" class="msg">{{ msg }}</div>
+
+        <h2>{{ t('combo.shockParams') }}</h2>
+        <div class="field">
+          <label>{{ t('combo.shockDuration') }}: {{ shockDuration.toFixed(1) }}s</label>
+          <input type="range" v-model.number="shockDuration" min="0.5" max="5" step="0.1">
+        </div>
+        <div class="field">
+          <label>{{ t('common.wavePreset') }}</label>
+          <select v-model="shockPreset"><option value="">{{ t('common.default') }}</option><option v-for="p in presets" :key="p" :value="p">{{ p }}</option></select>
+        </div>
+        <div class="field">
+          <label>{{ t('common.waveScale') }}: {{ shockScale.toFixed(2) }}</label>
+          <input type="range" v-model.number="shockScale" min="0" max="1" step="0.05">
+        </div>
+
+        <h2>{{ t('combo.touchParams') }}</h2>
+        <div class="field">
+          <label>{{ t('common.wavePreset') }}</label>
+          <select v-model="touchPreset"><option value="">{{ t('common.default') }}</option><option v-for="p in presets" :key="p" :value="p">{{ p }}</option></select>
+        </div>
+        <div class="field">
+          <label>{{ t('common.waveScale') }}: {{ touchScale.toFixed(2) }}</label>
+          <input type="range" v-model.number="touchScale" min="0" max="1" step="0.05">
+        </div>
+        <div class="field">
+          <label>{{ t('combo.derivative') }}</label>
+          <select v-model.number="touchDerivative">
+            <option :value="0">{{ t('combo.deriv0') }}</option>
+            <option :value="1">{{ t('combo.deriv1') }}</option>
+            <option :value="2">{{ t('combo.deriv2') }}</option>
+            <option :value="3">{{ t('combo.deriv3') }}</option>
+          </select>
+        </div>
+
+        <div class="save-bar">
+          <button class="btn btn-primary" @click="saveCombo">{{ t('common.save') }}</button>
+          <button class="btn btn-ghost" @click="loadCombo">{{ t('common.reload') }}</button>
+          <span class="msg" v-if="msg">{{ msg }}</span>
+        </div>
       </div>
 
       <div class="card">
@@ -103,31 +117,35 @@ onMounted(() => { loadPresets(); loadCombo() })
           <div class="divider">{{ switchDuration.toFixed(2) }}s</div>
           <div class="phase phase-touch" style="white-space:pre-line">{{ t('combo.touchPhase') }}</div>
         </div>
-        <h2 style="margin-top:16px">{{ t('common.triggerRange') }}</h2>
-        <label>{{ t('common.triggerBottom') }}: {{ triggerBottom.toFixed(2) }}</label>
-        <input type="range" v-model.number="triggerBottom" min="0" max="0.5" step="0.01">
-        <label>{{ t('common.triggerTop') }}: {{ triggerTop.toFixed(2) }}</label>
-        <input type="range" v-model.number="triggerTop" min="0.3" max="1" step="0.01">
+        <h2>{{ t('common.triggerRange') }}</h2>
+        <div class="field">
+          <label>{{ t('common.triggerBottom') }}: {{ triggerBottom.toFixed(2) }}</label>
+          <input type="range" v-model.number="triggerBottom" min="0" max="0.5" step="0.01">
+        </div>
+        <div class="field">
+          <label>{{ t('common.triggerTop') }}: {{ triggerTop.toFixed(2) }}</label>
+          <input type="range" v-model.number="triggerTop" min="0.3" max="1" step="0.01">
+        </div>
       </div>
     </div>
   </div>
 </template>
 
 <style scoped>
-.tabs { display: flex; gap: 8px; margin-bottom: 16px; }
-.tabs button { padding: 8px 20px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); color: var(--muted); cursor: pointer; }
-.tabs button.active { border-color: var(--blue); color: var(--blue); }
-.grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
-label { display: block; font-size: 0.82em; color: var(--muted); margin: 8px 0 4px; }
-select, input[type="range"] { width: 100%; }
-select { padding: 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel-2); color: var(--text); }
-input[type="range"] { accent-color: var(--blue); }
-.diagram { display: flex; align-items: stretch; height: 100px; gap: 2px; }
-.phase { flex: 1; display: flex; align-items: center; justify-content: center; border-radius: 8px; text-align: center; font-size: 0.85em; line-height: 1.4; }
-.phase-shock { background: rgba(255,107,107,0.1); border: 1px solid rgba(255,107,107,0.3); color: #ff8b8b; }
-.phase-touch { background: rgba(114,224,143,0.1); border: 1px solid rgba(114,224,143,0.3); color: var(--green); flex: 2; }
-.divider { display: flex; align-items: center; padding: 0 6px; font-size: 0.7em; color: var(--amber); }
-.actions { display: flex; gap: 8px; }
-.msg { margin-top: 8px; font-size: 0.85em; color: var(--green); }
+.ch-tabs { display: flex; gap: var(--sp-2); margin-bottom: var(--sp-4); }
+.ch-tabs button { padding: var(--sp-2) var(--sp-4); border: 1px solid var(--border); border-radius: var(--radius-md); background: transparent; color: var(--text-muted); cursor: pointer; font-size: var(--text-sm); transition: all var(--transition); }
+.ch-tabs button.active { border-color: var(--accent); color: var(--accent); background: rgba(139,92,246,0.08); }
+.grid { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-4); }
+.field { margin-bottom: var(--sp-4); }
+.field label { display: block; font-size: var(--text-sm); color: var(--text-secondary); margin-bottom: var(--sp-1); font-weight: 500; }
+.field select { width: 100%; }
+.field input[type="range"] { width: 100%; accent-color: var(--accent); }
+.diagram { display: flex; align-items: stretch; height: 100px; gap: 2px; margin-bottom: var(--sp-4); }
+.phase { flex: 1; display: flex; align-items: center; justify-content: center; border-radius: var(--radius-md); text-align: center; font-size: var(--text-sm); line-height: 1.4; }
+.phase-shock { background: rgba(248,113,113,0.08); border: 1px solid rgba(248,113,113,0.25); color: var(--danger); }
+.phase-touch { background: rgba(52,211,153,0.08); border: 1px solid rgba(52,211,153,0.25); color: var(--success); flex: 2; }
+.divider { display: flex; align-items: center; padding: 0 var(--sp-2); font-size: var(--text-xs); color: var(--warning); }
+.save-bar { display: flex; align-items: center; gap: var(--sp-3); margin-top: var(--sp-4); padding-top: var(--sp-4); border-top: 1px solid var(--border); }
+.msg { font-size: var(--text-sm); color: var(--success); }
 @media (max-width: 768px) { .grid { grid-template-columns: 1fr; } }
 </style>

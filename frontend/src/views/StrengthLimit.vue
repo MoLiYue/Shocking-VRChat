@@ -68,7 +68,7 @@ onMounted(load)
 
 <template>
   <div>
-    <h1 class="gradient-text" style="font-size:var(--text-2xl);margin-bottom:var(--sp-2)">{{ t('strength.title') }}</h1>
+    <h1 class="gradient-text page-title">{{ t('strength.title') }}</h1>
     <p class="page-desc">{{ t('strength.desc') }}</p>
 
     <div class="recommend-banner">
@@ -162,7 +162,6 @@ onMounted(load)
 </template>
 
 <style scoped>
-.page-desc { color: var(--text-muted); font-size: var(--text-sm); margin-bottom: var(--sp-4); }
 .recommend-banner { display: flex; align-items: flex-start; gap: var(--sp-3); padding: var(--sp-4); margin-bottom: var(--sp-5); background: rgba(139,92,246,0.08); border: 1px solid rgba(139,92,246,0.25); border-radius: var(--radius-lg); font-size: var(--text-sm); color: var(--text-secondary); line-height: 1.6; }
 .recommend-icon { font-size: 1.3em; flex-shrink: 0; }
 .recommend-banner strong { color: var(--accent); }

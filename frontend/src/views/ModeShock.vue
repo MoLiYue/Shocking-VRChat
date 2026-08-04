@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, computed } from 'vue'
 import { api, apiPost } from '@/api'
 import { useI18n } from '@/i18n'
 import WavePreview from '@/components/WavePreview.vue'
+import WaveSimulator from '@/components/WaveSimulator.vue'
 
 const { t } = useI18n()
 
@@ -14,6 +15,14 @@ const triggerBottom = ref(0)
 const triggerTop = ref(0.8)
 const presets = ref<string[]>([])
 const msg = ref('')
+
+// Reactive params for wave simulator
+const simParams = computed(() => ({
+  duration: duration.value,
+  wave_preset: wavePreset.value || null,
+  wave_scale: waveScale.value,
+  trigger_range: { bottom: triggerBottom.value, top: triggerTop.value },
+}))
 
 async function loadPresets() {
   const data = await api('/api/v1/wave_presets')
@@ -47,7 +56,7 @@ onMounted(() => { loadPresets(); load() })
 
 <template>
   <div>
-    <h1 class="gradient-text" style="font-size:var(--text-2xl);margin-bottom:var(--sp-2)">{{ t('modeShock.title') }}</h1>
+    <h1 class="gradient-text page-title">{{ t('modeShock.title') }}</h1>
     <p class="page-desc">{{ t('modeShock.desc') }}</p>
 
     <div class="ch-tabs">
@@ -109,6 +118,16 @@ onMounted(() => { loadPresets(); load() })
       </section>
     </div>
 
+    <!-- Wave Simulator -->
+    <section class="card" style="margin-top:var(--sp-5)">
+      <h2>{{ t('common.waveSimulator') }}</h2>
+      <WaveSimulator
+        mode="shock"
+        :channel="ch"
+        :params="simParams"
+      />
+    </section>
+
     <div class="save-bar">
       <button class="btn btn-primary" @click="save">💾 {{ t('common.save') }}</button>
       <button class="btn btn-ghost" @click="load">↺ {{ t('common.reload') }}</button>
@@ -118,7 +137,6 @@ onMounted(() => { loadPresets(); load() })
 </template>
 
 <style scoped>
-.page-desc { color: var(--text-muted); font-size: var(--text-sm); margin-bottom: var(--sp-4); }
 .ch-tabs { display: flex; gap: var(--sp-2); margin-bottom: var(--sp-4); }
 .ch-tabs button { padding: var(--sp-2) var(--sp-4); border: 1px solid var(--border); border-radius: var(--radius-md); background: transparent; color: var(--text-muted); cursor: pointer; font-size: var(--text-sm); }
 .ch-tabs button.active { border-color: var(--accent); color: var(--accent); background: rgba(139,92,246,0.08); }

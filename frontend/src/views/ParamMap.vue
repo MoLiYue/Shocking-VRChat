@@ -155,7 +155,7 @@ onMounted(() => { loadChannel('a'); loadChannel('b') })
 
 <template>
   <div>
-    <h1>{{ t('params.title') }}</h1>
+    <h1 class="gradient-text page-title">{{ t('params.title') }}</h1>
     <p class="subtitle">{{ t('params.desc') }}</p>
 
     <!-- Channel A -->

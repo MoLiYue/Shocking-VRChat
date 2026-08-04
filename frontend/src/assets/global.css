@@ -22,6 +22,19 @@
   --warning: #fbbf24;
   --info: #60a5fa;
 
+  /* Extended palette */
+  --bg-tertiary: rgba(25, 22, 38, 0.7);
+  --bg-elevated: rgba(45, 38, 65, 0.5);
+  --bg-inset: rgba(10, 8, 16, 0.5);
+  --border-subtle: rgba(139, 92, 246, 0.06);
+  --accent-hover: #a78bfa;
+  --green: #34d399;
+  --purple: #8b5cf6;
+  --info-surface: rgba(96, 165, 250, 0.08);
+  --danger-surface: rgba(248, 113, 113, 0.08);
+  --success-surface: rgba(52, 211, 153, 0.08);
+  --warning-surface: rgba(251, 191, 36, 0.08);
+
   /* Spacing */
   --sp-1: 4px; --sp-2: 8px; --sp-3: 12px; --sp-4: 16px;
   --sp-5: 20px; --sp-6: 24px; --sp-8: 32px; --sp-10: 40px; --sp-12: 48px;
@@ -68,6 +81,17 @@ a:hover { color: var(--text); }
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
+}
+
+/* Page layout utilities */
+.page-title {
+  font-size: var(--text-2xl);
+  margin-bottom: var(--sp-2);
+}
+.page-desc {
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  margin-bottom: var(--sp-4);
 }
 
 /* Buttons */
@@ -117,6 +141,8 @@ a:hover { color: var(--text); }
 .btn-blue { background: var(--gradient-btn); }
 .btn-gray { background: rgba(255,255,255,0.06); border: 1px solid var(--border); color: var(--text-muted); }
 .btn-gray:hover { color: var(--text); border-color: var(--border-hover); }
+.btn-sm { padding: var(--sp-1) var(--sp-3); font-size: var(--text-xs); }
+.btn-lg { padding: var(--sp-3) var(--sp-6); font-size: var(--text-base); }
 
 /* Cards - glassmorphism */
 .card {

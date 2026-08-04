@@ -148,7 +148,7 @@ onMounted(() => { checkUpdate() })
 
 <template>
   <div>
-    <h1 class="gradient-text" style="font-size:var(--text-2xl);margin-bottom:var(--sp-2)">{{ t('settings.title') }}</h1>
+    <h1 class="gradient-text page-title">{{ t('settings.title') }}</h1>
     <p class="page-desc">{{ t('settings.desc') }}</p>
 
     <div class="settings-grid">

@@ -121,7 +121,7 @@ onUnmounted(() => timers.forEach(clearInterval))
 
 <template>
   <div>
-    <h1 class="gradient-text" style="font-size:var(--text-2xl);margin-bottom:var(--sp-5)">{{ t('recorder.title') }}</h1>
+    <h1 class="gradient-text page-title">{{ t('recorder.title') }}</h1>
 
     <div class="top-grid">
       <!-- Recording -->
