@@ -5,3 +5,5 @@ loguru
 websockets
 python-osc
 pyyaml
+pystray
+Pillow

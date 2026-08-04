@@ -44,6 +44,13 @@ function toggleGroup(label: string) {
     expandedGroups.value.add(label)
   }
 }
+
+async function shutdownApp() {
+  if (!confirm(t('nav.shutdownConfirm'))) return
+  try {
+    await fetch('/api/v1/shutdown', { method: 'POST' })
+  } catch {}
+}
 </script>
 
 <template>
@@ -95,6 +102,7 @@ function toggleGroup(label: string) {
         <button class="lang-btn" :class="{ active: locale === 'zh' }" @click="setLocale('zh')">中</button>
         <button class="lang-btn" :class="{ active: locale === 'en' }" @click="setLocale('en')">EN</button>
       </div>
+      <button class="shutdown-btn" @click="shutdownApp">⏻ {{ t('nav.shutdown') }}</button>
       <button class="toggle-btn" @click="sidebarOpen = !sidebarOpen">
         {{ sidebarOpen ? '‹' : '›' }}
       </button>
@@ -214,6 +222,8 @@ function toggleGroup(label: string) {
 .lang-btn { padding: 2px 8px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: transparent; color: var(--text-muted); cursor: pointer; font-size: 11px; font-weight: 600; transition: all var(--transition); }
 .lang-btn.active { border-color: var(--accent); color: var(--accent); background: rgba(139,92,246,0.1); }
 .lang-btn:hover { border-color: var(--border-hover); color: var(--text); }
+.shutdown-btn { margin: var(--sp-2) var(--sp-3); padding: var(--sp-2); width: calc(100% - 2 * var(--sp-3)); border: 1px solid var(--border); border-radius: var(--radius-sm); background: transparent; color: var(--text-muted); cursor: pointer; font-size: var(--text-xs); transition: all var(--transition); }
+.shutdown-btn:hover { color: var(--danger); border-color: var(--danger); background: rgba(239,68,68,0.06); }
 
 /* Main content */
 .main {

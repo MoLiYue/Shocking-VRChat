@@ -13,6 +13,8 @@ export default {
     waveTest: '波形测试',
     recorder: '录制回放',
     settings: '设置',
+    shutdown: '关闭程序',
+    shutdownConfirm: '确定要关闭程序？设备连接将断开。',
   },
   // Common
   common: {

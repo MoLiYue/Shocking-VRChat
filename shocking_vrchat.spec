@@ -58,6 +58,10 @@ a = Analysis(
         'websockets.server',
         'websockets.asyncio',
         'websockets.asyncio.server',
+        # System tray
+        'pystray',
+        'pystray._win32',
+        'PIL',
     ],
     hookspath=[],
     hooksconfig={},
@@ -75,7 +79,7 @@ a = Analysis(
         # IPython / Jupyter
         'IPython', 'jupyter', 'notebook',
         # Other unused
-        'numpy', 'matplotlib', 'PIL', 'cv2', 'scipy',
+        'numpy', 'matplotlib', 'cv2', 'scipy',
         'pandas', 'sklearn', 'torch', 'tensorflow',
     ],
     noarchive=False,
@@ -93,7 +97,7 @@ exe = EXE(
     bootloader_ignore_signals=False,
     strip=False,
     upx=True,
-    console=True,
+    console=False,
     icon=None,
 )
 

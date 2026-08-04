@@ -973,6 +973,16 @@ async def api_v1_engine_restart():
 async def api_v1_engine_status():
     return {'running': engine.running}
 
+@app.post("/api/v1/shutdown")
+async def api_v1_shutdown():
+    """Shutdown the entire program."""
+    logger.info("[shutdown] Shutdown requested via API.")
+    async def _do_shutdown():
+        await asyncio.sleep(0.5)
+        os._exit(0)
+    asyncio.create_task(_do_shutdown())
+    return {'success': True, 'message': 'Shutting down...'}
+
 # --- Auto Update ---
 _update_cache: dict = {}
 _update_cache_time = 0.0
@@ -2261,6 +2271,9 @@ def main():
     logger.info(f"Channel A: {enabled_a} params | Channel B: {enabled_b} params")
     logger.info(f"Web: :{SETTINGS['web_server']['listen_port']} | WS: :{SETTINGS['ws']['listen_port']} | OSC: :{SETTINGS['osc']['listen_port']}")
 
+    # System tray icon (Windows only, non-blocking)
+    _start_tray_icon()
+
     # Run FastAPI with Uvicorn (engine starts via startup event)
     import uvicorn
     uvicorn.run(
@@ -2270,6 +2283,47 @@ def main():
         log_level="warning",
         access_log=False,
     )
+
+
+def _start_tray_icon():
+    """Start system tray icon in a background thread (Windows only)."""
+    if sys.platform != 'win32':
+        return
+    try:
+        import pystray
+        from PIL import Image, ImageDraw
+    except ImportError:
+        logger.debug("[tray] pystray/Pillow not available, skipping tray icon.")
+        return
+
+    def _create_icon_image():
+        """Create a simple lightning bolt icon."""
+        img = Image.new('RGBA', (64, 64), (0, 0, 0, 0))
+        draw = ImageDraw.Draw(img)
+        # Purple circle background
+        draw.ellipse([4, 4, 60, 60], fill=(139, 92, 246, 255))
+        # Lightning bolt shape
+        draw.polygon([(32, 8), (18, 34), (28, 34), (24, 56), (46, 28), (34, 28), (38, 8)], fill=(255, 255, 255, 255))
+        return img
+
+    def _on_open(icon, item):
+        import webbrowser
+        webbrowser.open_new_tab(f"http://127.0.0.1:{SETTINGS['web_server']['listen_port']}")
+
+    def _on_quit(icon, item):
+        icon.stop()
+        os._exit(0)
+
+    port = SETTINGS['web_server']['listen_port']
+    menu = pystray.Menu(
+        pystray.MenuItem(f'打开管理页面 (:{port})', _on_open, default=True),
+        pystray.MenuItem('退出', _on_quit),
+    )
+    icon = pystray.Icon('ShockingVRChat', _create_icon_image(), 'Shocking VRChat', menu)
+
+    tray_thread = Thread(target=icon.run, daemon=True)
+    tray_thread.start()
+    logger.info("[tray] System tray icon started.")
 
 if __name__ == "__main__":
     try:

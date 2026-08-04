@@ -13,6 +13,8 @@ export default {
     waveTest: 'Wave Test',
     recorder: 'Recorder',
     settings: 'Settings',
+    shutdown: 'Shutdown',
+    shutdownConfirm: 'Shutdown the program? Device connections will be lost.',
   },
   // Common
   common: {
