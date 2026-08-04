@@ -22,7 +22,7 @@ class DGWSMessage():
         })
     async def send(self, conn):
         msg = self.__str__()
-        logger.debug(f'ID {conn.uuid}, SENDING {msg}')
+        logger.debug(f'[ws] Device {conn.uuid} sending: {msg}')
         ret = await conn.ws_conn.send(msg)
         return ret
 
@@ -76,11 +76,11 @@ class DGConnection():
                     if (self.strength[chann] != 0 and self.strength[chann] != limit):
                         await self.set_strength(chann, value=limit)
             elif msg.message.startswith('feedback-'):
-                logger.success(f'ID {self.uuid}, {msg.message}')
+                logger.info(f'[ws] Device {self.uuid} feedback: {msg.message}')
             else:
-                logger.error(f'ID {self.uuid}, unknown msg {msg.message}')
+                logger.warning(f'[ws] Device {self.uuid} unknown msg: {msg.message}')
         elif msg.type == 'heartbeat':
-            logger.debug(f'ID {self.uuid}, RECV HB')
+            logger.debug(f'[ws] Device {self.uuid} heartbeat')
     
     def get_upper_strength(self, channel='A'):
         limit = self.strength_limit[channel]
@@ -95,11 +95,11 @@ class DGConnection():
                 raise ValueError()
             limit = self.get_upper_strength(channel)
             if value > int(limit) and mode == '2':
-                logger.warning(f'ID {self.uuid}, set_strength, {value} is over the limit {limit}, setting to {limit}.')
+                logger.warning(f'[ws] Device {self.uuid} set_strength: {value} over limit {limit}, clamping to {limit}')
                 value = limit
         if mode == '2':
             self.strength[channel] = value
-        logger.debug(f"Channel {channel}, set strength, mode {mode}, value {value}.")
+        logger.debug(f'[ws] Set strength: ch={channel} mode={mode} val={value}')
         msg = DGWSMessage('msg', self.master_uuid, self.uuid, f"strength-{'1' if channel == 'A' else '2'}+{mode}+{value}")
         await msg.send(self)
 
@@ -125,7 +125,7 @@ class DGConnection():
     async def heartbeat(self):
         while 1:
             await asyncio.sleep(60)
-            logger.debug(f'ID {self.uuid}, Sending HB.')
+            logger.debug(f'[ws] Device {self.uuid} sending heartbeat')
             await self.ws_conn.send(DGWSMessage.HEARTBEAT)
     
     async def connection_init(self):
@@ -134,24 +134,24 @@ class DGConnection():
         await self.set_strength('B', value=1, force=True)
 
     async def serve(self):
-        logger.success(f'New device connected, id {self.uuid}.')
+        logger.success(f'[ws] Device connected: {self.uuid}')
         msg = DGWSMessage('bind', clientId=str(self.uuid), targetId='', message='targetId')
         await msg.send(self)
         asyncio.create_task(self.connection_init())
         try:
             hb = asyncio.ensure_future(self.heartbeat())
             async for message in self.ws_conn:
-                logger.debug(f'WSID {self.uuid}, RECVMSG {message}.')
+                logger.debug(f'[ws] Device {self.uuid} recv: {message}')
                 event = json.loads(message)
                 msg = DGWSMessage(**event)
                 try:
                     await self.msg_handler(msg)
                 except Exception as e:
-                    logger.error(traceback.format_exc())
+                    logger.error(f'[ws] {traceback.format_exc()}')
                     DGWSMessage('error',message='500')
             await self.ws_conn.wait_closed()
         finally:
-            logger.warning(f'Device disconnected, id {self.uuid}.')
+            logger.warning(f'[ws] Device disconnected: {self.uuid}')
             hb.cancel()
             WS_CONNECTIONS.remove(self)
 
@@ -161,7 +161,7 @@ class DGConnection():
             try:
                 cls.wave_observer(channel, wavestr)
             except Exception:
-                logger.exception('wave_observer failed')
+                logger.exception('[ws] wave_observer failed')
         for conn in WS_CONNECTIONS:
             conn : cls
             await conn.send_wave(channel=channel, wavestr=wavestr)
@@ -174,7 +174,7 @@ class DGConnection():
             try:
                 cls.clear_observer(channel)
             except Exception:
-                logger.exception('clear_observer failed')
+                logger.exception('[ws] clear_observer failed')
         for conn in WS_CONNECTIONS:
             conn : cls
             await conn.clear_wave(channel=channel)

@@ -67,7 +67,7 @@ class ShockHandler(BaseHandler):
         self.boost_active = False         # currently boosted
     
     def start_background_jobs(self):
-        # logger.info(f"Channel: {self.channel}, background job started.")
+        logger.info(f'[handler] Channel {self.channel} background job started')
         asyncio.ensure_future(self.clear_check())
         if self.shock_mode == 'distance':
             asyncio.ensure_future(self.distance_background_wave_feeder())
@@ -111,7 +111,7 @@ class ShockHandler(BaseHandler):
             source_id=f"{self.channel}_{self.shock_mode}_{context.get('address', '')}",
         )
         if not accepted:
-            logger.debug(f"[queue] dropped (cooldown): {self.channel} {self.shock_mode} {context.get('address')}")
+            logger.debug(f"[handler] Queue dropped (cooldown): {self.channel} {self.shock_mode} {context.get('address')}")
 
     @staticmethod
     def summarize_wave(wavestr):
@@ -136,7 +136,7 @@ class ShockHandler(BaseHandler):
         param = context.get('address') if context else '-'
         raw = context.get('raw_args') if context else [value]
         msg = (
-            f"[trigger] channel={self.channel} mode={self.shock_mode} "
+            f"[handler] [trigger] channel={self.channel} mode={self.shock_mode} "
             f"param={param} raw={raw} value={value:.3f}"
         )
         if normalized is not None:
@@ -146,7 +146,7 @@ class ShockHandler(BaseHandler):
         logger.debug(msg)
 
     def log_output(self, *, source, strength=None, wave=None, extra=''):
-        msg = f"[output] channel={self.channel} mode={self.shock_mode} source={source}"
+        msg = f"[handler] [output] channel={self.channel} mode={self.shock_mode} source={source}"
         if strength is not None:
             msg += f" strength={strength:.3f}"
         if wave is not None:
@@ -156,7 +156,7 @@ class ShockHandler(BaseHandler):
         logger.debug(msg)
 
     async def clear_check(self):
-        # logger.info(f'Channel {self.channel} started clear check.')
+        logger.debug(f'[handler] Channel {self.channel} clear check started')
         sleep_time = 0.05
         while 1:
             await asyncio.sleep(sleep_time)
@@ -176,11 +176,11 @@ class ShockHandler(BaseHandler):
                 self.combo_in_touch_mode = False
                 self.combo_shock_fired = False
                 await self.DG_CONN.broadcast_clear_wave(self.channel)
-                logger.debug(f"[clear] channel={self.channel} mode={self.shock_mode} reason=timeout")
+                logger.debug(f"[handler] Channel {self.channel} cleared after timeout")
     
     async def feed_wave(self):
         raise NotImplemented
-        logger.info(f'Channel {self.channel} started wave feeding.')
+        logger.debug(f'[handler] Channel {self.channel} wave feeder started')
         sleep_time = 1
         while 1:
             await asyncio.sleep(sleep_time)
@@ -301,7 +301,7 @@ class ShockHandler(BaseHandler):
     @staticmethod
     def normalize_between(value, bottom, top):
         if top <= bottom:
-            logger.warning(f'Invalid normalize range: bottom={bottom}, top={top}.')
+            logger.warning(f'[handler] Invalid normalize range: bottom={bottom}, top={top}')
             return 0
         clamped = min(max(value, bottom), top)
         return (clamped - bottom) / (top - bottom)
@@ -392,7 +392,7 @@ class ShockHandler(BaseHandler):
             try:
                 threshold = float(profile.get('threshold', 0))
             except (TypeError, ValueError):
-                logger.warning(f'Channel {self.channel}, invalid touch preset threshold: {profile}')
+                logger.warning(f'[handler] Channel {self.channel} invalid touch preset threshold: {profile}')
                 continue
             if current_strength >= threshold:
                 if selected_profile is None or threshold >= selected_profile['threshold']:
@@ -572,7 +572,7 @@ class ShockHandler(BaseHandler):
             n_derivative = self.mode_config['touch']['n_derivative']
             derivative_values = self.compute_derivative()
             if n_derivative < 0 or n_derivative >= len(derivative_values):
-                logger.warning(f'Channel {self.channel}, invalid n_derivative {n_derivative}, fallback to 1.')
+                logger.warning(f'[handler] Channel {self.channel} invalid n_derivative {n_derivative}, fallback to 1')
                 n_derivative = 1
             current_strength = derivative_values[n_derivative]
             derivative_params = self.mode_config['touch']['derivative_params'][n_derivative]
@@ -633,7 +633,7 @@ class ShockHandler(BaseHandler):
                 # Switch to touch mode
                 self.combo_in_touch_mode = True
                 self.touch_dist_arr.clear()
-                logger.debug(f"[combo] channel={self.channel} switched to touch after {touch_duration:.2f}s")
+                logger.debug(f"[handler] [combo] channel={self.channel} switched to touch after {touch_duration:.2f}s")
 
             if self.combo_in_touch_mode:
                 # Sustained: feed to touch logic
@@ -651,7 +651,7 @@ class ShockHandler(BaseHandler):
                     # Short touch → fire shock
                     self.combo_shock_fired = True
                     await self.handler_shock(distance=trigger_bottom + 0.01, context=context)
-                    logger.debug(f"[combo] channel={self.channel} fired shock (duration={touch_duration:.2f}s)")
+                    logger.debug(f"[handler] [combo] channel={self.channel} fired shock (duration={touch_duration:.2f}s)")
                 self.combo_touch_start = 0
                 self.combo_in_touch_mode = False
 

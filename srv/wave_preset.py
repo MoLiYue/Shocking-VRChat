@@ -94,7 +94,7 @@ class WavePresetLibrary:
     def reload(self):
         self.presets = {}
         if not self.preset_dir.exists():
-            logger.warning(f"Wave preset directory not found: {self.preset_dir}")
+            logger.warning(f"[preset] Directory not found: {self.preset_dir}")
             return
         for preset_file in sorted(self.preset_dir.glob("*.json")):
             try:
@@ -116,16 +116,16 @@ class WavePresetLibrary:
                     "preview_sections": raw.get("preview_sections"),
                     **_decode_ops_to_samples(ops),
                 }
-                logger.info(f"Loaded wave preset `{name}` with {len(ops)} ops.")
+                logger.info(f"[preset] Loaded: {name} ({len(ops)} ops)")
             except Exception as exc:
-                logger.error(f"Failed to load wave preset {preset_file}: {exc}")
+                logger.error(f"[preset] Failed to load {preset_file.name}: {exc}")
 
     def get(self, name: Optional[str]):
         if not name:
             return None
         preset = self.presets.get(name)
         if preset is None:
-            logger.warning(f"Wave preset `{name}` not found.")
+            logger.warning(f"[preset] Not found: {name}")
         return preset
 
     def get_raw(self, name: Optional[str]):

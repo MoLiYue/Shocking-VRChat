@@ -473,7 +473,7 @@ async def _strength_boost_checker(stop_event: asyncio.Event):
                 _strength_boost[ch] = 0
                 for conn in srv.WS_CONNECTIONS:
                     await conn.set_strength(ch, mode='0', value=boost_val, force=True)
-                logger.debug(f"[boost] channel={ch} reverted -{boost_val}")
+                logger.debug(f"[strength] channel={ch} reverted -{boost_val}")
 
 async def _ws_status_pusher(stop_event: asyncio.Event):
     """Periodically push device status to subscribed WS clients."""
@@ -529,7 +529,7 @@ async def api_v1_strength_limit_set(request: Request):
     if changed:
         config_save()
         DGConnection.refresh_limits_from_settings(SETTINGS)
-        logger.info(f"[strength_limit] Updated: A={SETTINGS_BASIC['dglab3']['channel_a']['strength_limit']}(+{SETTINGS_BASIC['dglab3']['channel_a'].get('overlimit_max',20)}), B={SETTINGS_BASIC['dglab3']['channel_b']['strength_limit']}(+{SETTINGS_BASIC['dglab3']['channel_b'].get('overlimit_max',20)})")
+        logger.info(f"[strength] Updated: A={SETTINGS_BASIC['dglab3']['channel_a']['strength_limit']}(+{SETTINGS_BASIC['dglab3']['channel_a'].get('overlimit_max',20)}), B={SETTINGS_BASIC['dglab3']['channel_b']['strength_limit']}(+{SETTINGS_BASIC['dglab3']['channel_b'].get('overlimit_max',20)})")
     return {
         'success': True,
         'channel_a': SETTINGS_BASIC['dglab3']['channel_a']['strength_limit'],
@@ -617,7 +617,7 @@ async def api_v1_overlimit_rules_set(request: Request):
     _overlimit_rules = data.get('rules', [])
     _save_overlimit_rules()
     _evaluate_overlimit_rules()
-    logger.info(f"[overlimit_rules] Saved {len(_overlimit_rules)} rules")
+    logger.info(f"[config] Overlimit rules saved: {len(_overlimit_rules)} rules")
     return {'success': True, 'rules': _overlimit_rules}
 
 @app.delete("/api/v1/overlimit_rules/{index}")
@@ -626,7 +626,7 @@ async def api_v1_overlimit_rules_delete(index: int):
         removed = _overlimit_rules.pop(index)
         _save_overlimit_rules()
         _evaluate_overlimit_rules()
-        logger.info(f"[overlimit_rules] Deleted rule: {removed.get('name', index)}")
+        logger.info(f"[config] Overlimit rule deleted: {removed.get('name', index)}")
         return {'success': True, 'rules': _overlimit_rules}
     raise HTTPException(400, 'invalid index')
 
@@ -702,7 +702,7 @@ async def api_v1_wave_test_start(request: Request):
     _wave_test_state['strength'] = strength
     _wave_test_state['wave_scale'] = wave_scale
     _wave_test_state['preset'] = preset_name
-    logger.info(f"[wave_test] Started: ch={channel} str={strength} scale={wave_scale} preset={preset_name or 'default'}")
+    logger.info(f"[wave-test] Started: ch={channel} str={strength} scale={wave_scale} preset={preset_name or 'default'}")
     return {'result': 'OK', 'active': True}
 
 @app.post("/api/v1/wave_test/stop")
@@ -713,7 +713,7 @@ async def api_v1_wave_test_stop():
     for ch in channels:
         for conn in srv.WS_CONNECTIONS:
             await conn.clear_wave(ch)
-    logger.info("[wave_test] Stopped")
+    logger.info("[wave-test] Stopped")
     return {'result': 'OK', 'active': False}
 
 @app.post("/api/v1/wave_test/update")
@@ -802,7 +802,7 @@ async def _wave_test_loop(stop_event: asyncio.Event):
         except asyncio.CancelledError:
             return
         except Exception as e:
-            logger.error(f"[wave_test_loop] error: {e}")
+            logger.error(f"[wave-test] error: {e}")
             await asyncio.sleep(0.5)
 
 # --- Settings ---
@@ -890,13 +890,13 @@ async def api_v1_settings_update(request: Request):
             await asyncio.sleep(0.5)
             if engine_needs_restart:
                 if ws_restart:
-                    logger.info("[settings] Restarting engine (WS config changed)...")
+                    logger.info("[config] Restarting engine (WS config changed)...")
                     await engine.restart(keep_ws=False)
                 else:
-                    logger.info("[settings] Restarting engine (preserving WS connections)...")
+                    logger.info("[config] Restarting engine (preserving WS connections)...")
                     await engine.restart(keep_ws=True)
             if web_restart:
-                logger.warning("[settings] Web server port/host changed. Full restart required.")
+                logger.warning("[config] Web server port/host changed. Full restart required.")
                 _restart_program()
         asyncio.create_task(_delayed_restart())
     return {
@@ -2042,7 +2042,7 @@ async def command_queue_processor(stop_event: asyncio.Event):
         except asyncio.CancelledError:
             return
         except Exception as e:
-            logger.error(f"[command_queue] error: {e}")
+            logger.error(f"[queue] error: {e}")
             await asyncio.sleep(0.01)
 
 # --- DG-LAB WebSocket handler ---
@@ -2088,7 +2088,7 @@ class Engine:
             avatar_params = SETTINGS['dglab3'][config_chann_name].get('avatar_params', [])
             for param_entry in avatar_params:
                 if not param_entry.get('enabled', True):
-                    logger.info(f"Channel {chann} skipping disabled param: {param_entry['path']}")
+                    logger.info(f"[engine] Channel {chann} skipping disabled param: {param_entry['path']}")
                     continue
                 param_path = param_entry['path']
                 param_mode = param_entry['mode']
@@ -2100,7 +2100,7 @@ class Engine:
                         handler_mode=param_mode,
                     )
                     self.handlers.append(channel_handlers[param_mode])
-                logger.success(f"Channel {chann} mode {param_mode} listening {param_path}")
+                logger.info(f"[engine] Channel {chann} mode {param_mode} listening {param_path}")
                 self.dispatcher.map(param_path, channel_handlers[param_mode].osc_handler)
 
         global handlers
@@ -2133,10 +2133,10 @@ class Engine:
                 self.dispatcher, asyncio.get_event_loop()
             )
             self._transport, _ = await server.create_serve_endpoint()
-            logger.success(f'OSC Listening: {SETTINGS["osc"]["listen_host"]}:{SETTINGS["osc"]["listen_port"]}')
+            logger.success(f'[engine] OSC Listening: {SETTINGS["osc"]["listen_host"]}:{SETTINGS["osc"]["listen_port"]}')
         except Exception:
             logger.error(traceback.format_exc())
-            logger.error("OSC监听失败，可能存在端口冲突")
+            logger.error("[engine] OSC listen failed, possible port conflict")
             await self._cleanup_tasks()
             return
 
@@ -2152,10 +2152,10 @@ class Engine:
         try:
             self._ws_server = await wsserve(wshandler, SETTINGS['ws']["listen_host"], SETTINGS['ws']["listen_port"])
             self._ws_running = True
-            logger.success(f'WS Listening: {SETTINGS["ws"]["listen_host"]}:{SETTINGS["ws"]["listen_port"]}')
+            logger.success(f'[engine] WS Listening: {SETTINGS["ws"]["listen_host"]}:{SETTINGS["ws"]["listen_port"]}')
         except Exception:
             logger.error(traceback.format_exc())
-            logger.error("WS服务监听失败，可能存在端口冲突")
+            logger.error("[engine] WS server listen failed, possible port conflict")
 
     async def _stop_ws_server(self):
         """Stop the DG-LAB WebSocket server."""
@@ -2264,7 +2264,7 @@ class ConfigFileInited(Exception):
     pass
 
 def config_init():
-    logger.info(f'Loading config: {CONFIG_FILENAME_BASIC}, {CONFIG_FILENAME}')
+    logger.info(f'[init] Loading config: {CONFIG_FILENAME_BASIC}, {CONFIG_FILENAME}')
     global SETTINGS, SETTINGS_BASIC, SERVER_IP
     if not (os.path.exists(CONFIG_FILENAME) and os.path.exists(CONFIG_FILENAME_BASIC)):
         SETTINGS['ws']['master_uuid'] = str(uuid.uuid4())
@@ -2274,13 +2274,13 @@ def config_init():
     SETTINGS, SETTINGS_BASIC = load_config_files()
 
     if SETTINGS.get('version', None) != CONFIG_FILE_VERSION or SETTINGS_BASIC.get('version', None) != CONFIG_FILE_VERSION:
-        logger.error(f"配置文件版本不匹配！请删除 {CONFIG_FILENAME_BASIC} 和 {CONFIG_FILENAME} 后重启。")
+        logger.error(f"[init] Config version mismatch! Delete {CONFIG_FILENAME_BASIC} and {CONFIG_FILENAME} and restart.")
         raise Exception(f'Config version mismatch.')
     SERVER_IP = SETTINGS['SERVER_IP'] or get_current_ip()
 
     reset_logger()
     update_config_mtimes()
-    logger.success("配置加载完成 | Websocket 需要监听外来连接，如弹出防火墙提示请允许")
+    logger.success("[init] Config loaded. WS needs external access - allow firewall prompt if shown.")
 
 def main():
     if SETTINGS['general']['auto_open_qr_web_page'] and not os.environ.pop('SHOCKING_SKIP_OPEN', None):
@@ -2290,13 +2290,13 @@ def main():
         info_ip = SETTINGS['web_server']['listen_host']
         if info_ip == '0.0.0.0':
             info_ip = get_current_ip()
-        logger.success(f"请打开浏览器访问 http://{info_ip}:{SETTINGS['web_server']['listen_port']}")
+        logger.success(f"[init] Open browser: http://{info_ip}:{SETTINGS['web_server']['listen_port']}")
 
     # Startup summary
     enabled_a = sum(1 for p in SETTINGS['dglab3']['channel_a']['avatar_params'] if p.get('enabled', True))
     enabled_b = sum(1 for p in SETTINGS['dglab3']['channel_b']['avatar_params'] if p.get('enabled', True))
-    logger.info(f"Channel A: {enabled_a} params | Channel B: {enabled_b} params")
-    logger.info(f"Web: :{SETTINGS['web_server']['listen_port']} | WS: :{SETTINGS['ws']['listen_port']} | OSC: :{SETTINGS['osc']['listen_port']}")
+    logger.info(f"[init] Channel A: {enabled_a} params | Channel B: {enabled_b} params")
+    logger.info(f"[init] Web: :{SETTINGS['web_server']['listen_port']} | WS: :{SETTINGS['ws']['listen_port']} | OSC: :{SETTINGS['osc']['listen_port']}")
 
     # System tray icon (Windows only, non-blocking)
     _start_tray_icon()
@@ -2357,7 +2357,7 @@ if __name__ == "__main__":
         config_init()
         main()
     except ConfigFileInited:
-        logger.success('未找到配置文件，启动配置向导...')
+        logger.success('[init] No config file found, starting setup wizard...')
         import webbrowser
         port = SETTINGS['web_server']['listen_port']
         webbrowser.open_new_tab(f"http://127.0.0.1:{port}/setup")
@@ -2379,13 +2379,13 @@ if __name__ == "__main__":
         while not getattr(app.state, 'setup_complete', False):
             time.sleep(0.5)
 
-        logger.success('配置向导完成，正在重启...')
+        logger.success('[init] Setup wizard complete, restarting...')
         os.environ['SHOCKING_SKIP_OPEN'] = '1'
         config_save()
         time.sleep(1)
         _restart_program()
     except Exception as e:
         logger.error(traceback.format_exc())
-        logger.error("Unexpected Error.")
-    logger.info('正在退出...')
+        logger.error("[init] Unexpected Error.")
+    logger.info('[shutdown] Exiting...')
     time.sleep(1)
