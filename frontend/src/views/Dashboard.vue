@@ -58,7 +58,7 @@ function connectLiveWs() {
       } else if (msg.topic === 'osc' && msg.event) {
         oscEvents.value.unshift(msg.event)
         if (oscEvents.value.length > 20) oscEvents.value = oscEvents.value.slice(0, 20)
-        lastTrigger.value = '刚刚'
+        lastTrigger.value = t('dashboard.justNow')
       } else if (msg.topic === 'status') {
         const devices = msg.devices || []
         deviceCount.value = devices.length
@@ -103,8 +103,8 @@ async function pollStatus() {
     oscStatus.value = data.osc_listening || ''
     if (data.last_osc_time) {
       const ago = Math.round(Date.now() / 1000 - data.last_osc_time)
-      lastTrigger.value = ago < 2 ? '刚刚' : `${ago}s 前`
-    } else { lastTrigger.value = '无数据' }
+      lastTrigger.value = ago < 2 ? t('dashboard.justNow') : `${ago}s`
+    } else { lastTrigger.value = t('dashboard.noData') }
   } catch { connected.value = false }
 }
 
@@ -220,18 +220,18 @@ async function loadProfiles() {
 async function saveProfile() {
   if (!profileName.value.trim()) return
   const data = await apiPut(`/api/v1/profiles/${encodeURIComponent(profileName.value)}`)
-  if (data.success) { profileMsg.value = '已保存'; profileName.value = ''; loadProfiles() }
-  else profileMsg.value = data.message || '失败'
+  if (data.success) { profileMsg.value = t('dashboard.profileSaved'); profileName.value = ''; loadProfiles() }
+  else profileMsg.value = data.message || t('dashboard.profileFailed')
   setTimeout(() => profileMsg.value = '', 3000)
 }
 
 async function loadProfile(name: string) {
   const data = await apiPost(`/api/v1/profiles/${encodeURIComponent(name)}`)
-  if (data.success) addLog(`切换预设: ${name}`)
+  if (data.success) addLog(t('dashboard.profileSwitched', { name }))
 }
 
 async function deleteProfile(name: string) {
-  if (!confirm(`删除 "${name}"？`)) return
+  if (!confirm(t('dashboard.profileDeleteConfirm', { name }))) return
   await apiDelete(`/api/v1/profiles/${encodeURIComponent(name)}`)
   loadProfiles()
 }
