@@ -192,6 +192,9 @@ def load_config_files():
 def reset_logger():
     logger.remove()
     logger.add(sys.stderr, level=SETTINGS.get('log_level', 'INFO'))
+    # File log (always available, even without console)
+    _log_file = os.path.join(get_exe_dir(), 'shocking_vrchat.log')
+    logger.add(_log_file, level='DEBUG', rotation='5 MB', retention=2, encoding='utf-8')
     logger.add(_log_buffer_sink, level=SETTINGS.get('log_level', 'INFO'), format="{time:HH:mm:ss.SSS} | {level:<8} | {name}:{function}:{line} - {message}")
 
 
@@ -1663,6 +1666,129 @@ def _playback_worker(filepath, speed, loop):
         _playback_state['active'] = False
         _playback_state['progress'] = 0
 
+# --- Wave Simulate ---
+@app.post("/api/v1/wave_simulate")
+async def api_v1_wave_simulate(request: Request):
+    """Simulate wave output for given mode parameters and input value. Pure computation, no device needed."""
+    from srv.wave_preset import WavePresetLibrary
+    try:
+        data = await request.json()
+    except (json.JSONDecodeError, ValueError):
+        return JSONResponse(status_code=400, content={"error": "Invalid or missing JSON body"})
+    mode = data.get('mode', 'distance')
+    channel = data.get('channel', 'a').lower()
+    input_value = float(data.get('input_value', 0.5))
+    params = data.get('params', {})
+
+    input_value = max(0.0, min(1.0, input_value))
+    trigger_range = params.get('trigger_range', {'bottom': 0.0, 'top': 0.8})
+    bottom = float(trigger_range.get('bottom', 0.0))
+    top = float(trigger_range.get('top', 0.8))
+
+    # Normalize input through trigger range
+    if top <= bottom:
+        normalized = 0.0
+    elif input_value <= bottom:
+        normalized = 0.0
+    else:
+        normalized = min(1.0, (input_value - bottom) / (top - bottom))
+
+    # Apply curve if available
+    effective_strength = normalized
+    curve_getter = ShockHandler._curve_getter
+    if curve_getter:
+        points = curve_getter(f'channel_{channel}')
+        if points:
+            effective_strength = apply_curve(normalized, points)
+
+    # Determine wave parameters
+    wave_preset = params.get('wave_preset') or None
+    wave_scale = max(0.0, min(1.0, float(params.get('wave_scale', 1.0))))
+    texture_floor = max(0.0, min(1.0, float(params.get('texture_floor', 0.0))))
+
+    lib = WavePresetLibrary()
+    samples = []
+
+    if mode == 'shock':
+        duration_s = max(0.5, min(10.0, float(params.get('duration', 2.0))))
+        total_samples = int(duration_s * 40)  # 40 samples/sec (25ms each)
+
+        if wave_preset and lib.get(wave_preset):
+            preset = lib.get(wave_preset)
+            texture_samples = preset.get('texture_samples', [])
+            if texture_samples:
+                for i in range(total_samples):
+                    # Shock mode: strength decays from 1.0 to 0.0 over duration
+                    t_frac = i / max(1, total_samples - 1)
+                    envelope = max(0.0, 1.0 - t_frac)
+                    tex_idx = i % len(texture_samples)
+                    tex_val = texture_samples[tex_idx]
+                    val = tex_val * wave_scale * envelope * effective_strength
+                    samples.append(max(0.0, min(1.0, val)))
+            else:
+                for i in range(total_samples):
+                    t_frac = i / max(1, total_samples - 1)
+                    envelope = max(0.0, 1.0 - t_frac)
+                    samples.append(envelope * wave_scale * effective_strength)
+        else:
+            # Default shock wave: full strength decaying
+            for i in range(total_samples):
+                t_frac = i / max(1, total_samples - 1)
+                envelope = max(0.0, 1.0 - t_frac)
+                samples.append(envelope * wave_scale * effective_strength)
+
+        duration_ms = duration_s * 1000
+
+    elif mode in ('distance', 'touch'):
+        window_ops = max(1, min(16, int(params.get('wave_window_ops', 4))))
+        sample_step = max(0.25, min(8.0, float(params.get('wave_sample_step', 1.0))))
+        total_samples = window_ops * 4  # 4 samples per op
+
+        if wave_preset and lib.get(wave_preset):
+            preset = lib.get(wave_preset)
+            texture_samples = preset.get('texture_samples', [])
+            freq_samples = preset.get('freq_samples', [])
+            if texture_samples:
+                for i in range(total_samples):
+                    position = i * sample_step
+                    tex_len = len(texture_samples)
+                    pos_mod = position % tex_len
+                    left = int(pos_mod) % tex_len
+                    right = (left + 1) % tex_len
+                    frac = pos_mod - int(pos_mod)
+                    tex_val = texture_samples[left] * (1.0 - frac) + texture_samples[right] * frac
+                    # Apply texture_floor
+                    lifted = texture_floor + tex_val * (1.0 - texture_floor)
+                    val = lifted * wave_scale * effective_strength
+                    samples.append(max(0.0, min(1.0, val)))
+            else:
+                for i in range(total_samples):
+                    samples.append(wave_scale * effective_strength)
+        else:
+            # No preset: generate simple pulse based on freq_ms
+            freq_ms = max(10, min(240, int(params.get('freq_ms', 10))))
+            for i in range(total_samples):
+                samples.append(wave_scale * effective_strength)
+
+        duration_ms = total_samples * 25  # Each sample = 25ms
+
+    else:
+        duration_ms = 0
+
+    return {
+        'samples': [round(s, 4) for s in samples],
+        'effective_strength': round(effective_strength, 4),
+        'duration_ms': duration_ms,
+        'info': {
+            'mode': mode,
+            'input_value': input_value,
+            'normalized': round(normalized, 4),
+            'wave_preset': wave_preset,
+            'total_samples': len(samples),
+        },
+    }
+
+
 # --- Wave Presets ---
 @app.get("/api/v1/wave_presets")
 async def api_v1_wave_presets():
@@ -2353,6 +2479,8 @@ def _start_tray_icon():
     logger.info("[tray] System tray icon started.")
 
 if __name__ == "__main__":
+    # Ensure errors are visible even with console=False (Windows GUI mode)
+    _error_log_path = os.path.join(get_exe_dir(), 'error.log')
     try:
         config_init()
         main()
@@ -2385,7 +2513,33 @@ if __name__ == "__main__":
         time.sleep(1)
         _restart_program()
     except Exception as e:
-        logger.error(traceback.format_exc())
-        logger.error("[init] Unexpected Error.")
-    logger.info('[shutdown] Exiting...')
+        err_msg = traceback.format_exc()
+        # Write to error.log (always accessible even without console)
+        try:
+            with open(_error_log_path, 'w', encoding='utf-8') as f:
+                f.write(f"Shocking VRChat crashed at startup:\n\n{err_msg}\n")
+        except:
+            pass
+        # Try logger (works if stderr exists)
+        try:
+            logger.error(err_msg)
+            logger.error("[init] Unexpected Error. See error.log for details.")
+        except:
+            pass
+        # Show Windows message box if GUI mode (no console)
+        if sys.platform == 'win32' and not sys.stderr:
+            try:
+                import ctypes
+                ctypes.windll.user32.MessageBoxW(
+                    0,
+                    f"程序启动失败，详细信息已写入 error.log:\n\n{str(e)[:500]}",
+                    "Shocking VRChat - Error",
+                    0x10  # MB_ICONERROR
+                )
+            except:
+                pass
+    try:
+        logger.info('[shutdown] Exiting...')
+    except:
+        pass
     time.sleep(1)
