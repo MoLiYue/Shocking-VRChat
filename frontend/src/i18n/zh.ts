@@ -11,6 +11,7 @@ export default {
     modeTouch: '触摸',
     modeCombo: 'Combo',
     waveTest: '波形测试',
+    logs: '日志',
     recorder: '录制回放',
     settings: '设置',
     shutdown: '关闭程序',
@@ -300,6 +301,14 @@ export default {
   recorder: {
     title: '🎙 录制回放',
     desc: '录制和回放 OSC 输入',
+  },
+  // Logs
+  logs: {
+    title: '📋 日志',
+    filter: '搜索日志...',
+    autoScroll: '自动滚动',
+    clear: '清空',
+    empty: '暂无日志',
   },
   // Overlimit
   overlimit: {

@@ -19,6 +19,7 @@ const router = createRouter({
     { path: '/strength', component: () => import('./views/StrengthLimit.vue') },
     { path: '/overlimit-rules', component: () => import('./views/OverlimitRules.vue') },
     { path: '/wave-test', component: () => import('./views/WaveTest.vue') },
+    { path: '/logs', component: () => import('./views/Logs.vue') },
     // Legacy redirects
     { path: '/curve', redirect: '/mode/distance' },
     { path: '/combo', redirect: '/mode/combo' },

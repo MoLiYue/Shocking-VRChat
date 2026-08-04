@@ -11,6 +11,7 @@ export default {
     modeTouch: 'Touch',
     modeCombo: 'Combo',
     waveTest: 'Wave Test',
+    logs: 'Logs',
     recorder: 'Recorder',
     settings: 'Settings',
     shutdown: 'Shutdown',
@@ -300,6 +301,14 @@ export default {
   recorder: {
     title: '🎙 Recorder',
     desc: 'Record and playback OSC input',
+  },
+  // Logs
+  logs: {
+    title: '📋 Logs',
+    filter: 'Filter logs...',
+    autoScroll: 'Auto-scroll',
+    clear: 'Clear',
+    empty: 'No logs yet',
   },
   // Overlimit
   overlimit: {

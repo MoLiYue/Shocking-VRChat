@@ -192,6 +192,28 @@ def load_config_files():
 def reset_logger():
     logger.remove()
     logger.add(sys.stderr, level=SETTINGS.get('log_level', 'INFO'))
+    logger.add(_log_buffer_sink, level=SETTINGS.get('log_level', 'INFO'), format="{time:HH:mm:ss.SSS} | {level:<8} | {name}:{function}:{line} - {message}")
+
+
+# --- Log buffer for web UI ---
+_LOG_BUFFER_MAX = 500
+_log_buffer: list = []  # [{text, level, time}]
+
+def _log_buffer_sink(message):
+    record = message.record
+    entry = {
+        'text': str(message).rstrip('\n'),
+        'level': record['level'].name.lower(),
+        'time': record['time'].timestamp(),
+    }
+    _log_buffer.append(entry)
+    if len(_log_buffer) > _LOG_BUFFER_MAX:
+        del _log_buffer[:len(_log_buffer) - _LOG_BUFFER_MAX]
+    # Push to WebSocket subscribers
+    try:
+        _ws_broadcast_sync('log', entry)
+    except:
+        pass
 
 
 def update_config_mtimes():
@@ -982,6 +1004,11 @@ async def api_v1_shutdown():
         os._exit(0)
     asyncio.create_task(_do_shutdown())
     return {'success': True, 'message': 'Shutting down...'}
+
+@app.get("/api/v1/logs")
+async def api_v1_logs():
+    """Get recent log entries."""
+    return {'logs': _log_buffer[-200:]}
 
 # --- Auto Update ---
 _update_cache: dict = {}
