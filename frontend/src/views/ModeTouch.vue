@@ -1,9 +1,8 @@
 <script setup lang="ts">
-import { ref, onMounted, computed } from 'vue'
+import { ref, onMounted } from 'vue'
 import { api, apiPost } from '@/api'
 import { useI18n } from '@/i18n'
 import WavePreview from '@/components/WavePreview.vue'
-import WaveSimulator from '@/components/WaveSimulator.vue'
 
 const { t } = useI18n()
 const ch = ref<'a' | 'b'>('a')
@@ -19,19 +18,6 @@ const triggerBottom = ref(0)
 const triggerTop = ref(0.8)
 const presets = ref<string[]>([])
 const msg = ref('')
-
-// Reactive params for wave simulator
-const simParams = computed(() => ({
-  wave_preset: wavePreset.value || null,
-  wave_scale: waveScale.value,
-  n_derivative: nDerivative.value,
-  texture_floor: textureFloor.value,
-  wave_window_ops: windowOps.value,
-  wave_sample_step: sampleStep.value,
-  wave_advance_samples: advanceSamples.value,
-  wave_envelope_curve: envelopeCurve.value,
-  trigger_range: { bottom: triggerBottom.value, top: triggerTop.value },
-}))
 
 async function loadPresets() {
   const data = await api('/api/v1/wave_presets')
@@ -167,16 +153,6 @@ onMounted(() => { loadPresets(); load() })
         </div>
       </section>
     </div>
-
-    <!-- Wave Simulator -->
-    <section class="card" style="margin-top:var(--sp-5)">
-      <h2>{{ t('common.waveSimulator') }}</h2>
-      <WaveSimulator
-        mode="touch"
-        :channel="ch"
-        :params="simParams"
-      />
-    </section>
 
     <div class="save-bar">
       <button class="btn btn-primary" @click="save">💾 {{ t('common.save') }}</button>
