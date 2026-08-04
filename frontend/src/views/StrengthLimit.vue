@@ -166,7 +166,8 @@ onMounted(load)
 .recommend-banner { display: flex; align-items: flex-start; gap: var(--sp-3); padding: var(--sp-4); margin-bottom: var(--sp-5); background: rgba(139,92,246,0.08); border: 1px solid rgba(139,92,246,0.25); border-radius: var(--radius-lg); font-size: var(--text-sm); color: var(--text-secondary); line-height: 1.6; }
 .recommend-icon { font-size: 1.3em; flex-shrink: 0; }
 .recommend-banner strong { color: var(--accent); }
-.limit-grid { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-4); margin-bottom: var(--sp-4); }
+.limit-grid { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-4); margin-bottom: var(--sp-4); align-items: stretch; }
+.limit-grid .card { display: flex; flex-direction: column; height: 100%; }
 .field { margin-bottom: 0; }
 .field label { display: block; font-size: var(--text-sm); color: var(--text-secondary); margin-bottom: var(--sp-2); font-weight: 500; }
 .slider-row { display: flex; align-items: center; gap: var(--sp-2); }
