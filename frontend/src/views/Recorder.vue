@@ -133,7 +133,7 @@ onUnmounted(() => timers.forEach(clearInterval))
         </div>
         <div class="actions">
           <button class="btn btn-danger" :disabled="recActive" @click="startRec">{{ t('recorder.startRec') }}</button>
-          <button class="btn btn-gray" :disabled="!recActive" @click="stopRec">{{ t('recorder.stopRec') }}</button>
+          <button class="btn btn-ghost" :disabled="!recActive" @click="stopRec">{{ t('recorder.stopRec') }}</button>
         </div>
       </section>
 
@@ -148,7 +148,7 @@ onUnmounted(() => timers.forEach(clearInterval))
         <input type="range" v-model.number="speed" min="0.25" max="3" step="0.25">
         <label><input type="checkbox" v-model="loop"> {{ t('recorder.loopPlayback') }}</label>
         <div class="actions">
-          <button class="btn btn-gray" :disabled="!playActive" @click="stopPlay">{{ t('recorder.stopPlayback') }}</button>
+          <button class="btn btn-ghost" :disabled="!playActive" @click="stopPlay">{{ t('recorder.stopPlayback') }}</button>
         </div>
         <div v-if="playActive" class="playback-progress">
           <div class="progress-bar"><div class="fill" :style="{width: (playTotal > 0 ? playProgress / playTotal * 100 : 0) + '%'}"></div></div>

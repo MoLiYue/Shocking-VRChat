@@ -352,8 +352,8 @@ onUnmounted(() => {
           <div class="profile-list">
             <div class="profile-item" v-for="p in profiles" :key="p">
               <span class="profile-name">{{ p }}</span>
-              <button class="btn-sm load" @click="loadProfile(p)">▶</button>
-              <button class="btn-sm del" @click="deleteProfile(p)">✕</button>
+              <button class="prof-btn load" @click="loadProfile(p)">▶</button>
+              <button class="prof-btn del" @click="deleteProfile(p)">✕</button>
             </div>
             <div v-if="!profiles.length" class="empty">{{ t('dashboard.noProfiles') }}</div>
           </div>
@@ -443,10 +443,10 @@ onUnmounted(() => {
 .profile-item { display: flex; align-items: center; gap: var(--sp-2); padding: var(--sp-2) var(--sp-3); border-radius: var(--radius-sm); transition: background var(--transition); }
 .profile-item:hover { background: rgba(139,92,246,0.05); }
 .profile-name { flex: 1; font-size: var(--text-sm); }
-.btn-sm { border: none; border-radius: var(--radius-full); padding: 3px 10px; cursor: pointer; font-size: var(--text-xs); color: #fff; transition: all var(--transition); }
-.btn-sm:hover { transform: scale(1.05); }
-.btn-sm.load { background: var(--success); }
-.btn-sm.del { background: rgba(248,113,113,0.7); }
+.prof-btn { border: none; border-radius: var(--radius-full); padding: 3px 10px; cursor: pointer; font-size: var(--text-xs); color: #fff; transition: all var(--transition); }
+.prof-btn:hover { transform: scale(1.05); }
+.prof-btn.load { background: var(--success); }
+.prof-btn.del { background: rgba(248,113,113,0.7); }
 .profile-add { display: flex; gap: var(--sp-2); }
 .profile-add input { flex: 1; }
 .profile-msg { font-size: var(--text-xs); color: var(--success); margin-top: var(--sp-2); }

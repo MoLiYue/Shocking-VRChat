@@ -79,7 +79,7 @@ onUnmounted(() => { if (ws) ws.close() })
 <template>
   <div class="logs-page">
     <div class="logs-header">
-      <h1 class="gradient-text">{{ t('logs.title') }}</h1>
+      <h1 class="gradient-text page-title">{{ t('logs.title') }}</h1>
       <div class="logs-controls">
         <select v-model="filterLevel" class="filter-select">
           <option v-for="lv in LEVELS" :key="lv" :value="lv">{{ lv.toUpperCase() }}</option>
@@ -107,7 +107,7 @@ onUnmounted(() => { if (ws) ws.close() })
 <style scoped>
 .logs-page { display: flex; flex-direction: column; height: calc(100vh - 4rem); }
 .logs-header { display: flex; align-items: center; gap: var(--sp-4); margin-bottom: var(--sp-3); flex-wrap: wrap; }
-.logs-header h1 { font-size: var(--text-2xl); margin: 0; white-space: nowrap; }
+.logs-header h1 { margin: 0; white-space: nowrap; }
 .logs-controls { display: flex; align-items: center; gap: var(--sp-2); flex: 1; flex-wrap: wrap; }
 .filter-select { width: 100px; font-size: var(--text-xs); padding: var(--sp-1) var(--sp-2); }
 .filter-input { flex: 1; min-width: 120px; max-width: 250px; font-size: var(--text-xs); padding: var(--sp-1) var(--sp-2); font-family: var(--font-mono); }
