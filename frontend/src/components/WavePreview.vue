@@ -1,6 +1,9 @@
 <script setup lang="ts">
 import { ref, watch, onMounted, onUnmounted, nextTick } from 'vue'
 import { api } from '@/api'
+import { useI18n } from '@/i18n'
+
+const { t } = useI18n()
 
 const props = defineProps<{
   presetName: string
@@ -67,7 +70,7 @@ function draw() {
     ctx.fillStyle = 'rgba(139,92,246,0.3)'
     ctx.font = '12px Inter, sans-serif'
     ctx.textAlign = 'center'
-    ctx.fillText(props.presetName ? '加载中...' : '未选择预设', W / 2, H / 2 + 4)
+    ctx.fillText(props.presetName ? t('common.loading') : t('common.noWaveData'), W / 2, H / 2 + 4)
     return
   }
 

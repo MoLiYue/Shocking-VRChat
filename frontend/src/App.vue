@@ -7,6 +7,7 @@ const sidebarOpen = ref(true)
 
 interface NavItem {
   path?: string
+  key?: string
   label: string
   icon: string
   children?: NavItem[]
@@ -18,7 +19,7 @@ const navItems = computed<NavItem[]>(() => [
   { path: '/strength', label: t('nav.strength'), icon: '🔋' },
   { path: '/overlimit-rules', label: t('nav.overlimit'), icon: '⚡' },
   {
-    label: t('nav.modes'), icon: '🎮',
+    key: MODES_GROUP_KEY, label: t('nav.modes'), icon: '🎮',
     children: [
       { path: '/mode/shock', label: t('nav.modeShock'), icon: '💥' },
       { path: '/mode/distance', label: t('nav.modeDistance'), icon: '📏' },
@@ -34,15 +35,15 @@ const navItems = computed<NavItem[]>(() => [
 
 const expandedGroups = ref<Set<string>>(new Set())
 
-// Auto-expand modes group
-expandedGroups.value.add('模式')
-expandedGroups.value.add('Modes')
+// Auto-expand modes group (use nav key as stable identifier)
+const MODES_GROUP_KEY = 'nav.modes'
+expandedGroups.value.add(MODES_GROUP_KEY)
 
-function toggleGroup(label: string) {
-  if (expandedGroups.value.has(label)) {
-    expandedGroups.value.delete(label)
+function toggleGroup(key: string) {
+  if (expandedGroups.value.has(key)) {
+    expandedGroups.value.delete(key)
   } else {
-    expandedGroups.value.add(label)
+    expandedGroups.value.add(key)
   }
 }
 
@@ -68,14 +69,14 @@ async function shutdownApp() {
           <template v-if="item.children">
             <button
               class="nav-link nav-group-toggle"
-              :class="{ expanded: expandedGroups.has(item.label) }"
-              @click="toggleGroup(item.label)"
+              :class="{ expanded: expandedGroups.has(item.key || item.label) }"
+              @click="toggleGroup(item.key || item.label)"
             >
               <span class="nav-ico">{{ item.icon }}</span>
               <span class="nav-txt">{{ item.label }}</span>
-              <span class="nav-arrow">{{ expandedGroups.has(item.label) ? '▾' : '▸' }}</span>
+              <span class="nav-arrow">{{ expandedGroups.has(item.key || item.label) ? '▾' : '▸' }}</span>
             </button>
-            <div class="nav-children" v-show="expandedGroups.has(item.label)">
+            <div class="nav-children" v-show="expandedGroups.has(item.key || item.label)">
               <router-link
                 v-for="child in item.children" :key="child.path"
                 :to="child.path!"
