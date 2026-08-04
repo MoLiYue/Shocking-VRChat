@@ -19,109 +19,119 @@ const MODES = [
   { value: 'boost', label: '强度增减' },
 ]
 
-const activeChannel = ref<'a' | 'b'>('a')
-const params = ref<Param[]>([])
-const defaultMode = ref('distance')
-const strengthLimit = ref(100)
-const newPath = ref('')
-const newMode = ref('distance')
 const PARAM_PREFIX = '/avatar/parameters/'
-const editIndex = ref<number | null>(null)
+
+// Per-channel state
+const paramsA = ref<Param[]>([])
+const paramsB = ref<Param[]>([])
+const defaultModeA = ref('distance')
+const defaultModeB = ref('distance')
+const strengthLimitA = ref(100)
+const strengthLimitB = ref(100)
+const dirtyA = ref(false)
+const dirtyB = ref(false)
+
+// Add form state (shared)
+const newPathA = ref('')
+const newModeA = ref('distance')
+const newPathB = ref('')
+const newModeB = ref('distance')
+const editIndexA = ref<number | null>(null)
+const editIndexB = ref<number | null>(null)
 const editPath = ref('')
 const editMode = ref('')
 const msg = ref('')
 const msgErr = ref(false)
-const dirty = ref(false)
 
-async function loadChannel() {
-  const data = await api(`/api/v1/params/${activeChannel.value}`)
-  params.value = (data.params || []).map((p: any) => ({
+async function loadChannel(ch: 'a' | 'b') {
+  const data = await api(`/api/v1/params/${ch}`)
+  const params = (data.params || []).map((p: any) => ({
     path: typeof p === 'string' ? p : p.path,
     mode: typeof p === 'string' ? data.default_mode : (p.mode || data.default_mode),
     enabled: typeof p === 'string' ? true : (p.enabled !== false),
   }))
-  defaultMode.value = data.default_mode || 'distance'
-  strengthLimit.value = data.strength_limit || 100
-  dirty.value = false
-  editIndex.value = null
-  msg.value = ''
-}
-
-function switchChannel(ch: 'a' | 'b') {
-  if (dirty.value && !confirm('有未保存的更改，是否切换？')) return
-  activeChannel.value = ch
-  loadChannel()
-}
-
-function addParam() {
-  let path = newPath.value.trim()
-  if (!path) return
-  // Auto-prepend prefix if user didn't include it
-  if (!path.startsWith('/')) {
-    path = PARAM_PREFIX + path
-  } else if (!path.startsWith(PARAM_PREFIX)) {
-    // Has a leading / but not the standard prefix - use as-is
+  if (ch === 'a') {
+    paramsA.value = params
+    defaultModeA.value = data.default_mode || 'distance'
+    strengthLimitA.value = data.strength_limit || 100
+    dirtyA.value = false
+    editIndexA.value = null
+  } else {
+    paramsB.value = params
+    defaultModeB.value = data.default_mode || 'distance'
+    strengthLimitB.value = data.strength_limit || 100
+    dirtyB.value = false
+    editIndexB.value = null
   }
+}
+
+function addParam(ch: 'a' | 'b') {
+  const rawPath = ch === 'a' ? newPathA.value.trim() : newPathB.value.trim()
+  const mode = ch === 'a' ? newModeA.value : newModeB.value
+  if (!rawPath) return
+  let path = rawPath
+  if (!path.startsWith('/')) path = PARAM_PREFIX + path
+  const params = ch === 'a' ? paramsA : paramsB
   if (params.value.some(p => p.path === path)) { showMsg(t('params.paramExists'), true); return }
-  params.value.push({ path, mode: newMode.value, enabled: true })
-  newPath.value = ''
-  dirty.value = true
+  params.value.push({ path, mode, enabled: true })
+  if (ch === 'a') { newPathA.value = ''; dirtyA.value = true }
+  else { newPathB.value = ''; dirtyB.value = true }
 }
 
-function removeParam(index: number) {
+function removeParam(ch: 'a' | 'b', index: number) {
+  const params = ch === 'a' ? paramsA : paramsB
+  const editIdx = ch === 'a' ? editIndexA : editIndexB
   params.value.splice(index, 1)
-  dirty.value = true
-  if (editIndex.value === index) editIndex.value = null
+  if (ch === 'a') dirtyA.value = true; else dirtyB.value = true
+  if (editIdx.value === index) editIdx.value = null
 }
 
-function startEdit(index: number) {
-  editIndex.value = index
+function startEdit(ch: 'a' | 'b', index: number) {
+  const params = ch === 'a' ? paramsA : paramsB
+  if (ch === 'a') editIndexA.value = index; else editIndexB.value = index
   editPath.value = params.value[index].path
   editMode.value = params.value[index].mode
 }
 
-function confirmEdit() {
-  if (editIndex.value === null) return
+function confirmEdit(ch: 'a' | 'b') {
+  const editIdx = ch === 'a' ? editIndexA : editIndexB
+  const params = ch === 'a' ? paramsA : paramsB
+  if (editIdx.value === null) return
   const path = editPath.value.trim()
-  if (!path || !path.startsWith('/')) { showMsg('路径必须以 / 开头', true); return }
-  params.value[editIndex.value] = { path, mode: editMode.value, enabled: params.value[editIndex.value].enabled }
-  editIndex.value = null
-  dirty.value = true
+  if (!path || !path.startsWith('/')) { showMsg(t('params.paramExists'), true); return }
+  params.value[editIdx.value] = { path, mode: editMode.value, enabled: params.value[editIdx.value].enabled }
+  editIdx.value = null
+  if (ch === 'a') dirtyA.value = true; else dirtyB.value = true
 }
 
-function cancelEdit() { editIndex.value = null }
+function cancelEdit(ch: 'a' | 'b') {
+  if (ch === 'a') editIndexA.value = null; else editIndexB.value = null
+}
 
 async function waitForRestart() {
-  // Wait for old server to die
   for (let i = 0; i < 20; i++) {
     await new Promise(r => setTimeout(r, 300))
     try { await fetch('/api/v1/status') } catch { break }
   }
-  // Wait for new server to come up
   for (let i = 0; i < 30; i++) {
     await new Promise(r => setTimeout(r, 500))
-    try {
-      const resp = await fetch('/api/v1/status')
-      if (resp.ok) return
-    } catch {}
+    try { const resp = await fetch('/api/v1/status'); if (resp.ok) return } catch {}
   }
 }
 
-async function save() {
-  const data = await apiPost(`/api/v1/params/${activeChannel.value}`, {
-    params: params.value,
-    default_mode: defaultMode.value,
-    strength_limit: strengthLimit.value,
-  })
+async function save(ch: 'a' | 'b') {
+  const params = ch === 'a' ? paramsA.value : paramsB.value
+  const defaultMode = ch === 'a' ? defaultModeA.value : defaultModeB.value
+  const strengthLimit = ch === 'a' ? strengthLimitA.value : strengthLimitB.value
+  const data = await apiPost(`/api/v1/params/${ch}`, { params, default_mode: defaultMode, strength_limit: strengthLimit })
   if (data.success) {
     showMsg(t('params.savedRestarting'), false)
-    dirty.value = false
-    // Wait for restart then reload
+    if (ch === 'a') dirtyA.value = false; else dirtyB.value = false
     await waitForRestart()
-    loadChannel()
+    loadChannel(ch)
     showMsg(t('params.applied'), false)
   } else {
-    showMsg(data.message || '保存失败', true)
+    showMsg(data.message || t('common.saveFailed'), true)
   }
 }
 
@@ -136,7 +146,11 @@ function modeLabel(mode: string) {
   return translated !== key ? translated : mode
 }
 
-onMounted(loadChannel)
+function shortPath(path: string) {
+  return path.startsWith(PARAM_PREFIX) ? path.slice(PARAM_PREFIX.length) : path
+}
+
+onMounted(() => { loadChannel('a'); loadChannel('b') })
 </script>
 
 <template>
@@ -144,92 +158,145 @@ onMounted(loadChannel)
     <h1>{{ t('params.title') }}</h1>
     <p class="subtitle">{{ t('params.desc') }}</p>
 
-    <div class="tabs">
-      <button :class="{active: activeChannel === 'a'}" @click="switchChannel('a')">{{ t('common.channelA') }}</button>
-      <button :class="{active: activeChannel === 'b'}" @click="switchChannel('b')">{{ t('common.channelB') }}</button>
-      <span v-if="dirty" class="dirty-badge">● {{ t('common.unsaved') }}</span>
-    </div>
-
-    <!-- Channel settings -->
-    <div class="card settings-row">
-      <div class="setting">
-        <label>{{ t('params.defaultMode') }}</label>
-        <select v-model="defaultMode" @change="dirty = true">
-          <option v-for="m in MODES" :key="m.value" :value="m.value">{{ modeLabel(m.value) }}</option>
-        </select>
+    <!-- Channel A -->
+    <section class="channel-section">
+      <div class="channel-header">
+        <h2 class="ch-title ch-a">{{ t('common.channelA') }}</h2>
+        <span v-if="dirtyA" class="dirty-badge">● {{ t('common.unsaved') }}</span>
       </div>
-      <div class="setting">
-        <label>{{ t('params.strengthLimit') }}</label>
-        <input type="number" v-model.number="strengthLimit" min="0" max="200" @change="dirty = true">
-      </div>
-    </div>
 
-    <!-- Param list -->
-    <div class="card">
-      <h2>{{ t('params.paramList') }} ({{ params.filter(p => p.enabled).length }}/{{ params.length }} {{ t('params.colEnabled') }})</h2>
+      <div class="settings-row">
+        <div class="setting">
+          <label>{{ t('params.defaultMode') }}</label>
+          <select v-model="defaultModeA" @change="dirtyA = true">
+            <option v-for="m in MODES" :key="m.value" :value="m.value">{{ modeLabel(m.value) }}</option>
+          </select>
+        </div>
+        <div class="setting">
+          <label>{{ t('params.strengthLimit') }}</label>
+          <input type="number" v-model.number="strengthLimitA" min="0" max="200" @change="dirtyA = true">
+        </div>
+      </div>
+
       <table>
         <thead>
-          <tr><th style="width:40px">{{ t('params.colEnabled') }}</th><th>{{ t('params.colPath') }}</th><th>{{ t('params.colMode') }}</th><th style="width:100px">{{ t('params.colActions') }}</th></tr>
+          <tr><th style="width:36px">{{ t('params.colEnabled') }}</th><th>{{ t('params.colPath') }}</th><th>{{ t('params.colMode') }}</th><th style="width:80px">{{ t('params.colActions') }}</th></tr>
         </thead>
         <tbody>
-          <tr v-for="(p, i) in params" :key="i" :class="{'editing': editIndex === i, 'disabled-row': !p.enabled}">
-            <template v-if="editIndex === i">
-              <td><input type="checkbox" v-model="p.enabled" @change="dirty = true"></td>
-              <td><input v-model="editPath" class="edit-input" placeholder="/avatar/parameters/..."></td>
+          <tr v-for="(p, i) in paramsA" :key="i" :class="{'editing': editIndexA === i, 'disabled-row': !p.enabled}">
+            <template v-if="editIndexA === i">
+              <td><input type="checkbox" v-model="p.enabled" @change="dirtyA = true"></td>
+              <td><input v-model="editPath" class="edit-input"></td>
               <td><select v-model="editMode" class="edit-select"><option v-for="m in MODES" :key="m.value" :value="m.value">{{ modeLabel(m.value) }}</option></select></td>
-              <td class="actions"><button class="act-btn save" @click="confirmEdit">✓</button><button class="act-btn cancel" @click="cancelEdit">✕</button></td>
+              <td class="actions"><button class="act-btn save" @click="confirmEdit('a')">✓</button><button class="act-btn cancel" @click="cancelEdit('a')">✕</button></td>
             </template>
             <template v-else>
-              <td><input type="checkbox" v-model="p.enabled" @change="dirty = true"></td>
-              <td class="path" :class="{'path-disabled': !p.enabled}"><span class="path-prefix">{{ p.path.startsWith('/avatar/parameters/') ? '/avatar/parameters/' : '' }}</span>{{ p.path.startsWith('/avatar/parameters/') ? p.path.slice(19) : p.path }}</td>
-              <td><span class="mode-badge" :class="[('mode-' + p.mode), {'badge-disabled': !p.enabled}]">{{ modeLabel(p.mode) }}</span></td>
-              <td class="actions"><button class="act-btn edit" @click="startEdit(i)">✎</button><button class="act-btn del" @click="removeParam(i)">🗑</button></td>
+              <td><input type="checkbox" v-model="p.enabled" @change="dirtyA = true"></td>
+              <td class="path" :class="{'path-disabled': !p.enabled}"><span class="path-prefix">/avatar/parameters/</span>{{ shortPath(p.path) }}</td>
+              <td><span class="mode-badge" :class="'mode-' + p.mode">{{ modeLabel(p.mode) }}</span></td>
+              <td class="actions"><button class="act-btn edit" @click="startEdit('a', i)">✎</button><button class="act-btn del" @click="removeParam('a', i)">🗑</button></td>
             </template>
           </tr>
-          <tr v-if="!params.length"><td colspan="4" class="empty">{{ t('params.noParams') }}</td></tr>
+          <tr v-if="!paramsA.length"><td colspan="4" class="empty">{{ t('params.noParams') }}</td></tr>
         </tbody>
       </table>
-    </div>
 
-    <!-- Add new param -->
-    <div class="card add-row">
-      <h2>{{ t('params.addTitle') }}</h2>
       <div class="add-form">
         <span class="prefix-label">/avatar/parameters/</span>
-        <input v-model="newPath" placeholder="pcs/contact/enterPass" class="add-input" @keyup.enter="addParam">
-        <select v-model="newMode" class="add-select">
+        <input v-model="newPathA" placeholder="pcs/contact/enterPass" class="add-input" @keyup.enter="addParam('a')">
+        <select v-model="newModeA" class="add-select">
           <option v-for="m in MODES" :key="m.value" :value="m.value">{{ modeLabel(m.value) }}</option>
         </select>
-        <button class="btn btn-green" @click="addParam">+ 添加</button>
+        <button class="btn btn-green" @click="addParam('a')">+</button>
       </div>
-      <p class="hint">{{ t('params.addHint') }}</p>
-    </div>
 
-    <!-- Save -->
-    <div class="save-bar">
-      <button class="btn btn-green" :disabled="!dirty" @click="save">{{ t('params.saveConfig') }}</button>
-      <button class="btn btn-gray" @click="loadChannel">{{ t('params.undoChanges') }}</button>
-      <span :class="['msg', msgErr ? 'err' : '']">{{ msg }}</span>
-    </div>
+      <div class="save-row">
+        <button class="btn btn-primary" :disabled="!dirtyA" @click="save('a')">💾 {{ t('common.save') }}</button>
+        <button class="btn btn-ghost" @click="loadChannel('a')">↺</button>
+      </div>
+    </section>
+
+    <!-- Channel B -->
+    <section class="channel-section">
+      <div class="channel-header">
+        <h2 class="ch-title ch-b">{{ t('common.channelB') }}</h2>
+        <span v-if="dirtyB" class="dirty-badge">● {{ t('common.unsaved') }}</span>
+      </div>
+
+      <div class="settings-row">
+        <div class="setting">
+          <label>{{ t('params.defaultMode') }}</label>
+          <select v-model="defaultModeB" @change="dirtyB = true">
+            <option v-for="m in MODES" :key="m.value" :value="m.value">{{ modeLabel(m.value) }}</option>
+          </select>
+        </div>
+        <div class="setting">
+          <label>{{ t('params.strengthLimit') }}</label>
+          <input type="number" v-model.number="strengthLimitB" min="0" max="200" @change="dirtyB = true">
+        </div>
+      </div>
+
+      <table>
+        <thead>
+          <tr><th style="width:36px">{{ t('params.colEnabled') }}</th><th>{{ t('params.colPath') }}</th><th>{{ t('params.colMode') }}</th><th style="width:80px">{{ t('params.colActions') }}</th></tr>
+        </thead>
+        <tbody>
+          <tr v-for="(p, i) in paramsB" :key="i" :class="{'editing': editIndexB === i, 'disabled-row': !p.enabled}">
+            <template v-if="editIndexB === i">
+              <td><input type="checkbox" v-model="p.enabled" @change="dirtyB = true"></td>
+              <td><input v-model="editPath" class="edit-input"></td>
+              <td><select v-model="editMode" class="edit-select"><option v-for="m in MODES" :key="m.value" :value="m.value">{{ modeLabel(m.value) }}</option></select></td>
+              <td class="actions"><button class="act-btn save" @click="confirmEdit('b')">✓</button><button class="act-btn cancel" @click="cancelEdit('b')">✕</button></td>
+            </template>
+            <template v-else>
+              <td><input type="checkbox" v-model="p.enabled" @change="dirtyB = true"></td>
+              <td class="path" :class="{'path-disabled': !p.enabled}"><span class="path-prefix">/avatar/parameters/</span>{{ shortPath(p.path) }}</td>
+              <td><span class="mode-badge" :class="'mode-' + p.mode">{{ modeLabel(p.mode) }}</span></td>
+              <td class="actions"><button class="act-btn edit" @click="startEdit('b', i)">✎</button><button class="act-btn del" @click="removeParam('b', i)">🗑</button></td>
+            </template>
+          </tr>
+          <tr v-if="!paramsB.length"><td colspan="4" class="empty">{{ t('params.noParams') }}</td></tr>
+        </tbody>
+      </table>
+
+      <div class="add-form">
+        <span class="prefix-label">/avatar/parameters/</span>
+        <input v-model="newPathB" placeholder="pcs/contact/enterPass" class="add-input" @keyup.enter="addParam('b')">
+        <select v-model="newModeB" class="add-select">
+          <option v-for="m in MODES" :key="m.value" :value="m.value">{{ modeLabel(m.value) }}</option>
+        </select>
+        <button class="btn btn-green" @click="addParam('b')">+</button>
+      </div>
+
+      <div class="save-row">
+        <button class="btn btn-primary" :disabled="!dirtyB" @click="save('b')">💾 {{ t('common.save') }}</button>
+        <button class="btn btn-ghost" @click="loadChannel('b')">↺</button>
+      </div>
+    </section>
+
+    <div v-if="msg" class="msg-bar" :class="{ err: msgErr }">{{ msg }}</div>
+    <p class="hint" style="margin-top:var(--sp-3)">{{ t('params.addHint') }}</p>
   </div>
 </template>
 
 <style scoped>
 .subtitle { color: var(--text-muted); font-size: var(--text-sm); margin: var(--sp-1) 0 var(--sp-5); }
-.tabs { display: flex; gap: var(--sp-2); margin-bottom: var(--sp-4); align-items: center; }
-.tabs button { padding: var(--sp-2) var(--sp-5); border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface); color: var(--text-secondary); cursor: pointer; font-size: var(--text-sm); transition: all var(--transition); }
-.tabs button.active { border-color: var(--accent); color: var(--accent-hover); background: rgba(99,102,241,0.08); }
-.dirty-badge { color: var(--warning); font-size: var(--text-xs); margin-left: var(--sp-3); }
-.settings-row { display: flex; gap: var(--sp-5); margin-bottom: var(--sp-4); }
+.channel-section { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: var(--sp-5); margin-bottom: var(--sp-4); }
+.channel-header { display: flex; align-items: center; gap: var(--sp-3); margin-bottom: var(--sp-3); }
+.ch-title { font-size: var(--text-lg); margin: 0; }
+.ch-title.ch-a { color: var(--accent); }
+.ch-title.ch-b { color: var(--info); }
+.dirty-badge { color: var(--warning); font-size: var(--text-xs); }
+.settings-row { display: flex; gap: var(--sp-4); margin-bottom: var(--sp-3); }
 .setting { flex: 1; }
 .setting label { display: block; font-size: var(--text-xs); color: var(--text-muted); margin-bottom: var(--sp-1); }
 .setting select, .setting input { width: 100%; }
-table { width: 100%; border-collapse: collapse; }
-th { text-align: left; font-size: var(--text-xs); color: var(--text-muted); padding: var(--sp-2) var(--sp-3); border-bottom: 1px solid var(--border-subtle); }
-td { padding: var(--sp-3); font-size: var(--text-sm); border-bottom: 1px solid var(--border-subtle); vertical-align: middle; }
-.path { font-family: var(--font-mono); color: var(--text-secondary); word-break: break-all; }
+table { width: 100%; border-collapse: collapse; margin-bottom: var(--sp-3); }
+th { text-align: left; font-size: var(--text-xs); color: var(--text-muted); padding: var(--sp-2) var(--sp-2); border-bottom: 1px solid var(--border-subtle); }
+td { padding: var(--sp-2); font-size: var(--text-sm); border-bottom: 1px solid var(--border-subtle); vertical-align: middle; }
+.path { font-family: var(--font-mono); color: var(--text-secondary); word-break: break-all; font-size: var(--text-xs); }
 .path-prefix { color: var(--text-muted); opacity: 0.5; }
-.mode-badge { display: inline-block; padding: 2px 10px; border-radius: 99px; font-size: var(--text-xs); font-weight: 600; }
+.mode-badge { display: inline-block; padding: 1px 8px; border-radius: 99px; font-size: var(--text-xs); font-weight: 600; }
 .mode-distance { background: var(--info-surface); color: var(--info); }
 .mode-shock { background: var(--danger-surface); color: var(--danger); }
 .mode-touch { background: var(--success-surface); color: var(--success); }
@@ -244,16 +311,14 @@ td { padding: var(--sp-3); font-size: var(--text-sm); border-bottom: 1px solid v
 .editing { background: rgba(99,102,241,0.04); }
 .disabled-row { opacity: 0.5; }
 .path-disabled { text-decoration: line-through; }
-.badge-disabled { opacity: 0.4; }
-.edit-input, .edit-select { padding: var(--sp-2); border: 1px solid var(--accent); border-radius: var(--radius-sm); background: var(--bg-elevated); color: var(--text); font-family: var(--font-mono); font-size: var(--text-sm); width: 100%; }
-.add-row { margin-top: var(--sp-4); }
-.add-form { display: flex; gap: var(--sp-2); align-items: center; }
+.edit-input, .edit-select { padding: var(--sp-1) var(--sp-2); border: 1px solid var(--accent); border-radius: var(--radius-sm); background: var(--bg-elevated); color: var(--text); font-family: var(--font-mono); font-size: var(--text-xs); width: 100%; }
+.add-form { display: flex; gap: var(--sp-2); align-items: center; margin-bottom: var(--sp-3); }
 .prefix-label { font-family: var(--font-mono); font-size: var(--text-xs); color: var(--text-muted); white-space: nowrap; background: var(--bg-tertiary); padding: var(--sp-2) var(--sp-2); border-radius: var(--radius-sm) 0 0 var(--radius-sm); border: 1px solid var(--border); border-right: none; }
-.add-input { flex: 1; padding: var(--sp-2) var(--sp-3); border: 1px solid var(--border); border-radius: 0 var(--radius-md) var(--radius-md) 0; background: var(--bg-elevated); color: var(--text); font-family: var(--font-mono); font-size: var(--text-sm); }
-.add-select { width: 120px; }
-.hint { font-size: var(--text-xs); color: var(--text-muted); margin-top: var(--sp-2); }
-.save-bar { display: flex; align-items: center; gap: var(--sp-3); margin-top: var(--sp-4); padding: var(--sp-3) var(--sp-4); background: var(--surface); border-radius: var(--radius-md); border: 1px solid var(--border-subtle); }
-.msg { font-size: var(--text-sm); color: var(--success); }
-.msg.err { color: var(--danger); }
-.empty { color: var(--text-muted); text-align: center; padding: var(--sp-5); }
+.add-input { flex: 1; padding: var(--sp-2) var(--sp-3); border: 1px solid var(--border); border-radius: 0 var(--radius-md) var(--radius-md) 0; background: var(--bg-elevated); color: var(--text); font-family: var(--font-mono); font-size: var(--text-xs); }
+.add-select { width: 100px; font-size: var(--text-xs); }
+.save-row { display: flex; gap: var(--sp-2); align-items: center; }
+.msg-bar { text-align: center; padding: var(--sp-2) var(--sp-4); background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius-md); font-size: var(--text-sm); color: var(--success); }
+.msg-bar.err { color: var(--danger); }
+.hint { font-size: var(--text-xs); color: var(--text-muted); }
+.empty { color: var(--text-muted); text-align: center; padding: var(--sp-4); }
 </style>
