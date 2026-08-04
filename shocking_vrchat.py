@@ -44,7 +44,7 @@ WAVE_HISTORY_SAMPLE_MS = 25
 
 CONFIG_FILE_VERSION  = 'v0.2'
 APP_VERSION = '0.6.1'  # Semantic version of the application
-GITHUB_REPO = 'VRChatNext/Shocking-VRChat'
+GITHUB_REPO = 'MoLiYue/Shocking-VRChat'
 CONFIG_FILENAME = f'settings-advanced-{CONFIG_FILE_VERSION}.yaml'
 CONFIG_FILENAME_BASIC = f'settings-{CONFIG_FILE_VERSION}.yaml'
 CONFIG_HOT_RELOAD_INTERVAL = 1.0
