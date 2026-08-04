@@ -229,8 +229,8 @@ onMounted(() => { checkUpdate() })
       <h2>{{ t('settings.configTitle') }}</h2>
       <p class="hint" style="margin-bottom:var(--sp-3)">{{ t('settings.configDesc') }}</p>
       <div class="ie-bar">
-        <button class="btn" @click="exportConfig">{{ t('settings.exportConfig') }}</button>
-        <button class="btn" @click="triggerImport">{{ t('settings.importConfig') }}</button>
+        <button class="btn btn-ghost" @click="exportConfig">{{ t('settings.exportConfig') }}</button>
+        <button class="btn btn-ghost" @click="triggerImport">{{ t('settings.importConfig') }}</button>
         <input ref="importFileRef" type="file" accept=".json" hidden @change="handleImport">
         <span class="msg" :class="{ err: importErr }">{{ importMsg }}</span>
       </div>
@@ -256,7 +256,7 @@ onMounted(() => { checkUpdate() })
         </div>
       </div>
       <div class="ie-bar" style="margin-top:var(--sp-3)">
-        <button class="btn" @click="checkUpdate" :disabled="updateChecking">{{ t('settings.updateCheck') }}</button>
+        <button class="btn btn-ghost" @click="checkUpdate" :disabled="updateChecking">{{ t('settings.updateCheck') }}</button>
         <button
           v-if="updateInfo?.update_available"
           class="btn btn-primary"
