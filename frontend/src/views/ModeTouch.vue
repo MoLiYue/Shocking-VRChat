@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, computed } from 'vue'
 import { api, apiPost } from '@/api'
 import { useI18n } from '@/i18n'
 import WavePreview from '@/components/WavePreview.vue'
+import WaveSimulator from '@/components/WaveSimulator.vue'
 
 const { t } = useI18n()
 const ch = ref<'a' | 'b'>('a')
@@ -18,6 +19,19 @@ const triggerBottom = ref(0)
 const triggerTop = ref(0.8)
 const presets = ref<string[]>([])
 const msg = ref('')
+
+// Reactive params for wave simulator
+const simParams = computed(() => ({
+  wave_preset: wavePreset.value || null,
+  wave_scale: waveScale.value,
+  n_derivative: nDerivative.value,
+  texture_floor: textureFloor.value,
+  wave_window_ops: windowOps.value,
+  wave_sample_step: sampleStep.value,
+  wave_advance_samples: advanceSamples.value,
+  wave_envelope_curve: envelopeCurve.value,
+  trigger_range: { bottom: triggerBottom.value, top: triggerTop.value },
+}))
 
 async function loadPresets() {
   const data = await api('/api/v1/wave_presets')
@@ -71,35 +85,35 @@ onMounted(() => { loadPresets(); load() })
 
     <div class="grid">
       <section class="card">
-        <h2>触摸参数</h2>
+        <h2>{{ t('modeTouch.params') }}</h2>
         <div class="field">
-          <label>导数阶数</label>
+          <label>{{ t('modeTouch.derivative') }}</label>
           <select v-model.number="nDerivative">
-            <option :value="0">0 阶 - 位置（同距离模式）</option>
-            <option :value="1">1 阶 - 速度（推荐）</option>
-            <option :value="2">2 阶 - 加速度</option>
-            <option :value="3">3 阶 - 急动度</option>
+            <option :value="0">{{ t('modeTouch.deriv0') }}</option>
+            <option :value="1">{{ t('modeTouch.deriv1') }}</option>
+            <option :value="2">{{ t('modeTouch.deriv2') }}</option>
+            <option :value="3">{{ t('modeTouch.deriv3') }}</option>
           </select>
-          <p class="hint">越高阶越关注动作突变。1 阶 = 触摸速度。</p>
+          <p class="hint">{{ t('modeTouch.derivHint') }}</p>
         </div>
         <div class="field">
-          <label>波形预设</label>
+          <label>{{ t('common.wavePreset') }}</label>
           <select v-model="wavePreset">
-            <option value="">默认（实时生成）</option>
+            <option value="">{{ t('modeTouch.presetNone') }}</option>
             <option v-for="p in presets" :key="p" :value="p">{{ p }}</option>
           </select>
         </div>
         <div class="field">
-          <label>波形强度: {{ (waveScale * 100).toFixed(0) }}%</label>
+          <label>{{ t('common.waveScale') }}: {{ (waveScale * 100).toFixed(0) }}%</label>
           <input type="range" v-model.number="waveScale" min="0" max="1" step="0.05">
         </div>
         <div class="field">
-          <label>纹理底噪: {{ (textureFloor * 100).toFixed(0) }}%</label>
+          <label>{{ t('common.textureFloor') }}: {{ (textureFloor * 100).toFixed(0) }}%</label>
           <input type="range" v-model.number="textureFloor" min="0" max="0.5" step="0.01">
-          <p class="hint">波形低谷的最小强度。</p>
+          <p class="hint">{{ t('modeTouch.floorHint') }}</p>
         </div>
         <div class="field" v-if="wavePreset">
-          <label>波形预览</label>
+          <label>{{ t('modeTouch.preview') }}</label>
           <WavePreview
             :preset-name="wavePreset"
             :wave-scale="waveScale"
@@ -110,16 +124,16 @@ onMounted(() => { loadPresets(); load() })
       </section>
 
       <section class="card">
-        <h2>触发阈值</h2>
+        <h2>{{ t('common.triggerRange') }}</h2>
         <div class="field">
-          <label>下界 (bottom): {{ triggerBottom.toFixed(2) }}</label>
+          <label>{{ t('common.triggerBottom') }}: {{ triggerBottom.toFixed(2) }}</label>
           <input type="range" v-model.number="triggerBottom" min="0" max="0.9" step="0.01">
-          <p class="hint">导数值低于此值不触发。</p>
+          <p class="hint">{{ t('modeTouch.bottomHint') }}</p>
         </div>
         <div class="field">
-          <label>上界 (top): {{ triggerTop.toFixed(2) }}</label>
+          <label>{{ t('common.triggerTop') }}: {{ triggerTop.toFixed(2) }}</label>
           <input type="range" v-model.number="triggerTop" min="0.1" max="1" step="0.01">
-          <p class="hint">导数值达到此值视为最大强度。</p>
+          <p class="hint">{{ t('modeTouch.topHint') }}</p>
         </div>
         <div class="visual">
           <div class="bar">
@@ -129,21 +143,21 @@ onMounted(() => { loadPresets(); load() })
           </div>
         </div>
 
-        <h2 style="margin-top:var(--sp-5)">高级：波形窗口</h2>
+        <h2 style="margin-top:var(--sp-5)">{{ t('modeTouch.advancedWaveWindow') }}</h2>
         <div class="field">
-          <label>窗口大小: {{ windowOps }} ops</label>
+          <label>{{ t('modeDistance.windowSize') }}: {{ windowOps }} ops</label>
           <input type="range" v-model.number="windowOps" min="1" max="16" step="1">
         </div>
         <div class="field">
-          <label>采样步进: {{ sampleStep.toFixed(2) }}</label>
+          <label>{{ t('modeDistance.sampleStep') }}: {{ sampleStep.toFixed(2) }}</label>
           <input type="range" v-model.number="sampleStep" min="0.25" max="4" step="0.25">
         </div>
         <div class="field">
-          <label>窗口推进: {{ advanceSamples.toFixed(1) }}</label>
+          <label>{{ t('modeDistance.windowAdvance') }}: {{ advanceSamples.toFixed(1) }}</label>
           <input type="range" v-model.number="advanceSamples" min="1" max="16" step="0.5">
         </div>
         <div class="field">
-          <label>包络曲线</label>
+          <label>{{ t('modeDistance.envelope') }}</label>
           <select v-model="envelopeCurve">
             <option value="smoothstep">smoothstep</option>
             <option value="linear">linear</option>
@@ -154,9 +168,19 @@ onMounted(() => { loadPresets(); load() })
       </section>
     </div>
 
+    <!-- Wave Simulator -->
+    <section class="card" style="margin-top:var(--sp-5)">
+      <h2>{{ t('common.waveSimulator') }}</h2>
+      <WaveSimulator
+        mode="touch"
+        :channel="ch"
+        :params="simParams"
+      />
+    </section>
+
     <div class="save-bar">
-      <button class="btn btn-primary" @click="save">💾 保存</button>
-      <button class="btn btn-ghost" @click="load">↺ 重载</button>
+      <button class="btn btn-primary" @click="save">💾 {{ t('common.save') }}</button>
+      <button class="btn btn-ghost" @click="load">↺ {{ t('common.reload') }}</button>
       <span class="msg">{{ msg }}</span>
     </div>
   </div>

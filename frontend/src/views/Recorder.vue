@@ -29,7 +29,7 @@ async function startRec() {
 
 async function stopRec() {
   const data = await apiPost('/api/v1/recorder/stop')
-  if (data.success) { msg.value = `已保存 ${data.filename}`; loadFiles() }
+  if (data.success) { msg.value = `${t('common.saved')} ${data.filename}`; loadFiles() }
 }
 
 async function startPlay(filename: string) {
@@ -41,7 +41,7 @@ async function stopPlay() {
 }
 
 async function deleteFile(name: string) {
-  if (!confirm(`删除 ${name}？`)) return
+  if (!confirm(t('recorder.deleteConfirm', { name }))) return
   await apiDelete(`/api/v1/recordings/${encodeURIComponent(name)}`)
   loadFiles()
 }
@@ -126,29 +126,29 @@ onUnmounted(() => timers.forEach(clearInterval))
     <div class="top-grid">
       <!-- Recording -->
       <section class="card">
-        <h2>录制</h2>
+        <h2>{{ t('recorder.recording') }}</h2>
         <div class="status-badge" :class="recActive ? 'recording' : ''">
           <span class="dot" :class="recActive ? 'dot-rec' : ''"></span>
-          {{ recActive ? `录制中 · ${recCount} 条 · ${(recElapsed / 1000).toFixed(1)}s` : '待机' }}
+          {{ recActive ? `${t('recorder.recordingActive')} · ${recCount} ${t('recorder.messages')} · ${(recElapsed / 1000).toFixed(1)}s` : t('recorder.standby') }}
         </div>
         <div class="actions">
-          <button class="btn btn-danger" :disabled="recActive" @click="startRec">⏺ 开始</button>
-          <button class="btn btn-gray" :disabled="!recActive" @click="stopRec">⏹ 停止</button>
+          <button class="btn btn-danger" :disabled="recActive" @click="startRec">{{ t('recorder.startRec') }}</button>
+          <button class="btn btn-gray" :disabled="!recActive" @click="stopRec">{{ t('recorder.stopRec') }}</button>
         </div>
       </section>
 
       <!-- Playback -->
       <section class="card">
-        <h2>回放控制</h2>
+        <h2>{{ t('recorder.playbackControl') }}</h2>
         <div class="status-badge" :class="playActive ? 'playing' : ''">
           <span class="dot" :class="playActive ? 'dot-play' : ''"></span>
-          {{ playActive ? `回放中 · ${playFilename}` : '停止' }}
+          {{ playActive ? `${t('recorder.playbackActive')} · ${playFilename}` : t('recorder.playbackStopped') }}
         </div>
-        <label>速度: {{ speed.toFixed(2) }}x</label>
+        <label>{{ t('recorder.speed') }}: {{ speed.toFixed(2) }}x</label>
         <input type="range" v-model.number="speed" min="0.25" max="3" step="0.25">
-        <label><input type="checkbox" v-model="loop"> 循环回放</label>
+        <label><input type="checkbox" v-model="loop"> {{ t('recorder.loopPlayback') }}</label>
         <div class="actions">
-          <button class="btn btn-gray" :disabled="!playActive" @click="stopPlay">⏹ 停止</button>
+          <button class="btn btn-gray" :disabled="!playActive" @click="stopPlay">{{ t('recorder.stopPlayback') }}</button>
         </div>
         <div v-if="playActive" class="playback-progress">
           <div class="progress-bar"><div class="fill" :style="{width: (playTotal > 0 ? playProgress / playTotal * 100 : 0) + '%'}"></div></div>
@@ -158,15 +158,15 @@ onUnmounted(() => timers.forEach(clearInterval))
 
       <!-- Files -->
       <section class="card">
-        <h2>录制文件</h2>
+        <h2>{{ t('recorder.files') }}</h2>
         <div class="file-list">
           <div class="file-item" v-for="f in recordings" :key="f.name">
             <span class="file-name">{{ f.name }}</span>
-            <span class="file-meta">{{ f.message_count }}条 · {{ (f.duration_ms / 1000).toFixed(1) }}s</span>
+            <span class="file-meta">{{ f.message_count }}{{ t('recorder.messages') }} · {{ (f.duration_ms / 1000).toFixed(1) }}s</span>
             <button class="fbtn play" @click="startPlay(f.name)">▶</button>
             <button class="fbtn del" @click="deleteFile(f.name)">✕</button>
           </div>
-          <div v-if="!recordings.length" class="empty">无录制文件</div>
+          <div v-if="!recordings.length" class="empty">{{ t('recorder.noFiles') }}</div>
         </div>
       </section>
     </div>
@@ -175,7 +175,7 @@ onUnmounted(() => timers.forEach(clearInterval))
     <div class="monitor-grid">
       <!-- Wave -->
       <section class="card">
-        <h2>回放波形</h2>
+        <h2>{{ t('recorder.playbackWave') }}</h2>
         <div class="wave-row">
           <div class="wave-panel"><div class="wave-ch">A</div><canvas ref="canvasARef" class="wave-canvas"></canvas></div>
           <div class="wave-panel"><div class="wave-ch">B</div><canvas ref="canvasBRef" class="wave-canvas"></canvas></div>
@@ -184,7 +184,7 @@ onUnmounted(() => timers.forEach(clearInterval))
 
       <!-- OSC Feed -->
       <section class="card">
-        <h2>OSC 触发</h2>
+        <h2>{{ t('recorder.oscTrigger') }}</h2>
         <div class="osc-feed">
           <div class="osc-row" v-for="(e, i) in oscEvents" :key="i">
             <span class="badge" :class="'b-' + e.channel.toLowerCase()">{{ e.channel }}</span>
@@ -193,7 +193,7 @@ onUnmounted(() => timers.forEach(clearInterval))
             <span class="osc-val">{{ e.value }}</span>
             <span class="osc-time">{{ timeStr(e.time) }}</span>
           </div>
-          <div v-if="!oscEvents.length" class="empty">等待数据...</div>
+          <div v-if="!oscEvents.length" class="empty">{{ t('recorder.waitingData') }}</div>
         </div>
       </section>
     </div>

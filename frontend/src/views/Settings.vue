@@ -207,7 +207,7 @@ onMounted(() => { checkUpdate() })
         <h2>{{ t('settings.githubTitle') }}</h2>
         <div class="field">
           <label>{{ t('settings.githubMirror') }}</label>
-          <input type="text" v-model="githubMirror" placeholder="留空 = 直连 GitHub">
+          <input type="text" v-model="githubMirror" :placeholder="t('settings.githubMirrorPlaceholder')">
           <p class="hint">{{ t('settings.githubMirrorHint') }}</p>
           <div class="mirror-presets">
             <button class="preset-tag" @click="githubMirror = ''">{{ t('settings.githubDirect') }}</button>

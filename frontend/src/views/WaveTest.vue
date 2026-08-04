@@ -75,7 +75,7 @@ function drawRealtimeCanvas(canvas: HTMLCanvasElement | null, buffer: WaveSample
     ctx.fillStyle = 'rgba(255,255,255,0.2)'
     ctx.font = '12px Inter, sans-serif'
     ctx.textAlign = 'center'
-    ctx.fillText('等待波形数据...', w / 2, h / 2)
+    ctx.fillText(t('waveTest.waitingData'), w / 2, h / 2)
     ctx.textAlign = 'start'
     return
   }
@@ -135,12 +135,12 @@ async function loadPreview() {
     const totalPoints = previewSections.value.reduce((sum: number, s: SectionData) => sum + s.n_points * s.repeats, 0)
     const slotsPerPoint = 4 / spd
     const totalDurationS = (totalPoints * slotsPerPoint * 25 / 1000).toFixed(1)
-    previewInfo.value = `${previewSections.value.length} 小节 · ${totalPoints} 点 · ${totalDurationS}s · ${spd}x速`
+    previewInfo.value = `${previewSections.value.length} ${t('waveTest.previewSection')} · ${totalPoints} ${t('waveTest.previewPoints')} · ${totalDurationS}s · ${spd}${t('waveTest.previewSpeed')}`
     await nextTick()
     // Use rAF to ensure browser has laid out the element after v-if flip
     requestAnimationFrame(() => { drawPreview() })
   } catch {
-    previewInfo.value = '加载失败'
+    previewInfo.value = t('waveTest.loadFailed')
   }
 }
 
@@ -298,10 +298,10 @@ async function start() {
       playing.value = true
       startPolling()
     } else {
-      msg.value = data.error || '启动失败'
+      msg.value = data.error || t('waveTest.startFailed')
     }
   } catch (e: any) {
-    msg.value = e.message || '请求失败'
+    msg.value = e.message || t('waveTest.requestFailed')
   }
 }
 
@@ -484,8 +484,8 @@ onUnmounted(() => {
 
     <div class="wave-display">
       <div class="wave-header">
-        <span class="wave-title">实时波形</span>
-        <span class="wave-status" :class="{ active: playing }">{{ playing ? '▶ 播放中' : '⏹ 停止' }}</span>
+        <span class="wave-title">{{ t('waveTest.realtimeWave') }}</span>
+        <span class="wave-status" :class="{ active: playing }">{{ playing ? t('waveTest.playing') : t('waveTest.stopped') }}</span>
       </div>
       <div class="wave-dual">
         <div class="wave-channel">
@@ -498,43 +498,43 @@ onUnmounted(() => {
         </div>
       </div>
       <div class="rt-legend">
-        <span>柱宽=脉冲间隔(占空比)</span>
-        <span><span class="dot purple"></span>高频(柔和)</span>
-        <span><span class="dot red"></span>低频(尖锐)</span>
+        <span>{{ t('waveTest.legendBarWidth') }}</span>
+        <span><span class="dot purple"></span>{{ t('waveTest.legendHighFreq') }}</span>
+        <span><span class="dot red"></span>{{ t('waveTest.legendLowFreq') }}</span>
       </div>
     </div>
 
     <div class="test-grid">
       <section class="card">
-        <h2>参数设置</h2>
+        <h2>{{ t('waveTest.paramSettings') }}</h2>
 
         <div class="field">
-          <label>通道</label>
+          <label>{{ t('waveTest.channelLabel') }}</label>
           <div class="channel-tabs">
             <button :class="{ active: channel === 'A' }" @click="channel = 'A'" :disabled="playing">A</button>
             <button :class="{ active: channel === 'B' }" @click="channel = 'B'" :disabled="playing">B</button>
             <button :class="{ active: channel === 'AB' }" @click="channel = 'AB'" :disabled="playing">A+B</button>
           </div>
-          <p class="hint" v-if="playing">播放中不可切换通道，请先停止</p>
+          <p class="hint" v-if="playing">{{ t('waveTest.channelSwitchHint') }}</p>
         </div>
 
         <div class="field">
-          <label>强度 <span class="val">{{ strength }}</span></label>
+          <label>{{ t('waveTest.strengthLabel') }} <span class="val">{{ strength }}</span></label>
           <input type="range" v-model.number="strength" min="0" max="200" step="1">
-          <p class="hint">设备实际输出强度 (0–200)</p>
+          <p class="hint">{{ t('waveTest.strengthHint') }}</p>
         </div>
 
         <div class="field">
-          <label>波形缩放 (wave_scale) <span class="val">{{ waveScale.toFixed(2) }}</span></label>
+          <label>{{ t('waveTest.waveScaleLabel') }} <span class="val">{{ waveScale.toFixed(2) }}</span></label>
           <input type="range" v-model.number="waveScale" min="0" max="1" step="0.01">
-          <p class="hint">0 = 静音, 1 = 波形原始强度</p>
+          <p class="hint">{{ t('waveTest.waveScaleHint') }}</p>
         </div>
 
         <div class="field">
-          <label>波形预设</label>
+          <label>{{ t('common.wavePreset') }}</label>
           <div class="preset-row">
             <select v-model="preset">
-              <option value="">默认电击波</option>
+              <option value="">{{ t('waveTest.presetDefault') }}</option>
               <option v-for="p in presets" :key="p" :value="p">{{ p.replace(/^pulse-/, '').replace(/-\d+$/, '') }}</option>
             </select>
             <button class="btn btn-sm" @click="triggerImport">{{ t('waveTest.import') }}</button>
@@ -555,12 +555,12 @@ onUnmounted(() => {
           <div class="preview-info">{{ previewInfo }}</div>
           <canvas ref="previewCanvasRef" class="preview-canvas"></canvas>
           <div class="preview-legend">
-            <span class="legend-item">每柱=1脉冲</span>
-            <span class="legend-item">浅色=循环重复</span>
-            <span class="legend-item">虚线=小节分界</span>
+            <span class="legend-item">{{ t('waveTest.legendPerBar') }}</span>
+            <span class="legend-item">{{ t('waveTest.legendRepeat') }}</span>
+            <span class="legend-item">{{ t('waveTest.legendDivider') }}</span>
           </div>
         </div>
-        <div v-else class="empty-preview">选择预设查看波形预览</div>
+        <div v-else class="empty-preview">{{ t('waveTest.selectPresetHint') }}</div>
       </section>
     </div>
   </div>

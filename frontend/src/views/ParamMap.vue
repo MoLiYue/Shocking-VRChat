@@ -12,11 +12,11 @@ interface Param {
 }
 
 const MODES = [
-  { value: 'distance', label: '距离' },
-  { value: 'shock', label: '电击' },
-  { value: 'touch', label: '触摸' },
-  { value: 'combo', label: '组合' },
-  { value: 'boost', label: '强度增减' },
+  { value: 'distance' },
+  { value: 'shock' },
+  { value: 'touch' },
+  { value: 'combo' },
+  { value: 'boost' },
 ]
 
 const PARAM_PREFIX = '/avatar/parameters/'

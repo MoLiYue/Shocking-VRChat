@@ -32,7 +32,7 @@ async function load() {
 
 function addRule() {
   rules.value.push({
-    name: `规则 ${rules.value.length + 1}`,
+    name: `${t('overlimit.rulePrefix')} ${rules.value.length + 1}`,
     channel: 'both',
     limit_value: 30,
     condition: {
@@ -47,11 +47,11 @@ function addRule() {
 async function save() {
   const data = await apiPost('/api/v1/overlimit_rules', { rules: rules.value })
   if (data.success) {
-    msg.value = '✓ 已保存并生效'
+    msg.value = t('overlimit.savedSuccess')
     msgType.value = 'ok'
     rules.value = data.rules
   } else {
-    msg.value = '保存失败'
+    msg.value = t('overlimit.saveFailed')
     msgType.value = 'err'
   }
   setTimeout(() => msg.value = '', 3000)
@@ -85,30 +85,30 @@ onMounted(load)
     <p class="page-desc">{{ t('overlimit.desc') }}</p>
 
     <div class="status-bar">
-      <span class="status-label">当前生效超限:</span>
+      <span class="status-label">{{ t('overlimit.currentEffective') }}</span>
       <span class="status-chip" :class="{ active: effective.A > 0 }">A: {{ effective.A > 0 ? effective.A : '—' }}</span>
       <span class="status-chip" :class="{ active: effective.B > 0 }">B: {{ effective.B > 0 ? effective.B : '—' }}</span>
-      <button class="btn btn-ghost btn-sm" @click="load" title="刷新状态">↻</button>
+      <button class="btn btn-ghost btn-sm" @click="load" :title="t('overlimit.refreshStatus')">↻</button>
     </div>
 
     <div class="rules-list">
       <div v-for="(rule, i) in rules" :key="i" class="rule-card card" :class="{ disabled: !rule.enabled }">
         <div class="rule-header">
-          <input type="text" v-model="rule.name" class="rule-name" placeholder="规则名称">
+          <input type="text" v-model="rule.name" class="rule-name" :placeholder="t('overlimit.ruleName')">
           <label class="toggle">
             <input type="checkbox" v-model="rule.enabled">
-            <span class="toggle-label">{{ rule.enabled ? '启用' : '禁用' }}</span>
+            <span class="toggle-label">{{ rule.enabled ? t('common.enable') : t('common.disable') }}</span>
           </label>
           <div class="rule-actions">
-            <button class="btn-icon" @click="moveUp(i)" :disabled="i === 0" title="上移">↑</button>
-            <button class="btn-icon" @click="moveDown(i)" :disabled="i === rules.length - 1" title="下移">↓</button>
-            <button class="btn-icon danger" @click="removeRule(i)" title="删除">✕</button>
+            <button class="btn-icon" @click="moveUp(i)" :disabled="i === 0" :title="t('overlimit.moveUp')">↑</button>
+            <button class="btn-icon" @click="moveDown(i)" :disabled="i === rules.length - 1" :title="t('overlimit.moveDown')">↓</button>
+            <button class="btn-icon danger" @click="removeRule(i)" :title="t('common.delete')">✕</button>
           </div>
         </div>
 
         <div class="rule-body">
           <div class="condition-row">
-            <span class="cond-label">当</span>
+            <span class="cond-label">{{ t('overlimit.when') }}</span>
             <input type="text" v-model="rule.condition.param" class="cond-param" placeholder="/avatar/parameters/...">
             <select v-model="rule.condition.operator" class="cond-op">
               <option v-for="op in operators" :key="op" :value="op">{{ op }}</option>
@@ -116,44 +116,44 @@ onMounted(load)
             <input type="number" v-model.number="rule.condition.value" class="cond-value" step="0.01">
           </div>
           <div class="effect-row">
-            <span class="cond-label">则</span>
+            <span class="cond-label">{{ t('overlimit.then') }}</span>
             <select v-model="rule.channel" class="effect-channel">
-              <option value="a">通道 A</option>
-              <option value="b">通道 B</option>
-              <option value="both">双通道</option>
+              <option value="a">{{ t('overlimit.channelAOption') }}</option>
+              <option value="b">{{ t('overlimit.channelBOption') }}</option>
+              <option value="both">{{ t('overlimit.channelBothOption') }}</option>
             </select>
-            <span class="effect-text">上限提升到</span>
+            <span class="effect-text">{{ t('overlimit.limitBoostTo') }}</span>
             <input type="number" v-model.number="rule.limit_value" min="0" max="200" class="effect-value">
           </div>
         </div>
       </div>
 
       <div v-if="rules.length === 0" class="empty-state">
-        <p>暂无超限规则。点击下方按钮添加第一条规则。</p>
+        <p>{{ t('overlimit.emptyState') }}</p>
       </div>
     </div>
 
     <div class="save-bar">
-      <button class="btn btn-primary" @click="addRule">＋ 添加规则</button>
-      <button class="btn btn-primary" @click="save">💾 保存全部</button>
-      <button class="btn btn-ghost" @click="load">↺ 重新加载</button>
+      <button class="btn btn-primary" @click="addRule">{{ t('overlimit.addRule') }}</button>
+      <button class="btn btn-primary" @click="save">{{ t('overlimit.saveAll') }}</button>
+      <button class="btn btn-ghost" @click="load">{{ t('overlimit.reloadAll') }}</button>
       <span class="msg" :class="{ ok: msgType === 'ok', err: msgType === 'err' }">{{ msg }}</span>
     </div>
 
     <div class="info-card card">
-      <h3>使用说明</h3>
+      <h3>{{ t('overlimit.infoTitle') }}</h3>
       <ul>
-        <li><strong>条件</strong>：指定一个 OSC 参数路径和比较条件（如 <code>/avatar/parameters/pcs/smash-intense == 1</code>）</li>
-        <li><strong>效果</strong>：条件满足时，对应通道的强度上限<em>临时变为</em>规则中的值（绝对值，非增量）</li>
-        <li><strong>多规则</strong>：同时满足多条规则时，取所有匹配规则中的最大 limit_value</li>
-        <li><strong>优先级</strong>：规则顺序不影响结果（始终取最大值），但影响可读性</li>
-        <li><strong>恢复</strong>：当条件不再满足时，自动恢复到基础强度上限</li>
+        <li><strong>{{ t('overlimit.infoCondition') }}</strong>：{{ t('overlimit.infoConditionDesc') }}</li>
+        <li><strong>{{ t('overlimit.infoEffect') }}</strong>：{{ t('overlimit.infoEffectDesc') }}</li>
+        <li><strong>{{ t('overlimit.infoMultiRule') }}</strong>：{{ t('overlimit.infoMultiRuleDesc') }}</li>
+        <li><strong>{{ t('overlimit.infoPriority') }}</strong>：{{ t('overlimit.infoPriorityDesc') }}</li>
+        <li><strong>{{ t('overlimit.infoRecover') }}</strong>：{{ t('overlimit.infoRecoverDesc') }}</li>
       </ul>
-      <h3 style="margin-top:var(--sp-3)">示例</h3>
+      <h3 style="margin-top:var(--sp-3)">{{ t('overlimit.infoExampleTitle') }}</h3>
       <ul>
-        <li><code>/avatar/parameters/pcs/smash-intense == 1</code> → 激烈碰撞时允许上限到 60</li>
-        <li><code>/avatar/parameters/pcs/contact/enterPass >= 0.9</code> → 深入时允许上限到 80</li>
-        <li><code>/avatar/parameters/Shock/OverrideMax == 1</code> → 手动触发满功率</li>
+        <li><code>/avatar/parameters/pcs/smash-intense == 1</code> → {{ t('overlimit.infoExample1') }}</li>
+        <li><code>/avatar/parameters/pcs/contact/enterPass >= 0.9</code> → {{ t('overlimit.infoExample2') }}</li>
+        <li><code>/avatar/parameters/Shock/OverrideMax == 1</code> → {{ t('overlimit.infoExample3') }}</li>
       </ul>
     </div>
   </div>

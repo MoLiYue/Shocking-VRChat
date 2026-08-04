@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { ref, onMounted, watch, nextTick } from 'vue'
+import { ref, onMounted, watch, nextTick, computed } from 'vue'
 import { api, apiPost, apiDelete } from '@/api'
 import { useI18n } from '@/i18n'
 import WavePreview from '@/components/WavePreview.vue'
+import WaveSimulator from '@/components/WaveSimulator.vue'
 
 const { t } = useI18n()
 
@@ -21,6 +22,19 @@ const triggerTop = ref(0.8)
 const presets = ref<string[]>([])
 const distMsg = ref('')
 const showAdvanced = ref(false)
+
+// Reactive params for wave simulator
+const simParams = computed(() => ({
+  freq_ms: freqMs.value,
+  wave_preset: wavePreset.value || null,
+  wave_scale: waveScale.value,
+  texture_floor: textureFloor.value,
+  wave_window_ops: windowOps.value,
+  wave_sample_step: sampleStep.value,
+  wave_advance_samples: advanceSamples.value,
+  wave_envelope_curve: envelopeCurve.value,
+  trigger_range: { bottom: triggerBottom.value, top: triggerTop.value },
+}))
 
 // --- Curve editor state ---
 const paramList = ref<string[]>([])
@@ -180,7 +194,7 @@ function draw() {
   ctx.fillText('0', 4, H - 4)
   ctx.fillText('1', W - 12, H - 4)
   ctx.fillText('1', 4, 14)
-  ctx.fillText('参数值 →', W / 2 - 24, H - 4)
+  ctx.fillText(t('modeDistance.axisParamValue'), W / 2 - 24, H - 4)
 
   const pts = points.value
   ctx.beginPath()
@@ -391,6 +405,16 @@ onMounted(() => {
       <button class="btn btn-ghost" @click="loadDistance">{{ t('common.reload') }}</button>
       <span class="msg">{{ distMsg }}</span>
     </div>
+
+    <!-- Wave Simulator -->
+    <section class="card" style="margin-top:var(--sp-5)">
+      <h2>{{ t('common.waveSimulator') }}</h2>
+      <WaveSimulator
+        mode="distance"
+        :channel="ch"
+        :params="simParams"
+      />
+    </section>
 
     <!-- Curve Editor Section -->
     <div class="section-divider"></div>

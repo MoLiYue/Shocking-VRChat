@@ -81,7 +81,7 @@ async function save() {
       done.value = true
       await waitForBackend()
       window.location.href = '/dashboard'
-    } else { errMsg.value = data.message || '保存失败' }
+    } else { errMsg.value = data.message || t('setup.saveFailed') }
   } catch (e: any) { errMsg.value = e.message }
   finally { saving.value = false }
 }
@@ -148,12 +148,12 @@ async function save() {
         <h2>{{ t('setup.strengthTitle') }}</h2>
         <div class="strength-section">
           <div class="field">
-            <label>{{ sameAB ? '强度上限' : '通道 A 强度' }}: <strong class="accent">{{ strengthA }}</strong> / 200</label>
+            <label>{{ sameAB ? t('setup.strengthLabel') : t('setup.strengthLabelA') }}: <strong class="accent">{{ strengthA }}</strong> / 200</label>
             <input type="range" v-model.number="strengthA" min="0" max="200" step="1">
             <p class="hint">{{ t('setup.strengthHint') }}</p>
           </div>
           <div class="field" v-if="!sameAB">
-            <label>通道 B 强度: <strong class="accent">{{ strengthB }}</strong> / 200</label>
+            <label>{{ t('setup.strengthLabelB') }}: <strong class="accent">{{ strengthB }}</strong> / 200</label>
             <input type="range" v-model.number="strengthB" min="0" max="200" step="1">
           </div>
         </div>
@@ -170,10 +170,10 @@ async function save() {
 
       <!-- Nav -->
       <div class="wizard-nav">
-        <button class="btn btn-ghost" v-if="step > 0" @click="step--">← 上一步</button>
+        <button class="btn btn-ghost" v-if="step > 0" @click="step--">{{ t('setup.prevStep') }}</button>
         <div class="spacer"></div>
         <button class="btn btn-primary" v-if="step < totalSteps - 1" :disabled="!canProceed()" @click="step++">
-          下一步 →
+          {{ t('setup.nextStep') }}
         </button>
         <button class="btn btn-primary" v-if="step === totalSteps - 1" :disabled="saving" @click="save">
           {{ saving ? t('setup.saving') : '✓ ' + t('setup.saveAndStart') }}

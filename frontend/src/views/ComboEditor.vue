@@ -43,7 +43,7 @@ async function saveCombo() {
     touch: { wave_preset: touchPreset.value || null, wave_scale: touchScale.value, n_derivative: touchDerivative.value },
     trigger_range: { bottom: triggerBottom.value, top: triggerTop.value },
   })
-  msg.value = data.success ? '已保存' : '保存失败'
+  msg.value = data.success ? t('common.saved') : t('common.saveFailed')
   setTimeout(() => msg.value = '', 3000)
 }
 
@@ -71,22 +71,22 @@ onMounted(() => { loadPresets(); loadCombo() })
         <h2 style="margin-top:16px">{{ t('combo.shockParams') }}</h2>
         <label>{{ t('combo.shockDuration') }}: {{ shockDuration.toFixed(1) }}s</label>
         <input type="range" v-model.number="shockDuration" min="0.5" max="5" step="0.1">
-        <label>波形预设</label>
-        <select v-model="shockPreset"><option value="">默认</option><option v-for="p in presets" :key="p" :value="p">{{ p }}</option></select>
-        <label>波形强度: {{ shockScale.toFixed(2) }}</label>
+        <label>{{ t('common.wavePreset') }}</label>
+        <select v-model="shockPreset"><option value="">{{ t('common.default') }}</option><option v-for="p in presets" :key="p" :value="p">{{ p }}</option></select>
+        <label>{{ t('common.waveScale') }}: {{ shockScale.toFixed(2) }}</label>
         <input type="range" v-model.number="shockScale" min="0" max="1" step="0.05">
 
         <h2 style="margin-top:16px">{{ t('combo.touchParams') }}</h2>
-        <label>波形预设</label>
-        <select v-model="touchPreset"><option value="">默认</option><option v-for="p in presets" :key="p" :value="p">{{ p }}</option></select>
-        <label>波形强度: {{ touchScale.toFixed(2) }}</label>
+        <label>{{ t('common.wavePreset') }}</label>
+        <select v-model="touchPreset"><option value="">{{ t('common.default') }}</option><option v-for="p in presets" :key="p" :value="p">{{ p }}</option></select>
+        <label>{{ t('common.waveScale') }}: {{ touchScale.toFixed(2) }}</label>
         <input type="range" v-model.number="touchScale" min="0" max="1" step="0.05">
         <label>{{ t('combo.derivative') }}</label>
         <select v-model.number="touchDerivative">
-          <option :value="0">0 - 距离</option>
-          <option :value="1">1 - 速度</option>
-          <option :value="2">2 - 加速度</option>
-          <option :value="3">3 - 急动度</option>
+          <option :value="0">{{ t('combo.deriv0') }}</option>
+          <option :value="1">{{ t('combo.deriv1') }}</option>
+          <option :value="2">{{ t('combo.deriv2') }}</option>
+          <option :value="3">{{ t('combo.deriv3') }}</option>
         </select>
 
         <div class="actions" style="margin-top:16px">
@@ -99,14 +99,14 @@ onMounted(() => { loadPresets(); loadCombo() })
       <div class="card">
         <h2>{{ t('combo.behavior') }}</h2>
         <div class="diagram">
-          <div class="phase phase-shock">⚡ Shock<br>一激灵</div>
+          <div class="phase phase-shock" style="white-space:pre-line">{{ t('combo.shockPhase') }}</div>
           <div class="divider">{{ switchDuration.toFixed(2) }}s</div>
-          <div class="phase phase-touch">🤚 Touch<br>柔和抚摸</div>
+          <div class="phase phase-touch" style="white-space:pre-line">{{ t('combo.touchPhase') }}</div>
         </div>
-        <h2 style="margin-top:16px">Trigger Range</h2>
-        <label>下界: {{ triggerBottom.toFixed(2) }}</label>
+        <h2 style="margin-top:16px">{{ t('common.triggerRange') }}</h2>
+        <label>{{ t('common.triggerBottom') }}: {{ triggerBottom.toFixed(2) }}</label>
         <input type="range" v-model.number="triggerBottom" min="0" max="0.5" step="0.01">
-        <label>上界: {{ triggerTop.toFixed(2) }}</label>
+        <label>{{ t('common.triggerTop') }}: {{ triggerTop.toFixed(2) }}</label>
         <input type="range" v-model.number="triggerTop" min="0.3" max="1" step="0.01">
       </div>
     </div>
