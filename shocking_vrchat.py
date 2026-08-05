@@ -2424,22 +2424,51 @@ def main():
     logger.info(f"[init] Channel A: {enabled_a} params | Channel B: {enabled_b} params")
     logger.info(f"[init] Web: :{SETTINGS['web_server']['listen_port']} | WS: :{SETTINGS['ws']['listen_port']} | OSC: :{SETTINGS['osc']['listen_port']}")
 
-    # System tray icon (Windows only, non-blocking)
-    _start_tray_icon()
+    # Determine run mode based on --no-tray flag
+    no_tray = '--no-tray' in sys.argv
 
-    # Run FastAPI with Uvicorn (engine starts via startup event)
-    import uvicorn
-    uvicorn.run(
-        app,
-        host=SETTINGS['web_server']['listen_host'],
-        port=SETTINGS['web_server']['listen_port'],
-        log_level="warning",
-        access_log=False,
-    )
+    if no_tray or sys.platform != 'win32':
+        # Console mode: tray in background thread (if Windows), uvicorn in main thread
+        if not no_tray:
+            _start_tray_icon()
+        _run_uvicorn_blocking()
+    else:
+        # Windows tray mode (default): tray in main thread, uvicorn in background thread.
+        # This hides the console window completely — the tray icon is the only UI.
+        _run_with_tray()
+
+
+def _create_tray_icon_image():
+    """Create tray icon image. Uses .ico file if available, otherwise generates programmatically."""
+    from PIL import Image, ImageDraw
+
+    # Try to load the shipped .ico file
+    ico_path = os.path.join(get_runtime_base_dir(), 'shocking_vrchat.ico')
+    if not os.path.exists(ico_path):
+        ico_path = os.path.join(get_exe_dir(), 'shocking_vrchat.ico')
+    if os.path.exists(ico_path):
+        try:
+            img = Image.open(ico_path)
+            img = img.resize((64, 64), Image.LANCZOS)
+            return img
+        except Exception:
+            pass
+
+    # Fallback: generate programmatically
+    img = Image.new('RGBA', (64, 64), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(img)
+    # Purple circle background
+    draw.ellipse([4, 4, 60, 60], fill=(139, 92, 246, 255))
+    # Lightning bolt shape
+    draw.polygon([(32, 8), (18, 34), (28, 34), (24, 56), (46, 28), (34, 28), (38, 8)], fill=(255, 255, 255, 255))
+    return img
 
 
 def _start_tray_icon():
-    """Start system tray icon in a background thread (Windows only)."""
+    """Start system tray icon in a background thread (Windows only).
+    
+    Used when --no-tray is NOT set but tray cannot run in main thread (e.g. non-Windows).
+    """
     if sys.platform != 'win32':
         return
     try:
@@ -2448,16 +2477,6 @@ def _start_tray_icon():
     except ImportError:
         logger.debug("[tray] pystray/Pillow not available, skipping tray icon.")
         return
-
-    def _create_icon_image():
-        """Create a simple lightning bolt icon."""
-        img = Image.new('RGBA', (64, 64), (0, 0, 0, 0))
-        draw = ImageDraw.Draw(img)
-        # Purple circle background
-        draw.ellipse([4, 4, 60, 60], fill=(139, 92, 246, 255))
-        # Lightning bolt shape
-        draw.polygon([(32, 8), (18, 34), (28, 34), (24, 56), (46, 28), (34, 28), (38, 8)], fill=(255, 255, 255, 255))
-        return img
 
     def _on_open(icon, item):
         import webbrowser
@@ -2472,11 +2491,84 @@ def _start_tray_icon():
         pystray.MenuItem(f'打开管理页面 (:{port})', _on_open, default=True),
         pystray.MenuItem('退出', _on_quit),
     )
-    icon = pystray.Icon('ShockingVRChat', _create_icon_image(), 'Shocking VRChat', menu)
+    icon = pystray.Icon('ShockingVRChat', _create_tray_icon_image(), 'Shocking VRChat', menu)
 
     tray_thread = Thread(target=icon.run, daemon=True)
     tray_thread.start()
-    logger.info("[tray] System tray icon started.")
+    logger.info("[tray] System tray icon started (background thread).")
+
+
+def _run_with_tray():
+    """Run with system tray in the main thread, uvicorn in a background thread.
+    
+    This is the default mode on Windows when --no-tray is not specified.
+    The Win32 tray message loop requires the main thread, so uvicorn runs in a daemon thread.
+    """
+    try:
+        import pystray
+        from PIL import Image, ImageDraw
+    except ImportError:
+        logger.warning("[tray] pystray/Pillow not available, falling back to console mode.")
+        _run_uvicorn_blocking()
+        return
+
+    import uvicorn
+
+    # Start uvicorn in a background thread
+    uvicorn_config = uvicorn.Config(
+        app,
+        host=SETTINGS['web_server']['listen_host'],
+        port=SETTINGS['web_server']['listen_port'],
+        log_level="warning",
+        access_log=False,
+    )
+    server = uvicorn.Server(uvicorn_config)
+
+    def _uvicorn_thread():
+        server.run()
+
+    server_thread = Thread(target=_uvicorn_thread, daemon=True, name='uvicorn-server')
+    server_thread.start()
+
+    logger.info("[tray] Uvicorn started in background thread.")
+
+    # Tray callbacks
+    def _on_open(icon, item):
+        import webbrowser
+        webbrowser.open_new_tab(f"http://127.0.0.1:{SETTINGS['web_server']['listen_port']}")
+
+    def _on_quit(icon, item):
+        logger.info("[tray] Quit requested via tray menu.")
+        icon.stop()
+        server.should_exit = True
+
+    port = SETTINGS['web_server']['listen_port']
+    menu = pystray.Menu(
+        pystray.MenuItem(f'打开管理页面 (:{port})', _on_open, default=True),
+        pystray.MenuItem('退出', _on_quit),
+    )
+    icon = pystray.Icon('ShockingVRChat', _create_tray_icon_image(), 'Shocking VRChat', menu)
+
+    logger.info("[tray] System tray icon running in main thread.")
+    # icon.run() blocks the main thread with Win32 message pump
+    icon.run()
+
+    # After tray exits, ensure uvicorn stops
+    server.should_exit = True
+    server_thread.join(timeout=5)
+    logger.info("[shutdown] Tray and server stopped.")
+
+
+def _run_uvicorn_blocking():
+    """Run uvicorn directly in the main thread (--no-tray mode or non-Windows)."""
+    import uvicorn
+    uvicorn.run(
+        app,
+        host=SETTINGS['web_server']['listen_host'],
+        port=SETTINGS['web_server']['listen_port'],
+        log_level="warning",
+        access_log=False,
+    )
 
 if __name__ == "__main__":
     # Ensure errors are visible even with console=False (Windows GUI mode)

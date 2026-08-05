@@ -14,13 +14,14 @@ def build():
         "--output-dir=dist_nuitka",
         "--output-filename=shocking_vrchat.exe",
 
-        # Windows-specific
-        "--windows-console-mode=attach",
-        "--windows-icon-from-ico=",  # No icon (remove this line or provide .ico)
+        # Windows-specific: hide console, show only tray icon
+        "--windows-console-mode=disable",
+        "--windows-icon-from-ico=shocking_vrchat.ico",
 
         # Include data files (wave_presets excluded - kept external for easy editing)
         "--include-data-dir=static=static",
         "--include-data-dir=templates=templates",
+        "--include-data-files=shocking_vrchat.ico=shocking_vrchat.ico",
 
         # Include our package modules
         "--include-package=srv",
@@ -40,6 +41,10 @@ def build():
         "--include-module=pythonosc.osc_server",
         "--include-module=pythonosc.dispatcher",
         "--include-module=pythonosc.udp_client",
+        "--include-module=pystray",
+        "--include-module=pystray._win32",
+        "--include-module=PIL.Image",
+        "--include-module=PIL.ImageDraw",
 
         # Exclude unnecessary modules
         "--nofollow-import-to=pytest",
@@ -57,9 +62,6 @@ def build():
         # Entry point
         "shocking_vrchat.py",
     ]
-
-    # Remove empty icon flag if no icon
-    cmd = [c for c in cmd if c != "--windows-icon-from-ico="]
 
     print(f"Running Nuitka build...")
     print(f"Command: {' '.join(cmd)}")

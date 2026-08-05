@@ -105,9 +105,11 @@ jobs:
             --onefile `
             --output-dir=dist_nuitka `
             --output-filename=shocking_vrchat.exe `
-            --windows-console-mode=attach `
+            --windows-console-mode=disable `
+            --windows-icon-from-ico=shocking_vrchat.ico `
             --include-data-dir=static=static `
             --include-data-dir=templates=templates `
+            --include-data-files=shocking_vrchat.ico=shocking_vrchat.ico `
             --include-package=srv `
             --include-package=pulse_to_hex `
             --include-module=uvicorn.logging `
@@ -123,6 +125,10 @@ jobs:
             --include-module=pythonosc.osc_server `
             --include-module=pythonosc.dispatcher `
             --include-module=pythonosc.udp_client `
+            --include-module=pystray `
+            --include-module=pystray._win32 `
+            --include-module=PIL.Image `
+            --include-module=PIL.ImageDraw `
             --nofollow-import-to=pytest `
             --nofollow-import-to=unittest `
             --nofollow-import-to=setuptools `

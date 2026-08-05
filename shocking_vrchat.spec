@@ -14,6 +14,7 @@ a = Analysis(
     datas=[
         ('static', 'static'),
         ('templates', 'templates'),
+        ('shocking_vrchat.ico', '.'),
         # wave_presets NOT bundled: kept as external files next to exe for easy editing
     ],
     hiddenimports=[
@@ -62,6 +63,8 @@ a = Analysis(
         'pystray',
         'pystray._win32',
         'PIL',
+        'PIL.Image',
+        'PIL.ImageDraw',
     ],
     hookspath=[],
     hooksconfig={},
@@ -97,8 +100,8 @@ exe = EXE(
     bootloader_ignore_signals=False,
     strip=False,
     upx=True,
-    console=True,
-    icon=None,
+    console=False,
+    icon='shocking_vrchat.ico',
 )
 
 coll = COLLECT(
