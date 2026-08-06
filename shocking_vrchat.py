@@ -191,7 +191,9 @@ def load_config_files():
 
 def reset_logger():
     logger.remove()
-    logger.add(sys.stderr, level=SETTINGS.get('log_level', 'INFO'))
+    # Only add stderr sink when console is available (--noconsole / GUI mode sets it to None)
+    if sys.stderr is not None:
+        logger.add(sys.stderr, level=SETTINGS.get('log_level', 'INFO'))
     # File log (always available, even without console)
     _log_file = os.path.join(get_exe_dir(), 'shocking_vrchat.log')
     logger.add(_log_file, level='DEBUG', rotation='5 MB', retention=2, encoding='utf-8')
