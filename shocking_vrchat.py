@@ -2573,6 +2573,13 @@ def _run_uvicorn_blocking():
     )
 
 if __name__ == "__main__":
+    # Fix for PyInstaller --noconsole: sys.stdout/stderr are None, which crashes
+    # uvicorn's DefaultFormatter (calls .isatty()) and other stdlib code.
+    if sys.stdout is None:
+        sys.stdout = open(os.devnull, 'w')
+    if sys.stderr is None:
+        sys.stderr = open(os.devnull, 'w')
+
     # Ensure errors are visible even with console=False (Windows GUI mode)
     _error_log_path = os.path.join(get_exe_dir(), 'error.log')
     try:
