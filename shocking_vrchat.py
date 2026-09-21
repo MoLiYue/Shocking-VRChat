@@ -28,9 +28,15 @@ def get_runtime_base_dir():
         return sys._MEIPASS
     return os.path.dirname(os.path.abspath(__file__))
 
+def is_packaged_build():
+    """True when running as a packaged binary (PyInstaller sets sys.frozen,
+    Nuitka sets the module-level __compiled__ global)."""
+    return bool(getattr(sys, "frozen", False)) or ("__compiled__" in globals())
+
+
 def get_exe_dir():
     """Directory where the exe/script lives (for external files: wave_presets, dg-lab, configs)."""
-    if getattr(sys, "frozen", False):
+    if is_packaged_build():
         return os.path.dirname(sys.executable)
     return os.path.dirname(os.path.abspath(__file__))
 
@@ -1139,6 +1145,36 @@ _update_cache: dict = {}
 _update_cache_time = 0.0
 _update_lock = asyncio.Lock()
 
+# Live progress of an in-flight update, polled by the Web UI.
+# stage: idle|downloading|verifying|extracting|applying|restarting|error|done
+_update_progress: dict = {
+    'stage': 'idle',
+    'percent': 0,
+    'downloaded': 0,
+    'total': 0,
+    'message': '',
+    'error': '',
+    'updated_at': 0.0,
+}
+
+def _set_update_progress(stage=None, percent=None, downloaded=None,
+                         total=None, message=None, error=None):
+    """Update the global update-progress state (thread-safe enough for our use)."""
+    if stage is not None:
+        _update_progress['stage'] = stage
+    if percent is not None:
+        _update_progress['percent'] = int(max(0, min(100, percent)))
+    if downloaded is not None:
+        _update_progress['downloaded'] = int(downloaded)
+    if total is not None:
+        _update_progress['total'] = int(total)
+    if message is not None:
+        _update_progress['message'] = message
+    if error is not None:
+        _update_progress['error'] = error
+    _update_progress['updated_at'] = time.time()
+
+
 def _get_github_mirror() -> str:
     """Get configured GitHub mirror prefix (empty string = direct)."""
     return (SETTINGS.get('general', {}).get('github_mirror') or '').strip().rstrip('/')
@@ -1169,14 +1205,24 @@ def _blocking_update_check():
         return json.loads(resp.read().decode())
 
 
-def _blocking_download(url: str, dest_path: str, expected_size: int = 0):
-    """Blocking file download with progress logging. Run via asyncio.to_thread()."""
+def _blocking_download(url: str, dest_path: str, expected_size: int = 0, progress_cb=None):
+    """Blocking file download with progress logging. Run via asyncio.to_thread().
+
+    progress_cb(downloaded, total) is called periodically (best-effort) so the
+    Web UI can render a live progress bar.
+    """
     import urllib.request
     req = urllib.request.Request(url, headers={'User-Agent': 'ShockingVRChat'})
     with urllib.request.urlopen(req, timeout=120) as resp:
         total = int(resp.headers.get('Content-Length', 0)) or expected_size
         downloaded = 0
         last_log_pct = -10
+        last_cb_pct = -1
+        if progress_cb:
+            try:
+                progress_cb(0, total)
+            except Exception:
+                pass
         with open(dest_path, 'wb') as f:
             while True:
                 chunk = resp.read(65536)
@@ -1189,6 +1235,23 @@ def _blocking_download(url: str, dest_path: str, expected_size: int = 0):
                     if pct - last_log_pct >= 10:
                         logger.info(f"[update] Download progress: {pct}% ({downloaded}/{total})")
                         last_log_pct = pct
+                    # Report to UI on every 1% change (cheap) even without Content-Length
+                    if progress_cb and pct != last_cb_pct:
+                        last_cb_pct = pct
+                        try:
+                            progress_cb(downloaded, total)
+                        except Exception:
+                            pass
+                elif progress_cb:
+                    try:
+                        progress_cb(downloaded, total)
+                    except Exception:
+                        pass
+    if progress_cb:
+        try:
+            progress_cb(downloaded, total)
+        except Exception:
+            pass
     return downloaded
 
 
@@ -1310,6 +1373,11 @@ async def api_v1_update_check():
     _update_cache_time = time.time()
     return _update_cache
 
+@app.get("/api/v1/update/progress")
+async def api_v1_update_progress():
+    """Live progress of an in-flight update, polled by the Web UI."""
+    return dict(_update_progress)
+
 @app.post("/api/v1/update/apply")
 async def api_v1_update_apply():
     """Download and apply the latest update. Replaces files and restarts."""
@@ -1322,8 +1390,8 @@ async def api_v1_update_apply():
         raise HTTPException(409, '更新正在进行中，请勿重复操作')
 
     async with _update_lock:
-        # Only works for frozen (packaged) builds
-        if not getattr(sys, 'frozen', False):
+        # Only works for packaged builds (PyInstaller sets sys.frozen; Nuitka sets __compiled__)
+        if not is_packaged_build():
             raise HTTPException(400, '仅打包版本支持自动更新，开发环境请使用 git pull')
 
         check = await api_v1_update_check()
@@ -1342,15 +1410,26 @@ async def api_v1_update_apply():
         zip_path = os.path.join(tmp_dir, 'update.zip')
 
         try:
+            _set_update_progress(stage='downloading', percent=0, downloaded=0,
+                                 total=expected_size, message='正在下载更新包...', error='')
             # --- Download (non-blocking) ---
             actual_url = _apply_mirror(download_url)
             logger.info(f"[update] Downloading: {actual_url}")
+
+            def _on_download_progress(downloaded, total):
+                pct = int(downloaded * 100 / total) if total > 0 else 0
+                _set_update_progress(stage='downloading', percent=pct,
+                                     downloaded=downloaded, total=total,
+                                     message='正在下载更新包...')
+
             downloaded_size = await asyncio.to_thread(
-                _blocking_download, actual_url, zip_path, expected_size
+                _blocking_download, actual_url, zip_path, expected_size, _on_download_progress
             )
             logger.info(f"[update] Downloaded {downloaded_size} bytes to {zip_path}")
 
             # --- Integrity check ---
+            _set_update_progress(stage='verifying', percent=100,
+                                 message='正在校验文件完整性...')
             # Try to get SHA256 from release assets
             expected_sha256 = await asyncio.to_thread(
                 _try_fetch_sha256, assets, download_name
@@ -1361,18 +1440,21 @@ async def api_v1_update_apply():
             integrity_error = _verify_zip_integrity(zip_path, expected_size, expected_sha256)
             if integrity_error:
                 logger.error(f"[update] Integrity check failed: {integrity_error}")
+                _set_update_progress(stage='error', error=f'文件完整性校验失败: {integrity_error}')
                 raise HTTPException(500, f'文件完整性校验失败: {integrity_error}')
 
             logger.info("[update] Integrity check passed")
 
             # --- Zip Slip protection ---
+            _set_update_progress(stage='extracting', message='正在解压更新包...')
             extract_dir = os.path.join(tmp_dir, 'extracted')
             with zipfile.ZipFile(zip_path, 'r') as zf:
                 malicious_path = _check_zip_slip(zf, extract_dir)
                 if malicious_path:
                     logger.error(f"[update] Zip slip detected! Malicious path: {malicious_path}")
+                    _set_update_progress(stage='error', error=f'压缩包包含恶意路径: {malicious_path}')
                     raise HTTPException(500, f'压缩包包含恶意路径，更新已中止: {malicious_path}')
-                zf.extractall(extract_dir)
+                await asyncio.to_thread(zf.extractall, extract_dir)
 
             # Find the actual content dir (might be nested)
             # CI (GitHub Actions) packages as: shocking_vrchat_windows_x64.zip containing
@@ -1386,6 +1468,7 @@ async def api_v1_update_apply():
                 source_dir = extract_dir
 
             # Write update script that replaces files after this process exits
+            _set_update_progress(stage='applying', message='正在准备应用更新...')
             bat_path = os.path.join(tmp_dir, 'apply_update.bat')
             pid = os.getpid()
             exe_path = os.path.join(exe_dir, "shocking_vrchat.exe")
@@ -1395,6 +1478,7 @@ async def api_v1_update_apply():
                             'overlimit_rules.yaml', 'shocking_vrchat.log', 'error.log']
             with open(bat_path, 'w', encoding='utf-8') as f:
                 f.write('@echo off\n')
+                f.write('setlocal enabledelayedexpansion\n')
                 f.write('chcp 65001 >nul 2>&1\n')
                 f.write('echo Waiting for process to exit...\n')
                 # Wait for the process to exit (poll by PID, max 10s)
@@ -1421,12 +1505,15 @@ async def api_v1_update_apply():
                 exclude_file_args = ' '.join(f'"{ef}"' for ef in exclude_files)
                 f.write(f'robocopy "{exe_dir}" "{exe_dir}\\_backup" /s /xd {exclude_dir_args} /xf {exclude_file_args} >nul 2>&1\n')
                 f.write(f'echo Applying update...\n')
-                f.write(f'xcopy /s /y /q "{source_dir}\\*" "{exe_dir}\\"\n')
-                f.write(f'if errorlevel 1 (\n')
+                # robocopy is more robust than xcopy: handles subdirs/empty dirs, long paths,
+                # and is non-interactive. Exit codes 0-7 = success, >=8 = failure.
+                # Exclude _backup so we never recurse into our own backup copy.
+                f.write(f'robocopy "{source_dir}" "{exe_dir}" /e /xd "{exe_dir}\\_backup" >nul 2>&1\n')
+                f.write(f'if %ERRORLEVEL% GEQ 8 (\n')
                 f.write(f'    echo.\n')
                 f.write(f'    echo [ERROR] File copy failed. Attempting rollback from backup...\n')
-                f.write(f'    xcopy /s /y /q "{exe_dir}\\_backup\\*" "{exe_dir}\\"\n')
-                f.write(f'    if errorlevel 1 (\n')
+                f.write(f'    robocopy "{exe_dir}\\_backup" "{exe_dir}" /e >nul 2>&1\n')
+                f.write(f'    if !ERRORLEVEL! GEQ 8 (\n')
                 f.write(f'        echo.\n')
                 f.write(f'        echo [ERROR] Rollback also failed!\n')
                 f.write(f'        echo Please manually restore from: {exe_dir}\\_backup\n')
@@ -1448,6 +1535,8 @@ async def api_v1_update_apply():
 
             # Launch the update script and exit
             logger.info("[update] Launching update script and exiting...")
+            _set_update_progress(stage='restarting', percent=100,
+                                 message='更新已下载，正在应用并重启...')
             import subprocess
             subprocess.Popen(
                 ['cmd', '/c', bat_path],
@@ -1455,18 +1544,35 @@ async def api_v1_update_apply():
                 close_fds=True,
             )
 
-            # Schedule graceful shutdown
+            # Schedule shutdown. The update .bat waits for THIS pid to exit before
+            # copying files, so we must guarantee the process actually terminates.
+            # A plain sys.exit(0) inside this coroutine does NOT terminate the process
+            # in Windows tray mode, because uvicorn runs on a background thread while the
+            # main thread is blocked in the Win32 tray message loop — SystemExit raised
+            # in a background-thread task is swallowed by asyncio. So we stop the engine,
+            # stop the tray (to unblock the main thread / release resources), flush logs,
+            # then hard-exit via os._exit(0) which terminates the whole interpreter and
+            # releases the listening port immediately.
             async def _shutdown():
                 await asyncio.sleep(0.5)
-                await _graceful_shutdown()
+                logger.info("[update] Stopping services before restart...")
+                try:
+                    await engine.stop(keep_ws=False)
+                except Exception as e:
+                    logger.warning(f"[update] Engine stop error: {e}")
+                _sync_cleanup_before_exit()
+                logger.info("[update] Exiting for update apply...")
+                os._exit(0)
             asyncio.create_task(_shutdown())
 
             return {'success': True, 'message': '更新下载完成，正在应用更新并重启...'}
 
-        except HTTPException:
+        except HTTPException as he:
+            _set_update_progress(stage='error', error=str(he.detail))
             raise
         except Exception as e:
             logger.error(f"[update] Failed: {e}")
+            _set_update_progress(stage='error', error=str(e))
             # Cleanup
             try:
                 shutil.rmtree(tmp_dir, ignore_errors=True)
@@ -1485,7 +1591,7 @@ def _version_newer(latest: str, current: str) -> bool:
 def _restart_program():
     """Restart the current process. Works on both Windows and Linux."""
     import subprocess
-    if getattr(sys, 'frozen', False):
+    if is_packaged_build():
         cmd = [sys.executable] + sys.argv[1:]
     else:
         cmd = [sys.executable] + sys.argv

@@ -155,6 +155,22 @@ export default {
     updateFailed: '✗ Update failed',
     checking: 'Checking...',
     unknown: 'Unknown',
+    // Update progress modal
+    updateProgressTitle: 'Updating',
+    updateStageDownloading: 'Download',
+    updateStageVerifying: 'Verify',
+    updateStageExtracting: 'Extract',
+    updateStageApplying: 'Apply',
+    updateStageRestarting: 'Restart',
+    updateStageDone: 'Done',
+    updateProgressDownloading: 'Downloading update package…',
+    updateProgressVerifying: 'Verifying file integrity…',
+    updateProgressExtracting: 'Extracting files…',
+    updateProgressApplying: 'Applying update…',
+    updateProgressRestarting: 'Restarting, please wait…',
+    updateProgressWaiting: 'Waiting for new version to start…',
+    updateClose: 'Close',
+    updateProgressNote: 'Do not close the program during the update. The page will refresh automatically when done.',
   },
   // Strength page
   strength: {

@@ -155,6 +155,22 @@ export default {
     updateFailed: '✗ 更新失败',
     checking: '检查中...',
     unknown: '未知',
+    // Update progress modal
+    updateProgressTitle: '正在更新',
+    updateStageDownloading: '下载更新包',
+    updateStageVerifying: '校验完整性',
+    updateStageExtracting: '解压文件',
+    updateStageApplying: '应用更新',
+    updateStageRestarting: '重启程序',
+    updateStageDone: '完成',
+    updateProgressDownloading: '正在下载更新包…',
+    updateProgressVerifying: '正在校验文件完整性…',
+    updateProgressExtracting: '正在解压更新包…',
+    updateProgressApplying: '正在应用更新…',
+    updateProgressRestarting: '正在重启，请稍候…',
+    updateProgressWaiting: '等待新版本启动…',
+    updateClose: '关闭',
+    updateProgressNote: '更新期间请勿关闭程序。完成后页面会自动刷新。',
   },
   // Strength page
   strength: {

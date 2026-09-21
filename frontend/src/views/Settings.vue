@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, onUnmounted } from 'vue'
 import { api, apiPost } from '@/api'
 import { useI18n } from '@/i18n'
 
@@ -103,6 +103,40 @@ const updateApplying = ref(false)
 const updateMsg = ref('')
 const updateErr = ref(false)
 
+// --- Update progress modal ---
+const showUpdateModal = ref(false)
+const updateStage = ref<string>('idle')   // downloading|verifying|extracting|applying|restarting|done|error
+const updatePercent = ref(0)
+const updateDownloaded = ref(0)
+const updateTotal = ref(0)
+const updateStageMsg = ref('')
+const updateStageErr = ref('')
+let progressTimer: number | null = null
+
+const STAGES = ['downloading', 'verifying', 'extracting', 'applying', 'restarting']
+
+const stageLabels: Record<string, string> = {
+  downloading: 'updateStageDownloading',
+  verifying: 'updateStageVerifying',
+  extracting: 'updateStageExtracting',
+  applying: 'updateStageApplying',
+  restarting: 'updateStageRestarting',
+}
+
+function stageIndex(stage: string): number {
+  const i = STAGES.indexOf(stage)
+  return i < 0 ? (stage === 'done' ? STAGES.length : -1) : i
+}
+
+function fmtBytes(n: number): string {
+  if (!n) return '0 B'
+  const u = ['B', 'KB', 'MB', 'GB']
+  let i = 0
+  let v = n
+  while (v >= 1024 && i < u.length - 1) { v /= 1024; i++ }
+  return `${v.toFixed(v < 10 && i > 0 ? 1 : 0)} ${u[i]}`
+}
+
 async function checkUpdate() {
   updateChecking.value = true
   updateMsg.value = ''
@@ -120,28 +154,86 @@ async function checkUpdate() {
   updateChecking.value = false
 }
 
+function startProgressPolling() {
+  stopProgressPolling()
+  progressTimer = window.setInterval(async () => {
+    try {
+      const p = await api('/api/v1/update/progress')
+      updateStage.value = p.stage
+      updatePercent.value = p.percent || 0
+      updateDownloaded.value = p.downloaded || 0
+      updateTotal.value = p.total || 0
+      updateStageMsg.value = p.message || ''
+      if (p.stage === 'error') {
+        updateStageErr.value = p.error || t('settings.updateFailed')
+        stopProgressPolling()
+        updateApplying.value = false
+      }
+    } catch {
+      // server may be restarting — that's expected in the restarting stage
+    }
+  }, 500)
+}
+
+function stopProgressPolling() {
+  if (progressTimer !== null) {
+    clearInterval(progressTimer)
+    progressTimer = null
+  }
+}
+
 async function applyUpdate() {
   if (!confirm(t('settings.updateConfirm'))) return
+  // Open modal + reset progress
+  showUpdateModal.value = true
   updateApplying.value = true
-  updateMsg.value = t('settings.updateDownloading')
+  updateStage.value = 'downloading'
+  updatePercent.value = 0
+  updateDownloaded.value = 0
+  updateTotal.value = updateInfo.value?.download_size || 0
+  updateStageMsg.value = t('settings.updateProgressDownloading')
+  updateStageErr.value = ''
+  updateMsg.value = ''
   updateErr.value = false
+  startProgressPolling()
+
   try {
     const res = await fetch('/api/v1/update/apply', { method: 'POST' })
-    const data = await res.json()
-    if (data.success) {
-      updateMsg.value = '✓ ' + data.message + ' ' + t('settings.updateDone')
-      updateErr.value = false
-      // Poll until new server is ready, then reload
+    // If the server restarts before responding, fetch may reject — handled by poll.
+    let data: any = null
+    try { data = await res.json() } catch { /* server exited */ }
+    if (data && data.success) {
+      // Backend launched updater and will exit; move to restarting phase
+      updateStage.value = 'restarting'
+      updateStageMsg.value = t('settings.updateProgressRestarting')
+      stopProgressPolling()
       pollForRestart()
-    } else {
-      updateMsg.value = '✗ ' + (data.detail || data.message || t('settings.updateFailed'))
-      updateErr.value = true
+    } else if (data && !data.success) {
+      updateStage.value = 'error'
+      updateStageErr.value = data.detail || data.message || t('settings.updateFailed')
+      stopProgressPolling()
       updateApplying.value = false
+    } else {
+      // No response body: server likely already exited — treat as restarting
+      updateStage.value = 'restarting'
+      updateStageMsg.value = t('settings.updateProgressRestarting')
+      stopProgressPolling()
+      pollForRestart()
     }
   } catch (e) {
-    updateMsg.value = t('settings.updateFailed') + ': ' + e
-    updateErr.value = true
-    updateApplying.value = false
+    // Network error can mean the server already exited to apply the update.
+    // If we already got past applying, treat as restarting; otherwise error.
+    if (stageIndex(updateStage.value) >= stageIndex('applying')) {
+      updateStage.value = 'restarting'
+      updateStageMsg.value = t('settings.updateProgressRestarting')
+      stopProgressPolling()
+      pollForRestart()
+    } else {
+      updateStage.value = 'error'
+      updateStageErr.value = String(e)
+      stopProgressPolling()
+      updateApplying.value = false
+    }
   }
 }
 
@@ -149,15 +241,18 @@ const updatePollTimedOut = ref(false)
 
 function pollForRestart() {
   let attempts = 0
-  const maxAttempts = 15 // 15 × 2s = 30s max
+  const maxAttempts = 30 // 30 × 2s = 60s max
   updatePollTimedOut.value = false
-  updateMsg.value = t('settings.updateWaitingRestart')
+  updateStage.value = 'restarting'
+  updateStageMsg.value = t('settings.updateProgressWaiting')
   const interval = setInterval(async () => {
     attempts++
     try {
       const res = await fetch('/api/v1/status', { signal: AbortSignal.timeout(3000) })
       if (res.ok) {
         clearInterval(interval)
+        updateStage.value = 'done'
+        updatePercent.value = 100
         window.location.reload()
       }
     } catch {
@@ -184,7 +279,16 @@ function manualRefresh() {
   window.location.reload()
 }
 
+function closeUpdateModal() {
+  // Only allow closing on error (otherwise update is in progress)
+  if (updateStage.value === 'error' || updatePollTimedOut.value) {
+    showUpdateModal.value = false
+    stopProgressPolling()
+  }
+}
+
 onMounted(() => { checkUpdate() })
+onUnmounted(() => { stopProgressPolling() })
 </script>
 
 <template>
@@ -325,6 +429,88 @@ onMounted(() => { checkUpdate() })
         <span class="msg" :class="{ err: updateErr, waiting: updateApplying && !updateErr }">{{ updateMsg }}</span>
       </div>
     </section>
+
+    <!-- Update progress modal -->
+    <Teleport to="body">
+      <div v-if="showUpdateModal" class="update-overlay">
+        <div class="update-modal">
+          <div class="update-modal-head">
+            <h3>
+              <span class="spinner" v-if="updateStage !== 'error' && updateStage !== 'done'"></span>
+              <span v-else-if="updateStage === 'done'" class="done-icon">✓</span>
+              <span v-else class="err-icon">✗</span>
+              {{ t('settings.updateProgressTitle') }}
+            </h3>
+            <span class="ver-pill" v-if="updateInfo?.latest">v{{ updateInfo.latest }}</span>
+          </div>
+
+          <!-- Stepper -->
+          <div class="stepper">
+            <template v-for="(s, i) in STAGES" :key="s">
+              <div
+                class="step"
+                :class="{
+                  active: stageIndex(updateStage) === i,
+                  done: stageIndex(updateStage) > i || updateStage === 'done',
+                  failed: updateStage === 'error' && stageIndex(updateStage) === i,
+                }"
+              >
+                <div class="step-dot">
+                  <span v-if="stageIndex(updateStage) > i || updateStage === 'done'">✓</span>
+                  <span v-else>{{ i + 1 }}</span>
+                </div>
+                <div class="step-label">{{ t('settings.' + stageLabels[s]) }}</div>
+              </div>
+              <div v-if="i < STAGES.length - 1" class="step-line" :class="{ done: stageIndex(updateStage) > i || updateStage === 'done' }"></div>
+            </template>
+          </div>
+
+          <!-- Progress bar -->
+          <div class="progress-wrap" v-if="updateStage !== 'error'">
+            <div class="progress-track">
+              <div
+                class="progress-fill"
+                :class="{ indeterminate: updateStage !== 'downloading' && updateStage !== 'done' }"
+                :style="updateStage === 'downloading' || updateStage === 'done' ? { width: updatePercent + '%' } : {}"
+              ></div>
+            </div>
+            <div class="progress-meta">
+              <span class="progress-stage">{{ updateStageMsg }}</span>
+              <span class="progress-num" v-if="updateStage === 'downloading' && updateTotal > 0">
+                {{ fmtBytes(updateDownloaded) }} / {{ fmtBytes(updateTotal) }} · {{ updatePercent }}%
+              </span>
+              <span class="progress-num" v-else-if="updateStage === 'downloading'">
+                {{ fmtBytes(updateDownloaded) }}
+              </span>
+            </div>
+          </div>
+
+          <!-- Error box -->
+          <div v-if="updateStage === 'error'" class="update-error-box">
+            {{ updateStageErr }}
+          </div>
+
+          <p class="update-note" v-if="updateStage !== 'error' && !updatePollTimedOut">
+            {{ t('settings.updateProgressNote') }}
+          </p>
+
+          <!-- Timeout actions -->
+          <div v-if="updatePollTimedOut" class="update-error-box warn">
+            {{ t('settings.updatePollTimeout') }}
+          </div>
+
+          <div class="update-modal-actions">
+            <button v-if="updatePollTimedOut" class="btn btn-primary" @click="retryPoll">{{ t('settings.updateRetryPoll') }}</button>
+            <button v-if="updatePollTimedOut" class="btn btn-ghost" @click="manualRefresh">{{ t('settings.updateManualRefresh') }}</button>
+            <button
+              v-if="updateStage === 'error' || updatePollTimedOut"
+              class="btn btn-ghost"
+              @click="closeUpdateModal"
+            >{{ t('settings.updateClose') }}</button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
   </div>
 </template>
 
@@ -354,5 +540,78 @@ onMounted(() => { checkUpdate() })
 .mirror-presets { display: flex; gap: var(--sp-2); margin-top: var(--sp-2); flex-wrap: wrap; }
 .preset-tag { padding: 2px 10px; border: 1px solid var(--border); border-radius: 99px; background: transparent; color: var(--text-muted); font-size: var(--text-xs); cursor: pointer; transition: all var(--transition); }
 .preset-tag:hover { border-color: var(--accent); color: var(--accent); background: rgba(139,92,246,0.06); }
+
+/* --- Update progress modal --- */
+.update-overlay {
+  position: fixed; inset: 0; z-index: 1000;
+  background: rgba(0,0,0,0.55); backdrop-filter: blur(3px);
+  display: flex; align-items: center; justify-content: center;
+  padding: var(--sp-4);
+  animation: fade-in 0.2s ease;
+}
+@keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
+.update-modal {
+  width: 100%; max-width: 520px;
+  background: var(--bg-card); border: 1px solid var(--border);
+  border-radius: var(--radius-lg); padding: var(--sp-5);
+  box-shadow: 0 20px 60px rgba(0,0,0,0.4);
+  animation: modal-pop 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+@keyframes modal-pop { from { transform: translateY(12px) scale(0.97); opacity: 0; } to { transform: none; opacity: 1; } }
+.update-modal-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: var(--sp-5); }
+.update-modal-head h3 { display: flex; align-items: center; gap: var(--sp-2); margin: 0; font-size: var(--text-lg); }
+.ver-pill { padding: 2px 10px; border-radius: 99px; background: rgba(139,92,246,0.15); color: var(--accent); font-size: var(--text-xs); font-weight: 600; }
+.done-icon { color: var(--success); }
+.err-icon { color: var(--danger); }
+.spinner {
+  width: 16px; height: 16px; border-radius: 50%;
+  border: 2px solid rgba(139,92,246,0.25); border-top-color: var(--accent);
+  animation: spin 0.8s linear infinite; display: inline-block;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.stepper { display: flex; align-items: center; margin-bottom: var(--sp-5); }
+.step { display: flex; flex-direction: column; align-items: center; gap: var(--sp-1); flex-shrink: 0; }
+.step-dot {
+  width: 28px; height: 28px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-size: var(--text-xs); font-weight: 600;
+  border: 2px solid var(--border); background: var(--bg); color: var(--text-muted);
+  transition: all var(--transition);
+}
+.step.active .step-dot { border-color: var(--accent); color: var(--accent); box-shadow: 0 0 0 4px rgba(139,92,246,0.15); }
+.step.done .step-dot { border-color: var(--success); background: var(--success); color: #fff; }
+.step.failed .step-dot { border-color: var(--danger); color: var(--danger); }
+.step-label { font-size: 10px; color: var(--text-muted); white-space: nowrap; }
+.step.active .step-label { color: var(--accent); font-weight: 600; }
+.step.done .step-label { color: var(--text-secondary); }
+.step-line { flex: 1; height: 2px; background: var(--border); margin: 0 4px; margin-bottom: 16px; transition: background var(--transition); }
+.step-line.done { background: var(--success); }
+
+.progress-wrap { margin-bottom: var(--sp-4); }
+.progress-track { width: 100%; height: 8px; background: var(--bg); border-radius: 99px; overflow: hidden; }
+.progress-fill {
+  height: 100%; border-radius: 99px;
+  background: linear-gradient(90deg, var(--accent), #a78bfa);
+  transition: width 0.3s ease;
+}
+.progress-fill.indeterminate {
+  width: 40% !important;
+  animation: indeterminate 1.2s ease-in-out infinite;
+}
+@keyframes indeterminate {
+  0% { margin-left: -40%; }
+  100% { margin-left: 100%; }
+}
+.progress-meta { display: flex; justify-content: space-between; align-items: center; margin-top: var(--sp-2); gap: var(--sp-2); }
+.progress-stage { font-size: var(--text-sm); color: var(--text-secondary); }
+.progress-num { font-size: var(--text-xs); color: var(--text-muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+.update-error-box { padding: var(--sp-3); border-radius: var(--radius); background: rgba(239,68,68,0.1); border: 1px solid rgba(239,68,68,0.3); color: var(--danger); font-size: var(--text-sm); margin-bottom: var(--sp-3); word-break: break-word; }
+.update-error-box.warn { background: rgba(234,179,8,0.1); border-color: rgba(234,179,8,0.3); color: #eab308; }
+.update-note { font-size: var(--text-xs); color: var(--text-muted); margin: 0 0 var(--sp-3); }
+.update-modal-actions { display: flex; gap: var(--sp-2); justify-content: flex-end; }
+.update-modal-actions:empty { display: none; }
+
 @media (max-width: 768px) { .settings-grid { grid-template-columns: 1fr; } }
 </style>
