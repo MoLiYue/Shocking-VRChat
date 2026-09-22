@@ -113,108 +113,95 @@ onMounted(load)
 
 <template>
   <div>
-    <h2 class="page-title">{{ t('chatbox.title') }}</h2>
+    <h1 class="gradient-text page-title">{{ t('chatbox.title') }}</h1>
     <p class="page-desc">{{ t('chatbox.desc') }}</p>
 
     <!-- Enable toggle -->
-    <div class="card">
-      <div class="card-title">{{ t('chatbox.enableTitle') }}</div>
-      <div class="form-group" style="display: flex; align-items: center; gap: 12px;">
-        <label class="toggle">
-          <input type="checkbox" v-model="enabled" />
-          <span class="toggle-slider"></span>
-        </label>
+    <section class="card">
+      <h2>{{ t('chatbox.enableTitle') }}</h2>
+      <label class="toggle-row">
+        <input type="checkbox" v-model="enabled" />
         <span>{{ enabled ? t('common.enabled') : t('common.disabled') }}</span>
-      </div>
-    </div>
+      </label>
+    </section>
 
     <!-- Message Template -->
-    <div class="card">
-      <div class="card-title">{{ t('chatbox.templateTitle') }}</div>
-      <p class="card-desc">{{ t('chatbox.templateDesc') }}</p>
-      <div class="form-group">
-        <label class="form-label">{{ t('chatbox.templateLabel') }}</label>
-        <textarea
-          class="form-input"
-          v-model="messageTemplate"
-          rows="3"
-          style="resize: vertical; font-family: monospace;"
-        ></textarea>
+    <section class="card">
+      <h2>{{ t('chatbox.templateTitle') }}</h2>
+      <p class="page-desc" style="margin-bottom:var(--sp-4)">{{ t('chatbox.templateDesc') }}</p>
+      <div class="field">
+        <label>{{ t('chatbox.templateLabel') }}</label>
+        <textarea v-model="messageTemplate" rows="3" class="template-input"></textarea>
       </div>
-      <div class="form-group">
-        <label class="form-label">{{ t('chatbox.availableVars') }}</label>
-        <div style="display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px;">
+      <div class="field">
+        <label>{{ t('chatbox.availableVars') }}</label>
+        <div class="var-tags">
           <button
             v-for="v in availableVars"
             :key="v.key"
-            class="btn"
-            style="font-size: 12px; padding: 2px 8px;"
+            class="var-tag"
             @click="insertVar(v.key)"
             :title="t(v.desc)"
           >
             {{ v.key }}
           </button>
         </div>
-        <p class="form-hint">{{ t('chatbox.varClickHint') }}</p>
+        <p class="hint">{{ t('chatbox.varClickHint') }}</p>
       </div>
-      <div class="form-group">
-        <label class="form-label">{{ t('chatbox.preview') }}</label>
+      <div class="field">
+        <label>{{ t('chatbox.preview') }}</label>
         <div class="preview-box">{{ previewMessage }}</div>
       </div>
-    </div>
+    </section>
 
     <!-- OSC Settings -->
-    <div class="card">
-      <div class="card-title">{{ t('chatbox.oscTitle') }}</div>
-      <div class="form-row">
-        <div class="form-group">
-          <label class="form-label">{{ t('chatbox.targetHost') }}</label>
-          <input class="form-input" v-model="targetHost" style="width: 160px;" />
-          <p class="form-hint">{{ t('chatbox.targetHostHint') }}</p>
+    <section class="card">
+      <h2>{{ t('chatbox.oscTitle') }}</h2>
+      <div class="osc-grid">
+        <div class="field">
+          <label>{{ t('chatbox.targetHost') }}</label>
+          <input type="text" v-model="targetHost" />
+          <p class="hint">{{ t('chatbox.targetHostHint') }}</p>
         </div>
-        <div class="form-group">
-          <label class="form-label">{{ t('chatbox.targetPort') }}</label>
-          <input class="form-input" type="number" v-model.number="targetPort" style="width: 100px;" />
-          <p class="form-hint">{{ t('chatbox.targetPortHint') }}</p>
+        <div class="field">
+          <label>{{ t('chatbox.targetPort') }}</label>
+          <input type="number" v-model.number="targetPort" />
+          <p class="hint">{{ t('chatbox.targetPortHint') }}</p>
         </div>
-        <div class="form-group">
-          <label class="form-label">{{ t('chatbox.interval') }}</label>
-          <input class="form-input" type="number" v-model.number="intervalSeconds" step="0.5" min="0.5" style="width: 100px;" />
-          <p class="form-hint">{{ t('chatbox.intervalHint') }}</p>
+        <div class="field">
+          <label>{{ t('chatbox.interval') }}</label>
+          <input type="number" v-model.number="intervalSeconds" step="0.5" min="0.5" />
+          <p class="hint">{{ t('chatbox.intervalHint') }}</p>
         </div>
       </div>
-      <div class="form-group" style="display: flex; align-items: center; gap: 12px; margin-top: 8px;">
-        <label class="toggle">
+      <div class="field">
+        <label class="toggle-row">
           <input type="checkbox" v-model="sendNotification" />
-          <span class="toggle-slider"></span>
+          <span>{{ t('chatbox.sendNotification') }}</span>
         </label>
-        <span>{{ t('chatbox.sendNotification') }}</span>
+        <p class="hint">{{ t('chatbox.sendNotificationHint') }}</p>
       </div>
-      <p class="form-hint">{{ t('chatbox.sendNotificationHint') }}</p>
-      <div class="form-group" style="display: flex; align-items: center; gap: 12px; margin-top: 8px;">
-        <label class="toggle">
+      <div class="field">
+        <label class="toggle-row">
           <input type="checkbox" v-model="triggerSfx" />
-          <span class="toggle-slider"></span>
+          <span>{{ t('chatbox.triggerSfx') }}</span>
         </label>
-        <span>{{ t('chatbox.triggerSfx') }}</span>
       </div>
-    </div>
+    </section>
 
     <!-- Actions -->
-    <div class="card">
-      <div style="display: flex; gap: 12px; flex-wrap: wrap; align-items: center;">
-        <button class="btn btn-primary" @click="save">{{ t('chatbox.save') }}</button>
-        <button class="btn" @click="sendTest">{{ t('chatbox.testSend') }}</button>
-        <button class="btn" @click="load">{{ t('common.reload') }}</button>
-      </div>
-      <p v-if="msg" :class="msgErr ? 'msg-err' : 'msg-ok'" style="margin-top: 8px;">{{ msg }}</p>
-      <p v-if="testMsg" :class="testMsgErr ? 'msg-err' : 'msg-ok'" style="margin-top: 8px;">{{ testMsg }}</p>
+    <div class="save-bar">
+      <button class="btn btn-primary" @click="save">{{ t('chatbox.save') }}</button>
+      <button class="btn btn-ghost" @click="sendTest">{{ t('chatbox.testSend') }}</button>
+      <button class="btn btn-ghost" @click="load">{{ t('common.reload') }}</button>
+      <span class="msg" :class="{ err: msgErr }">{{ msg }}</span>
+      <span class="msg" :class="{ err: testMsgErr }">{{ testMsg }}</span>
     </div>
 
     <!-- Info -->
-    <div class="card">
-      <div class="card-title">{{ t('chatbox.infoTitle') }}</div>
-      <ul class="info-list">
+    <div class="info-card card">
+      <h3>{{ t('chatbox.infoTitle') }}</h3>
+      <ul>
         <li>{{ t('chatbox.info1') }}</li>
         <li>{{ t('chatbox.info2') }}</li>
         <li>{{ t('chatbox.info3') }}</li>
@@ -225,27 +212,71 @@ onMounted(load)
 </template>
 
 <style scoped>
+.field { margin-bottom: var(--sp-4); }
+.field:last-child { margin-bottom: 0; }
+.field label { display: block; font-size: var(--text-sm); color: var(--text-secondary); margin-bottom: var(--sp-2); font-weight: 500; }
+.field input { width: 100%; }
+.hint { font-size: var(--text-xs); color: var(--text-muted); margin-top: var(--sp-1); }
+
+.toggle-row { display: flex; align-items: center; gap: var(--sp-2); cursor: pointer; font-size: var(--text-sm); margin-bottom: 0; }
+.toggle-row input[type="checkbox"] { width: auto; margin: 0; cursor: pointer; }
+
+.template-input {
+  width: 100%;
+  padding: var(--sp-3) var(--sp-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: #1a1225;
+  color: var(--text);
+  font-size: var(--text-sm);
+  font-family: var(--font-mono);
+  resize: vertical;
+  outline: none;
+  transition: all var(--transition);
+}
+.template-input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.15), var(--glow-sm);
+}
+
+.var-tags { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
+.var-tag {
+  padding: 2px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-full);
+  background: transparent;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  cursor: pointer;
+  transition: all var(--transition);
+}
+.var-tag:hover { border-color: var(--accent); color: var(--accent); background: rgba(139,92,246,0.06); }
+
 .preview-box {
   background: rgba(139, 92, 246, 0.08);
   border: 1px solid rgba(139, 92, 246, 0.2);
   border-radius: var(--radius-md);
   padding: var(--sp-3) var(--sp-4);
-  font-family: monospace;
+  font-family: var(--font-mono);
   font-size: var(--text-sm);
   color: var(--text);
   word-break: break-all;
   min-height: 24px;
 }
-.form-row {
-  display: flex;
-  gap: 16px;
-  flex-wrap: wrap;
-}
-.info-list {
-  margin: 0;
-  padding-left: 20px;
-  color: var(--text-muted);
-  font-size: var(--text-sm);
-  line-height: 1.8;
+
+.osc-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: var(--sp-4); margin-bottom: var(--sp-4); }
+
+.save-bar { display: flex; align-items: center; gap: var(--sp-3); flex-wrap: wrap; margin-top: var(--sp-4); padding: var(--sp-4); background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius-lg); }
+.msg { font-size: var(--text-sm); color: var(--success); }
+.msg.err { color: var(--danger); }
+
+.info-card { margin-top: var(--sp-4); font-size: var(--text-sm); color: var(--text-secondary); }
+.info-card h3 { font-size: var(--text-base); margin-bottom: var(--sp-2); color: var(--text); }
+.info-card ul { padding-left: var(--sp-4); }
+.info-card li { margin-bottom: var(--sp-2); line-height: 1.6; }
+
+@media (max-width: 768px) {
+  .osc-grid { grid-template-columns: 1fr; }
 }
 </style>
