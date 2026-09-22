@@ -54,6 +54,12 @@ const index = ref(0)
 const steps = ref<TourStep[]>([])
 const targetRect = ref<TargetRect | null>(null)
 
+// Generation token: incremented whenever the step changes or the tour ends.
+// An in-flight resolveStep() captures the current value and bails out (without
+// writing targetRect) once it observes a newer generation, so stale element
+// polling can never overwrite the rect computed for the current step.
+let resolveGeneration = 0
+
 export function useTour() {
   const router = useRouter()
 
@@ -63,8 +69,15 @@ export function useTour() {
   const isFirst = computed(() => index.value === 0)
   const isLast = computed(() => index.value >= steps.value.length - 1)
 
-  /** Wait until an element matching the selector is in the DOM, or timeout. */
-  function waitForElement(selector: string): Promise<HTMLElement | null> {
+  /**
+   * Wait until an element matching the selector is in the DOM, or timeout.
+   * `isCurrent` lets the caller abort the poll early when the step changed:
+   * the promise resolves with null so the caller can bail without writing rect.
+   */
+  function waitForElement(
+    selector: string,
+    isCurrent: () => boolean,
+  ): Promise<HTMLElement | null> {
     return new Promise((resolve) => {
       const existing = document.querySelector<HTMLElement>(selector)
       if (existing) {
@@ -73,6 +86,12 @@ export function useTour() {
       }
       const start = performance.now()
       const timer = window.setInterval(() => {
+        // Superseded by a newer step/restart/finish — stop polling immediately.
+        if (!isCurrent()) {
+          window.clearInterval(timer)
+          resolve(null)
+          return
+        }
         const el = document.querySelector<HTMLElement>(selector)
         if (el) {
           window.clearInterval(timer)
@@ -87,14 +106,25 @@ export function useTour() {
 
   /** Resolve the current step: navigate, locate the anchor, compute its rect. */
   async function resolveStep() {
+    // Capture the generation for this resolution pass; any step change,
+    // restart, finish or skip bumps resolveGeneration and invalidates us.
+    const myGen = resolveGeneration
     const step = currentStep.value
     if (!step) return
     if (step.route && router.currentRoute.value.path !== step.route) {
       await router.push(step.route)
     }
+    if (myGen !== resolveGeneration) return
     // Let the router-view render the new page before querying the DOM.
     await new Promise<void>((r) => requestAnimationFrame(() => r()))
-    const el = await waitForElement(`[data-tour="${step.target}"]`)
+    if (myGen !== resolveGeneration) return
+    const el = await waitForElement(
+      `[data-tour="${step.target}"]`,
+      () => myGen === resolveGeneration,
+    )
+    // A newer resolution superseded us while we were polling — do not write,
+    // otherwise a stale hit/timeout would clobber the current step's rect.
+    if (myGen !== resolveGeneration) return
     if (el) {
       const rect = el.getBoundingClientRect()
       targetRect.value = {
@@ -127,17 +157,24 @@ export function useTour() {
     }
   }
 
+  /** Invalidate any in-flight resolveStep() so it won't write a stale rect. */
+  function invalidate() {
+    resolveGeneration += 1
+  }
+
   async function next() {
     if (isLast.value) {
       finish()
       return
     }
+    invalidate()
     index.value += 1
     await resolveStep()
   }
 
   async function prev() {
     if (isFirst.value) return
+    invalidate()
     index.value -= 1
     await resolveStep()
   }
@@ -147,6 +184,8 @@ export function useTour() {
   }
 
   function finish() {
+    // Cancel any pending resolution so it can't reset targetRect after we end.
+    invalidate()
     active.value = false
     targetRect.value = null
     try {
@@ -176,6 +215,9 @@ export function useTour() {
   }
 
   async function run(tourSteps: TourStep[]) {
+    // A restart while a previous pass is resolving must not let the old poll
+    // write a rect for the wrong step.
+    invalidate()
     steps.value = tourSteps
     index.value = 0
     active.value = true

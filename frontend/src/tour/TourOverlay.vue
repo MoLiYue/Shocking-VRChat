@@ -207,7 +207,7 @@ watch([active, stepNumber], () => {
   color: var(--warning);
   line-height: 1.6;
   background: var(--warning-surface);
-  border: 1px solid rgba(251, 191, 36, 0.25);
+  border: 1px solid var(--warning-border);
   border-radius: var(--radius-md);
   padding: var(--sp-2) var(--sp-3);
   margin-bottom: var(--sp-4);
