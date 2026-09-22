@@ -17,6 +17,7 @@ export default {
     settings: 'Settings',
     shutdown: 'Shutdown',
     shutdownConfirm: 'Shutdown the program? Device connections will be lost.',
+    tourRestart: '🧭 Replay guide',
   },
   // Common
   common: {
@@ -171,6 +172,7 @@ export default {
     updateProgressWaiting: 'Waiting for new version to start…',
     updateClose: 'Close',
     updateProgressNote: 'Do not close the program during the update. The page will refresh automatically when done.',
+    tourRestart: '🧭 Replay onboarding guide',
   },
   // Strength page
   strength: {
@@ -476,9 +478,53 @@ export default {
   },
   // Tour / coachmark
   tour: {
+    progress: 'Step {n} / {total}',
     skip: 'Skip',
     prev: 'Back',
     next: 'Next',
-    finish: 'Done',
+    done: 'Done',
+    welcome: {
+      title: 'Welcome to Shocking VRChat ⚡',
+      body: 'Take 2 minutes to finish the basics: add parameters → set strength → scan to connect your device.',
+    },
+    gotoParams: {
+      title: 'Step 1: Parameter Manager',
+      body: 'Click "Parameter Manager" in the sidebar to configure the OSC parameters to listen to.',
+    },
+    addParam: {
+      title: 'Add an OSC parameter',
+      body: 'Type a parameter path here to add it. The prefix /avatar/parameters/ is filled in automatically, and wildcards * are supported (e.g. Shock/*).',
+    },
+    pickMode: {
+      title: 'Pick a work mode',
+      body: 'Choose a mode: Distance (closer = stronger), Shock (a jolt on touch), Touch (follows stroking speed), or Combo (quick tap = shock, sustained = gentle).',
+    },
+    saveParam: {
+      title: 'Save to apply',
+      body: 'After saving, changes hot-reload instantly and take effect without dropping the device connection.',
+    },
+    gotoStrength: {
+      title: 'Step 2: Strength Settings',
+      body: 'Next, click "Strength Settings" in the sidebar to adjust the strength limit for each channel.',
+    },
+    setStrength: {
+      title: 'Set the strength limit',
+      body: 'Drag the slider to set the strength limit. The actual output is the smaller of the app setting here and the limit set in the DG-LAB app.',
+      safety: '⚠️ For safety, always start low (20–40 recommended) and increase gradually, staying within what you can comfortably tolerate.',
+    },
+    gotoQr: {
+      title: 'Step 3: Connect the device',
+      body: 'Click "Dashboard" in the sidebar to return to the home page and get ready to scan and connect your DG-LAB device.',
+    },
+    scanQr: {
+      title: 'Scan to connect',
+      body: 'Open "Socket Control" in the DG-LAB app and scan this QR code to connect. The V4 protocol is recommended.',
+    },
+    finish: {
+      title: 'Setup complete 🎉',
+      body: 'Once the device connects, the status here turns green. You can reopen this tutorial anytime via "Replay guide" in the sidebar.',
+      safety: '⚠️ Before use, please read and agree to the safety precautions, and use this product safely, soberly, and voluntarily.',
+      safetyLink: 'View safety precautions',
+    },
   },
 }

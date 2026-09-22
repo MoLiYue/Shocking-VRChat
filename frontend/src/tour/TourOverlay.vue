@@ -136,7 +136,7 @@ watch([active, stepNumber], () => {
           <button class="btn btn-ghost btn-sm" @click="skip">{{ t('tour.skip') }}</button>
           <button v-if="!isFirst" class="btn btn-ghost" @click="prev">{{ t('tour.prev') }}</button>
           <button class="btn btn-primary" @click="next">
-            {{ isLast ? t('tour.finish') : t('tour.next') }}
+            {{ isLast ? t('tour.done') : t('tour.next') }}
           </button>
         </div>
       </div>

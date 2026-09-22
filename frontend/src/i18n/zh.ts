@@ -17,6 +17,7 @@ export default {
     settings: '设置',
     shutdown: '关闭程序',
     shutdownConfirm: '确定要关闭程序？设备连接将断开。',
+    tourRestart: '🧭 重新查看引导',
   },
   // Common
   common: {
@@ -171,6 +172,7 @@ export default {
     updateProgressWaiting: '等待新版本启动…',
     updateClose: '关闭',
     updateProgressNote: '更新期间请勿关闭程序。完成后页面会自动刷新。',
+    tourRestart: '🧭 重新查看新手引导',
   },
   // Strength page
   strength: {
@@ -476,9 +478,53 @@ export default {
   },
   // Tour / coachmark
   tour: {
+    progress: '第 {n} / {total} 步',
     skip: '跳过',
     prev: '上一步',
     next: '下一步',
-    finish: '完成',
+    done: '完成',
+    welcome: {
+      title: '欢迎使用 Shocking VRChat ⚡',
+      body: '花 2 分钟跟着引导完成基础配置：添加参数 → 设置强度 → 扫码连接设备。',
+    },
+    gotoParams: {
+      title: '第一步：参数管理',
+      body: '先点击侧边栏的「参数管理」，在这里配置要监听的 OSC 参数。',
+    },
+    addParam: {
+      title: '添加 OSC 参数',
+      body: '在这里输入参数路径即可添加，前缀 /avatar/parameters/ 已自动补全，支持通配符 *（如 Shock/*）。',
+    },
+    pickMode: {
+      title: '选择工作模式',
+      body: '为参数选择模式：距离（越近越强）、电击（触碰一激灵）、触摸（按抚摸速度）、Combo（短碰电击+持续柔和）。',
+    },
+    saveParam: {
+      title: '保存生效',
+      body: '点击保存后自动热重载，即时生效，设备连接不会断开。',
+    },
+    gotoStrength: {
+      title: '第二步：强度设置',
+      body: '接着点击侧边栏的「强度设置」，调节各通道的强度上限。',
+    },
+    setStrength: {
+      title: '设置强度上限',
+      body: '拖动滑块调节强度上限。实际输出取「程序设置」与「郊狼 APP 被控上限」中的较小值。',
+      safety: '⚠️ 为了安全，务必从低强度开始（建议 20~40），循序渐进、逐步提高，以自身能承受为准。',
+    },
+    gotoQr: {
+      title: '第三步：连接设备',
+      body: '点击侧边栏的「Dashboard」回到主页，准备扫码连接郊狼设备。',
+    },
+    scanQr: {
+      title: '扫码连接',
+      body: '打开郊狼 APP 的「Socket 控制」扫描此二维码即可连接，推荐使用 V4 协议。',
+    },
+    finish: {
+      title: '配置完成 🎉',
+      body: '设备连接成功后，这里的状态会变绿。随时可在侧边栏点击「重新查看引导」重看本教程。',
+      safety: '⚠️ 使用前请务必阅读并同意安全须知，安全、清醒、自愿地使用本产品。',
+      safetyLink: '查看安全须知',
+    },
   },
 }
