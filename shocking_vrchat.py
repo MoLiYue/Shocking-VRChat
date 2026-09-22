@@ -852,32 +852,6 @@ def strip_basic_settings(settings: dict):
         del ret['dglab3'][chann]['strength_limit']
     return ret
 
-@app.get("/setup")
-async def web_setup_wizard():
-    return _read_template('setup_wizard.html')
-
-@app.post("/api/v1/setup")
-async def api_v1_setup(request: Request):
-    global SETTINGS, SETTINGS_BASIC, SERVER_IP
-    try:
-        data = await request.json()
-        for ch in ['channel_a', 'channel_b']:
-            ch_data = data.get(ch, {})
-            SETTINGS_BASIC['dglab3'][ch]['mode'] = ch_data.get('mode', 'distance')
-            SETTINGS_BASIC['dglab3'][ch]['strength_limit'] = int(ch_data.get('strength_limit', 100))
-            SETTINGS_BASIC['dglab3'][ch]['avatar_params'] = [
-                {'path': p, 'mode': ch_data.get('mode', 'distance')} for p in ch_data.get('avatar_params', [])
-            ]
-        if 'osc' in data:
-            SETTINGS['osc']['listen_port'] = int(data['osc'].get('listen_port', 9001))
-            SETTINGS['osc']['listen_host'] = data['osc'].get('listen_host', '127.0.0.1')
-        SETTINGS['ws']['master_uuid'] = str(uuid.uuid4())
-        config_save()
-        app.state.setup_complete = True
-        return {'success': True, 'message': 'Configuration saved.'}
-    except Exception as e:
-        raise HTTPException(500, str(e))
-
 @app.get("/api/v1/config")
 async def get_config():
     return {
@@ -3144,33 +3118,15 @@ if __name__ == "__main__":
         config_init()
         main()
     except ConfigFileInited:
-        logger.success('[init] No config file found, starting setup wizard...')
-        import webbrowser
-        port = SETTINGS['web_server']['listen_port']
-        webbrowser.open_new_tab(f"http://127.0.0.1:{port}/setup")
-        app.state.setup_complete = False
-
-        @app.get('/api/v1/setup/poll')
-        async def setup_poll():
-            return {'done': getattr(app.state, 'setup_complete', False)}
-
-        import uvicorn
-
-        def _run_wizard_server():
-            uvicorn.run(app, host='127.0.0.1', port=port, log_level="warning", access_log=False)
-
-        wizard_th = Thread(target=_run_wizard_server, daemon=True)
-        wizard_th.start()
-
-        # Wait for setup completion then restart
-        while not getattr(app.state, 'setup_complete', False):
-            time.sleep(0.5)
-
-        logger.success('[init] Setup wizard complete, restarting...')
-        os.environ['SHOCKING_SKIP_OPEN'] = '1'
-        config_save()
-        time.sleep(1)
-        _restart_program()
+        # First run: config_init() already wrote default config files (with a
+        # generated master_uuid). No separate setup wizard anymore — the Web UI
+        # onboarding tour guides the user through initial configuration.
+        logger.success('[init] No config file found. Default config created; starting normally...')
+        try:
+            config_init()
+            main()
+        except Exception:
+            raise
     except Exception as e:
         err_msg = traceback.format_exc()
         # Write to error.log (always accessible even without console)

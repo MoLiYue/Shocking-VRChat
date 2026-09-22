@@ -3,15 +3,38 @@ import { useRouter } from 'vue-router'
 
 /** A single coachmark step. */
 export interface TourStep {
-  /** data-tour attribute value to locate the anchor element. */
+  /** Stable step id (matches TOUR_SPEC route definition). */
+  id: string
+  /** data-tour attribute value to locate the anchor element (empty = centered). */
   target: string
   /** Route to navigate to before locating the anchor (optional). */
   route?: string
-  /** i18n key or literal title. */
+  /** i18n key for the step title. */
   title: string
-  /** i18n key or literal body text. */
+  /** i18n key for the step body. */
   body: string
+  /** Optional i18n key for a highlighted safety note. */
+  safety?: string
+  /** Optional i18n key for a safety-precautions link label. */
+  safetyLink?: string
 }
+
+/**
+ * Default onboarding route: params -> strength -> QR -> finish.
+ * Anchor values MUST match the data-tour attributes placed in the views.
+ */
+export const TOUR_STEPS: TourStep[] = [
+  { id: 'welcome', target: '', route: '/dashboard', title: 'tour.welcome.title', body: 'tour.welcome.body' },
+  { id: 'goto-params', target: 'nav-params', title: 'tour.gotoParams.title', body: 'tour.gotoParams.body' },
+  { id: 'add-param', target: 'param-add', route: '/params', title: 'tour.addParam.title', body: 'tour.addParam.body' },
+  { id: 'pick-mode', target: 'param-mode-select', route: '/params', title: 'tour.pickMode.title', body: 'tour.pickMode.body' },
+  { id: 'save-param', target: 'param-save', route: '/params', title: 'tour.saveParam.title', body: 'tour.saveParam.body' },
+  { id: 'goto-strength', target: 'nav-strength', title: 'tour.gotoStrength.title', body: 'tour.gotoStrength.body' },
+  { id: 'set-strength', target: 'strength-slider', route: '/strength', title: 'tour.setStrength.title', body: 'tour.setStrength.body', safety: 'tour.setStrength.safety' },
+  { id: 'goto-qr', target: 'nav-dashboard', title: 'tour.gotoQr.title', body: 'tour.gotoQr.body' },
+  { id: 'scan-qr', target: 'qr-code', route: '/dashboard', title: 'tour.scanQr.title', body: 'tour.scanQr.body' },
+  { id: 'finish', target: 'dashboard-status', route: '/dashboard', title: 'tour.finish.title', body: 'tour.finish.body', safety: 'tour.finish.safety', safetyLink: 'tour.finish.safetyLink' },
+]
 
 /** Rect of the currently highlighted element (viewport coordinates). */
 export interface TargetRect {
@@ -141,14 +164,14 @@ export function useTour() {
     }
   }
 
-  /** Start the tour with the given steps if it has never been completed. */
-  async function start(tourSteps: TourStep[]) {
+  /** Start the tour if it has never been completed. Defaults to TOUR_STEPS. */
+  async function start(tourSteps: TourStep[] = TOUR_STEPS) {
     if (hasCompleted()) return
     await run(tourSteps)
   }
 
-  /** Force-start the tour regardless of completion state. */
-  async function restart(tourSteps: TourStep[]) {
+  /** Force-start the tour regardless of completion state. Defaults to TOUR_STEPS. */
+  async function restart(tourSteps: TourStep[] = TOUR_STEPS) {
     await run(tourSteps)
   }
 

@@ -130,8 +130,18 @@ watch([active, stepNumber], () => {
     >
       <div class="tour-title gradient-text">{{ t(currentStep.title) }}</div>
       <div class="tour-body">{{ t(currentStep.body) }}</div>
+      <div v-if="currentStep.safety" class="tour-safety">
+        {{ t(currentStep.safety) }}
+        <a
+          v-if="currentStep.safetyLink"
+          class="tour-safety-link"
+          href="https://github.com/MoLiYue/Shocking-VRChat/blob/main/doc/dglab/%E5%AE%89%E5%85%A8%E9%A1%BB%E7%9F%A5.md"
+          target="_blank"
+          rel="noopener noreferrer"
+        >{{ t(currentStep.safetyLink) }}</a>
+      </div>
       <div class="tour-footer">
-        <span class="tour-progress">{{ stepNumber }} / {{ total }}</span>
+        <span class="tour-progress">{{ t('tour.progress', { n: stepNumber, total }) }}</span>
         <div class="tour-actions">
           <button class="btn btn-ghost btn-sm" @click="skip">{{ t('tour.skip') }}</button>
           <button v-if="!isFirst" class="btn btn-ghost" @click="prev">{{ t('tour.prev') }}</button>
@@ -192,6 +202,22 @@ watch([active, stepNumber], () => {
   line-height: 1.6;
   margin-bottom: var(--sp-4);
 }
+.tour-safety {
+  font-size: var(--text-xs);
+  color: var(--warning);
+  line-height: 1.6;
+  background: var(--warning-surface);
+  border: 1px solid rgba(251, 191, 36, 0.25);
+  border-radius: var(--radius-md);
+  padding: var(--sp-2) var(--sp-3);
+  margin-bottom: var(--sp-4);
+}
+.tour-safety-link {
+  color: var(--warning);
+  text-decoration: underline;
+  font-weight: 600;
+}
+.tour-safety-link:hover { color: var(--text); }
 .tour-footer {
   display: flex;
   align-items: center;

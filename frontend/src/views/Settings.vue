@@ -2,8 +2,14 @@
 import { ref, onMounted, onUnmounted } from 'vue'
 import { api, apiPost } from '@/api'
 import { useI18n } from '@/i18n'
+import { useTour } from '@/tour/useTour'
 
 const { t } = useI18n()
+const { restart: restartTour } = useTour()
+
+function replayTour() {
+  restartTour()
+}
 
 const oscPort = ref(9001)
 const oscHost = ref('127.0.0.1')
@@ -384,6 +390,7 @@ onUnmounted(() => { stopProgressPolling() })
       <div class="ie-bar">
         <button class="btn btn-ghost" @click="exportConfig">{{ t('settings.exportConfig') }}</button>
         <button class="btn btn-ghost" @click="triggerImport">{{ t('settings.importConfig') }}</button>
+        <button class="btn btn-ghost" @click="replayTour">{{ t('settings.tourRestart') }}</button>
         <input ref="importFileRef" type="file" accept=".json" hidden @change="handleImport">
         <span class="msg" :class="{ err: importErr }">{{ importMsg }}</span>
       </div>

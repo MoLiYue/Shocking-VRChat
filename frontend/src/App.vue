@@ -1,9 +1,11 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useI18n } from '@/i18n'
 import TourOverlay from '@/tour/TourOverlay.vue'
+import { useTour } from '@/tour/useTour'
 
 const { t, locale, setLocale } = useI18n()
+const { start, restart } = useTour()
 const sidebarOpen = ref(true)
 
 interface NavItem {
@@ -62,6 +64,15 @@ async function shutdownApp() {
     await fetch('/api/v1/shutdown', { method: 'POST' })
   } catch {}
 }
+
+function replayTour() {
+  restart()
+}
+
+onMounted(() => {
+  // First run (no tour_done in localStorage) auto-starts the onboarding tour.
+  start()
+})
 </script>
 
 <template>
@@ -114,6 +125,7 @@ async function shutdownApp() {
         <button class="lang-btn" :class="{ active: locale === 'zh' }" @click="setLocale('zh')">中</button>
         <button class="lang-btn" :class="{ active: locale === 'en' }" @click="setLocale('en')">EN</button>
       </div>
+      <button class="shutdown-btn" data-tour="tour-restart" @click="replayTour">{{ t('nav.tourRestart') }}</button>
       <button class="shutdown-btn" @click="shutdownApp">⏻ {{ t('nav.shutdown') }}</button>
       <button class="toggle-btn" @click="sidebarOpen = !sidebarOpen">
         {{ sidebarOpen ? '‹' : '›' }}

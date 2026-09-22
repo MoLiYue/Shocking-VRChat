@@ -14,7 +14,6 @@ const router = createRouter({
     { path: '/mode/combo', component: () => import('./views/ComboEditor.vue') },
     { path: '/params', component: () => import('./views/ParamMap.vue') },
     { path: '/recorder', component: () => import('./views/Recorder.vue') },
-    { path: '/setup', component: () => import('./views/SetupWizard.vue') },
     { path: '/settings', component: () => import('./views/Settings.vue') },
     { path: '/strength', component: () => import('./views/StrengthLimit.vue') },
     { path: '/overlimit-rules', component: () => import('./views/OverlimitRules.vue') },
