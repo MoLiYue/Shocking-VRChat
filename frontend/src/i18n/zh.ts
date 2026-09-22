@@ -474,4 +474,11 @@ export default {
     info3: '消息模板支持变量替换，实时显示设备状态',
     info4: 'Chatbox 消息在 VRChat 中对其他玩家可见',
   },
+  // Tour / coachmark
+  tour: {
+    skip: '跳过',
+    prev: '上一步',
+    next: '下一步',
+    finish: '完成',
+  },
 }

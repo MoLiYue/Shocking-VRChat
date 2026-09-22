@@ -474,4 +474,11 @@ export default {
     info3: 'Message template supports variable substitution to show live device status',
     info4: 'Chatbox messages are visible to other players in VRChat',
   },
+  // Tour / coachmark
+  tour: {
+    skip: 'Skip',
+    prev: 'Back',
+    next: 'Next',
+    finish: 'Done',
+  },
 }

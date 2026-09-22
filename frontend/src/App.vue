@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
 import { useI18n } from '@/i18n'
+import TourOverlay from '@/tour/TourOverlay.vue'
 
 const { t, locale, setLocale } = useI18n()
 const sidebarOpen = ref(true)
@@ -119,6 +120,9 @@ async function shutdownApp() {
         </keep-alive>
       </router-view>
     </main>
+
+    <!-- Guided tour coachmark overlay -->
+    <TourOverlay />
   </div>
 </template>
 
