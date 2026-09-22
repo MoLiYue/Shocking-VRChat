@@ -37,6 +37,13 @@ const navItems = computed<NavItem[]>(() => [
 
 const expandedGroups = ref<Set<string>>(new Set())
 
+// data-tour anchor contract: map top-level nav paths to stable tour anchors.
+const TOUR_ANCHORS: Record<string, string> = {
+  '/dashboard': 'nav-dashboard',
+  '/params': 'nav-params',
+  '/strength': 'nav-strength',
+}
+
 // Auto-expand modes group (use nav key as stable identifier)
 const MODES_GROUP_KEY = 'nav.modes'
 expandedGroups.value.add(MODES_GROUP_KEY)
@@ -96,6 +103,7 @@ async function shutdownApp() {
             :to="item.path!"
             class="nav-link"
             active-class="active"
+            :data-tour="item.path ? TOUR_ANCHORS[item.path] : undefined"
           >
             <span class="nav-ico">{{ item.icon }}</span>
             <span class="nav-txt">{{ item.label }}</span>

@@ -81,7 +81,7 @@ onMounted(load)
         <h2>{{ t('common.channelA') }}</h2>
         <div class="field">
           <label>{{ t('strength.strengthLabel') }}</label>
-          <div class="slider-row">
+          <div class="slider-row" data-tour="strength-slider">
             <input type="range" v-model.number="limitA" min="0" max="200" step="1" @input="onInput">
           </div>
           <div class="value-row">

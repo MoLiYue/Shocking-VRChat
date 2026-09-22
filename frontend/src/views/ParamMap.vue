@@ -201,17 +201,17 @@ onMounted(() => { loadChannel('a'); loadChannel('b') })
         </tbody>
       </table>
 
-      <div class="add-form">
+      <div class="add-form" data-tour="param-add">
         <span class="prefix-label">/avatar/parameters/</span>
         <input v-model="newPathA" placeholder="pcs/contact/enterPass" class="add-input" @keyup.enter="addParam('a')">
-        <select v-model="newModeA" class="add-select">
+        <select v-model="newModeA" class="add-select" data-tour="param-mode-select">
           <option v-for="m in MODES" :key="m.value" :value="m.value">{{ modeLabel(m.value) }}</option>
         </select>
         <button class="btn btn-green" @click="addParam('a')">+</button>
       </div>
 
       <div class="save-row">
-        <button class="btn btn-primary" :disabled="!dirtyA" @click="save('a')">💾 {{ t('common.save') }}</button>
+        <button class="btn btn-primary" data-tour="param-save" :disabled="!dirtyA" @click="save('a')">💾 {{ t('common.save') }}</button>
         <button class="btn btn-ghost" @click="loadChannel('a')">↺</button>
       </div>
     </section>

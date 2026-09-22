@@ -277,7 +277,7 @@ onUnmounted(() => {
   <div class="dashboard">
     <!-- Stats row -->
     <div class="stats-row">
-      <div class="stat-card" :class="connected ? 'stat-on' : ''">
+      <div class="stat-card" :class="connected ? 'stat-on' : ''" data-tour="dashboard-status">
         <span class="stat-dot" :class="connected ? 'on' : ''"></span>
         <div>
           <div class="stat-val">{{ connected ? t('dashboard.deviceCount', { count: deviceCount }) : t('dashboard.disconnected') }}</div>
@@ -356,7 +356,9 @@ onUnmounted(() => {
             <button class="qr-tab" :class="{ active: qrMode === 'v3' }" @click="qrMode = 'v3'">V3</button>
           </div>
           <div class="qr-badge" :class="qrMode">{{ qrMode === 'v4' ? t('dashboard.qrV4Badge') : t('dashboard.qrV3Badge') }}</div>
-          <QrCode :content="qrMode === 'v4' ? qrContentV4 : qrContent" :size="240" />
+          <div data-tour="qr-code">
+            <QrCode :content="qrMode === 'v4' ? qrContentV4 : qrContent" :size="240" />
+          </div>
           <div class="qr-text">{{ qrMode === 'v4' ? qrContentV4 : qrContent }}</div>
           <div class="qr-hint" v-if="qrMode === 'v4'">{{ t('dashboard.qrV4Hint') }}</div>
           <div class="qr-hint" v-else>{{ t('dashboard.qrV3Hint') }}</div>
