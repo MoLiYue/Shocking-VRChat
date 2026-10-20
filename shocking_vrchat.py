@@ -99,14 +99,24 @@ def _default_mode_config():
             'wave_scale': 1.0,
         },
         'touch': {
+            'freq_ms': 10,
             'wave_preset': None,
             'wave_scale': 1.0,
             'n_derivative': 1,
+            # Normalization range per derivative order:
+            # [0]=distance, [1]=velocity, [2]=acceleration, [3]=jerk
+            'derivative_params': [
+                {'bottom': 0.0, 'top': 1.0},
+                {'bottom': 0.0, 'top': 4.0},
+                {'bottom': 0.0, 'top': 40.0},
+                {'bottom': 0.0, 'top': 400.0},
+            ],
         },
         'combo': {
             'enabled': False,
-            'shock_threshold': 0.9,
-            'shock_hold_ms': 200,
+            # Touch shorter than switch_duration (seconds) fires a shock,
+            # longer switches to touch logic.
+            'switch_duration': 0.3,
         },
         'trigger_range': {
             'bottom': 0.0,
@@ -1681,7 +1691,8 @@ async def api_v1_mode_config_set(channel: str, mode: str, request: Request):
             if key in data:
                 mode_cfg[key] = data[key]
     elif mode == 'touch':
-        for key in ('wave_preset', 'wave_scale', 'n_derivative', 'texture_floor',
+        for key in ('freq_ms', 'wave_preset', 'wave_scale', 'n_derivative',
+                    'derivative_params', 'texture_floor',
                     'wave_window_ops', 'wave_sample_step', 'wave_advance_samples',
                     'wave_envelope_curve'):
             if key in data:
@@ -1723,13 +1734,13 @@ async def api_v1_combo_set(channel: str, request: Request):
     if 'shock' in data:
         for key in ('duration', 'wave_preset', 'wave_scale'):
             if key in data['shock']:
-                cfg['shock'][key] = data['shock'][key]
+                cfg.setdefault('shock', {})[key] = data['shock'][key]
     if 'touch' in data:
         for key in ('wave_preset', 'wave_scale', 'n_derivative'):
             if key in data['touch']:
-                cfg['touch'][key] = data['touch'][key]
+                cfg.setdefault('touch', {})[key] = data['touch'][key]
     if 'trigger_range' in data:
-        cfg['trigger_range'].update(data['trigger_range'])
+        cfg.setdefault('trigger_range', {}).update(data['trigger_range'])
     for handler in handlers:
         if hasattr(handler, 'refresh_settings'):
             handler.refresh_settings()
@@ -2767,7 +2778,7 @@ class Engine:
             asyncio.create_task(_ws_status_pusher(self._stop_event)),
         ]
         for handler in self.handlers:
-            handler.start_background_jobs()
+            self._tasks.extend(handler.start_background_jobs())
 
         # Start OSC server
         try:
@@ -2844,6 +2855,14 @@ class Engine:
 
         # Cancel tasks
         await self._cleanup_tasks()
+        # Let handlers release their own background loops and undo any
+        # residual device state (e.g. an active boost offset).
+        for handler in self.handlers:
+            if hasattr(handler, 'stop_background_jobs'):
+                try:
+                    await handler.stop_background_jobs()
+                except Exception:
+                    logger.exception('[engine] handler stop_background_jobs failed')
         self._running = False
         logger.info(f"[engine] Stopped.{' (WS preserved)' if keep_ws else ''}")
 

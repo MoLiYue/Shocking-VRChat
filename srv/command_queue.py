@@ -30,9 +30,14 @@ class Command:
 class CommandQueue:
     """Priority queue with per-source cooldown."""
 
-    def __init__(self):
-        self._queue: asyncio.PriorityQueue = asyncio.PriorityQueue()
+    # Bounded so an OSC flood cannot grow memory and latency without limit.
+    # At 100ms feeder ticks this is already far more backlog than is useful.
+    DEFAULT_MAXSIZE = 512
+
+    def __init__(self, maxsize: int = DEFAULT_MAXSIZE):
+        self._queue: asyncio.PriorityQueue = asyncio.PriorityQueue(maxsize=maxsize)
         self._source_last_time: dict[str, float] = {}
+        self._dropped = 0
         self._cooldowns: dict[CommandPriority, float] = {
             CommandPriority.API: 0,
             CommandPriority.OSC_PANEL: 0.1,
@@ -40,6 +45,10 @@ class CommandQueue:
             CommandPriority.GAME: 0.2,
         }
         self._enabled: dict[CommandPriority, bool] = {p: True for p in CommandPriority}
+
+    @property
+    def dropped(self) -> int:
+        return self._dropped
 
     def set_cooldown(self, priority: CommandPriority, seconds: float):
         self._cooldowns[priority] = seconds
@@ -69,7 +78,13 @@ class CommandQueue:
             value=value,
             source_id=source_id,
         )
-        await self._queue.put(cmd)
+        try:
+            self._queue.put_nowait(cmd)
+        except asyncio.QueueFull:
+            # Drop rather than block: awaiting here would stall the OSC
+            # dispatch path and let the backlog grow unbounded.
+            self._dropped += 1
+            return False
         return True
 
     async def get(self) -> Command:
@@ -83,6 +98,19 @@ class CommandQueue:
         return self._queue.empty()
 
     def clear(self):
-        """Discard all pending commands and recreate queue for new event loop."""
-        self._queue = asyncio.PriorityQueue()
+        """Discard all pending commands, in place.
+
+        Must not replace self._queue: a consumer already blocked on
+        `await self._queue.get()` would keep waiting on the orphaned queue
+        object forever and never see newly enqueued commands.
+        """
+        drained = 0
+        while True:
+            try:
+                self._queue.get_nowait()
+            except asyncio.QueueEmpty:
+                break
+            self._queue.task_done()
+            drained += 1
         self._source_last_time.clear()
+        return drained

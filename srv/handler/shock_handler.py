@@ -6,6 +6,7 @@ import time, asyncio, math, json
 from ..connector.coyotev3ws import DGConnection
 from ..wave_preset import WavePresetLibrary
 from ..command_queue import CommandQueue, CommandPriority
+from .. import DEFAULT_WAVE
 
 
 class ShockHandler(BaseHandler):
@@ -65,18 +66,78 @@ class ShockHandler(BaseHandler):
 
         # Boost mode state
         self.boost_active = False         # currently boosted
+
+        # Warning throttle state: key -> last emit timestamp
+        self._warn_last = {}
+        # Background tasks owned by this handler (cancelled on engine restart)
+        self._bg_tasks = []
     
     def start_background_jobs(self):
+        """Start this handler's background loops.
+
+        Returns the created tasks so the engine can cancel them on restart.
+        Previously these were fire-and-forget `ensure_future` calls that nobody
+        tracked, so every hot-reload leaked a full set of feeders that kept
+        broadcasting waves with stale config.
+        """
         logger.info(f'[handler] Channel {self.channel} background job started')
-        asyncio.ensure_future(self.clear_check())
-        if self.shock_mode == 'distance':
-            asyncio.ensure_future(self.distance_background_wave_feeder())
-        elif self.shock_mode == 'shock':
-            asyncio.ensure_future(self.shock_background_wave_feeder())
-        elif self.shock_mode == 'touch':
-            asyncio.ensure_future(self.touch_background_wave_feeder())
-        elif self.shock_mode == 'combo':
-            asyncio.ensure_future(self.combo_background_wave_feeder())
+        feeders = {
+            'distance': self.distance_background_wave_feeder,
+            'shock': self.shock_background_wave_feeder,
+            'touch': self.touch_background_wave_feeder,
+            'combo': self.combo_background_wave_feeder,
+        }
+        jobs = [('clear_check', self.clear_check)]
+        if self.shock_mode in feeders:
+            jobs.append((f'{self.shock_mode}_feeder', feeders[self.shock_mode]))
+
+        self._bg_tasks = [
+            asyncio.ensure_future(self._supervise(factory, name))
+            for name, factory in jobs
+        ]
+        return list(self._bg_tasks)
+
+    async def _supervise(self, coro_factory, name):
+        """Run a background loop forever, surviving unexpected exceptions.
+
+        A single bad config value (e.g. a missing key or an out-of-range
+        trigger_range) used to propagate out of the loop and kill the task
+        permanently, silently disabling the channel with no output and no
+        recovery until restart.
+        """
+        backoff = 0.5
+        while True:
+            try:
+                await coro_factory()
+                return  # loop exited on purpose
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logger.exception(
+                    f'[handler] Channel {self.channel} {name} crashed, '
+                    f'restarting in {backoff:.1f}s'
+                )
+                await asyncio.sleep(backoff)
+                backoff = min(5.0, backoff * 2)
+
+    async def stop_background_jobs(self):
+        """Cancel this handler's background loops and wait for them to finish."""
+        tasks = [t for t in self._bg_tasks if not t.done()]
+        for task in tasks:
+            task.cancel()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+        self._bg_tasks = []
+        # Leave no residual strength behind when this handler goes away.
+        if self.boost_active:
+            self.boost_active = False
+            try:
+                await self.DG_CONN.broadcast_strength_adjust(
+                    self.channel, mode='0', value=self._get_boost_value()
+                )
+                logger.info(f'[handler] Channel {self.channel} boost reverted on shutdown')
+            except Exception:
+                logger.exception(f'[handler] Channel {self.channel} failed to revert boost on shutdown')
 
     def refresh_settings(self):
         self.shock_settings = self.SETTINGS['dglab3'][f'channel_{self.channel.lower()}']
@@ -178,29 +239,9 @@ class ShockHandler(BaseHandler):
                 await self.DG_CONN.broadcast_clear_wave(self.channel)
                 logger.debug(f"[handler] Channel {self.channel} cleared after timeout")
     
-    async def feed_wave(self):
-        raise NotImplemented
-        logger.debug(f'[handler] Channel {self.channel} wave feeder started')
-        sleep_time = 1
-        while 1:
-            await asyncio.sleep(sleep_time)
-            await self.DG_CONN.broadcast_wave(channel=self.channel, wavestr=self.shock_settings['shock_wave'])
-
     async def set_clear_after(self, val):
         self.is_cleared = False
         self.to_clear_time = time.time() + val
-
-    @staticmethod
-    def generate_wave_100ms(freq, from_, to_):
-        assert 0 <= from_ <= 1, "Invalid wave generate."
-        assert 0 <= to_   <= 1, "Invalid wave generate."
-        from_ = int(100*from_)
-        to_   = int(100*to_)
-        ret = ["{:02X}".format(freq)]*4
-        delta = (to_ - from_) // 4
-        ret += ["{:02X}".format(min(max(from_ + delta*i, 0),100)) for i in range(1,5,1)]
-        ret = ''.join(ret)
-        return json.dumps([ret],separators=(',', ':'))
 
     @staticmethod
     def generate_wave_100ms_improved(freq, from_, to_, *, steps=4, curve="smoothstep"):
@@ -262,49 +303,158 @@ class ShockHandler(BaseHandler):
         return json.dumps([ret], separators=(",", ":"))
     
     def normalize_distance(self, distance):
-        out_distance = 0
-        trigger_bottom = self.mode_config['trigger_range']['bottom']
-        trigger_top = self.mode_config['trigger_range']['top']
-        if distance > self.mode_config['trigger_range']['bottom']:
-            out_distance = (
-                    distance - trigger_bottom
-                ) / (
-                    trigger_top - trigger_bottom
-                )
-            out_distance = 1 if out_distance > 1 else out_distance
-        return out_distance
+        trigger_range = self.mode_config.get('trigger_range', {})
+        try:
+            trigger_bottom = float(trigger_range.get('bottom', 0.0))
+            trigger_top = float(trigger_range.get('top', 1.0))
+        except (TypeError, ValueError):
+            logger.warning(f'[handler] Channel {self.channel} invalid trigger_range: {trigger_range}')
+            return 0.0
+        if trigger_top <= trigger_bottom:
+            # Invalid range would divide by zero or invert the curve.
+            self._warn_throttled(
+                'trigger_range',
+                f'[handler] Channel {self.channel} invalid trigger_range: '
+                f'bottom={trigger_bottom}, top={trigger_top}; output forced to 0',
+            )
+            return 0.0
+        if distance <= trigger_bottom:
+            return 0.0
+        out_distance = (distance - trigger_bottom) / (trigger_top - trigger_bottom)
+        return min(1.0, max(0.0, out_distance))
 
     def apply_strength_curve(self, value, param_path=None):
-        """Apply custom param-to-strength curve mapping."""
+        """Apply custom param-to-strength curve mapping.
+
+        The result is always clamped to [0, 1]: curve points come from
+        curve_config.yaml which users can edit by hand, bypassing API validation.
+        An out-of-range value here would be fed straight into wave generation.
+        """
         getter = ShockHandler._curve_getter
+        # Sanitize the input first: NaN must fail safe to 0, not fall through
+        # the interpolation and come out as the curve's last y (max strength).
+        value = self._clamp_unit(value)
         if not getter:
             return value
-        points = getter(param_path or self.channel)
+        try:
+            points = getter(param_path or self.channel)
+        except Exception:
+            logger.exception(f'[handler] Channel {self.channel} curve getter failed')
+            return self._clamp_unit(value)
         if not points:
-            return value
+            return self._clamp_unit(value)
+        return self._clamp_unit(self._interpolate_curve(value, points))
+
+    @staticmethod
+    def _clamp_unit(value):
+        try:
+            value = float(value)
+        except (TypeError, ValueError):
+            return 0.0
+        if value != value:  # NaN
+            return 0.0
+        return min(1.0, max(0.0, value))
+
+    @staticmethod
+    def _interpolate_curve(value, points):
         # Linear interpolation through control points
         if value <= 0:
             return 0.0
         if value >= 1.0:
-            return min(1.0, points[-1].get('y', 1.0) if points else 1.0)
+            return points[-1].get('y', 1.0)
         for i in range(len(points) - 1):
             px, py = points[i].get('x', 0), points[i].get('y', 0)
             nx, ny = points[i + 1].get('x', 0), points[i + 1].get('y', 0)
-            if value >= px and value <= nx:
+            if px <= value <= nx:
                 dx = nx - px
                 if dx <= 0:
                     return py
                 t = (value - px) / dx
                 return py + t * (ny - py)
-        return points[-1].get('y', value) if points else value
+        return points[-1].get('y', value)
 
-    @staticmethod
-    def normalize_between(value, bottom, top):
+    def _warn_throttled(self, key, message, interval=5.0):
+        """Log a warning at most once per `interval` seconds per key.
+
+        Feeder loops tick every 100ms; an unthrottled warning floods the log.
+        """
+        now = time.time()
+        if now - self._warn_last.get(key, 0) < interval:
+            return
+        self._warn_last[key] = now
+        logger.warning(message)
+
+    def normalize_between(self, value, bottom, top):
         if top <= bottom:
-            logger.warning(f'[handler] Invalid normalize range: bottom={bottom}, top={top}')
-            return 0
+            self._warn_throttled(
+                f'normalize_between_{bottom}_{top}',
+                f'[handler] Channel {self.channel} invalid normalize range: '
+                f'bottom={bottom}, top={top}; output forced to 0',
+            )
+            return 0.0
         clamped = min(max(value, bottom), top)
         return (clamped - bottom) / (top - bottom)
+
+    # Fallback matching DEFAULT touch.derivative_params ordering:
+    # [0]=distance, [1]=velocity, [2]=acceleration, [3]=jerk
+    _DEFAULT_DERIVATIVE_PARAMS = [
+        {'bottom': 0.0, 'top': 1.0},
+        {'bottom': 0.0, 'top': 4.0},
+        {'bottom': 0.0, 'top': 40.0},
+        {'bottom': 0.0, 'top': 400.0},
+    ]
+
+    def get_derivative_params(self, n_derivative):
+        """Resolve touch derivative normalization range, tolerating missing config.
+
+        Older config files (and the pre-fix defaults) have no
+        touch.derivative_params at all, which used to kill the feeder task.
+        """
+        params = self.get_mode_conf('touch').get('derivative_params')
+        if not isinstance(params, list) or not params:
+            self._warn_throttled(
+                'derivative_params_missing',
+                f'[handler] Channel {self.channel} touch.derivative_params missing, using defaults',
+            )
+            params = self._DEFAULT_DERIVATIVE_PARAMS
+        index = min(max(n_derivative, 0), len(params) - 1)
+        entry = params[index]
+        if not isinstance(entry, dict):
+            return self._DEFAULT_DERIVATIVE_PARAMS[
+                min(max(n_derivative, 0), len(self._DEFAULT_DERIVATIVE_PARAMS) - 1)
+            ]
+        return entry
+
+    def get_touch_n_derivative(self):
+        """Resolve touch.n_derivative, clamped to the 4 available orders."""
+        try:
+            n_derivative = int(self.get_mode_conf('touch').get('n_derivative', 1))
+        except (TypeError, ValueError):
+            n_derivative = 1
+        if not 0 <= n_derivative <= 3:
+            self._warn_throttled(
+                'n_derivative_invalid',
+                f'[handler] Channel {self.channel} invalid n_derivative {n_derivative}, fallback to 1',
+            )
+            n_derivative = 1
+        return n_derivative
+
+    def get_freq_ms(self, mode_name):
+        """Resolve a mode's wave frequency byte, tolerating missing config.
+
+        touch.freq_ms was absent from defaults; reading it raised KeyError and
+        killed the feeder whenever no wave preset was selected.
+        """
+        raw = self.get_mode_conf(mode_name).get('freq_ms', 10)
+        try:
+            freq = int(raw)
+        except (TypeError, ValueError):
+            self._warn_throttled(
+                f'freq_ms_{mode_name}',
+                f'[handler] Channel {self.channel} invalid {mode_name}.freq_ms={raw!r}, using 10',
+            )
+            freq = 10
+        return min(255, max(0, freq))
 
     def get_mode_conf(self, mode_name):
         return self.mode_config.get(mode_name, {})
@@ -375,14 +525,15 @@ class ShockHandler(BaseHandler):
         self.active_mode_presets.pop(mode_name, None)
         self.active_dynamic_preset = None
         if mode_name == 'shock':
+            fallback_wave = self.get_mode_conf('shock').get('wave') or DEFAULT_WAVE
             return self.scale_wavestr(
-                self.get_mode_conf('shock')['wave'],
-                to_strength * wave_scale,
+                fallback_wave,
+                self._clamp_unit(to_strength * wave_scale),
             )
         return self.generate_wave_100ms_improved(
-            mode_conf['freq_ms'],
-            from_strength,
-            to_strength,
+            self.get_freq_ms(mode_name),
+            self._clamp_unit(from_strength),
+            self._clamp_unit(to_strength),
         )
 
     def resolve_touch_profile(self, current_strength):
@@ -499,7 +650,7 @@ class ShockHandler(BaseHandler):
     
     async def handler_shock(self, distance, context=None):
         current_time = time.time()
-        if distance > self.mode_config['trigger_range']['bottom']:
+        if distance > self.mode_config.get('trigger_range', {}).get('bottom', 0.0):
             shock_duration = self.get_shock_duration()
             await self.set_clear_after(shock_duration)
             self.shock_started_at = current_time
@@ -569,17 +720,14 @@ class ShockHandler(BaseHandler):
                 await asyncio.sleep(tick_time_window)
                 continue
             next_tick_time = current_time + self.bg_wave_update_time_window
-            n_derivative = self.mode_config['touch']['n_derivative']
+            n_derivative = self.get_touch_n_derivative()
             derivative_values = self.compute_derivative()
-            if n_derivative < 0 or n_derivative >= len(derivative_values):
-                logger.warning(f'[handler] Channel {self.channel} invalid n_derivative {n_derivative}, fallback to 1')
-                n_derivative = 1
             current_strength = derivative_values[n_derivative]
-            derivative_params = self.mode_config['touch']['derivative_params'][n_derivative]
+            derivative_params = self.get_derivative_params(n_derivative)
             current_strength = self.normalize_between(
                 abs(current_strength),
-                derivative_params['bottom'],
-                derivative_params['top'],
+                derivative_params.get('bottom', 0.0),
+                derivative_params.get('top', 1.0),
             )
 
             self.bg_wave_current_strength = current_strength
@@ -615,8 +763,17 @@ class ShockHandler(BaseHandler):
     async def handler_combo(self, distance, context=None):
         """Combo mode: dispatch to shock (short) or touch (sustained)."""
         combo_conf = self.get_combo_conf()
-        threshold = float(combo_conf.get('switch_duration', 0.3))
-        trigger_bottom = self.mode_config['trigger_range']['bottom']
+        try:
+            threshold = float(combo_conf.get('switch_duration', 0.3))
+        except (TypeError, ValueError):
+            self._warn_throttled(
+                'combo_switch_duration',
+                f'[handler] Channel {self.channel} invalid combo.switch_duration='
+                f'{combo_conf.get("switch_duration")!r}, using 0.3',
+            )
+            threshold = 0.3
+        threshold = min(10.0, max(0.0, threshold))
+        trigger_bottom = self.mode_config.get('trigger_range', {}).get('bottom', 0.0)
         current_time = time.time()
 
         if distance > trigger_bottom:
@@ -674,16 +831,14 @@ class ShockHandler(BaseHandler):
 
             if self.combo_in_touch_mode:
                 # Touch wave output
-                n_derivative = self.mode_config['touch']['n_derivative']
+                n_derivative = self.get_touch_n_derivative()
                 derivative_values = self.compute_derivative()
-                if n_derivative < 0 or n_derivative >= len(derivative_values):
-                    n_derivative = 1
                 current_strength = derivative_values[n_derivative]
-                derivative_params = self.mode_config['touch']['derivative_params'][n_derivative]
+                derivative_params = self.get_derivative_params(n_derivative)
                 current_strength = self.normalize_between(
                     abs(current_strength),
-                    derivative_params['bottom'],
-                    derivative_params['top'],
+                    derivative_params.get('bottom', 0.0),
+                    derivative_params.get('top', 1.0),
                 )
                 self.bg_wave_current_strength = current_strength
                 if current_strength == last_touch_strength == 0:
@@ -712,11 +867,34 @@ class ShockHandler(BaseHandler):
                 self.shock_last_strength = current_strength
                 await self.DG_CONN.broadcast_wave(self.channel, wavestr=wave)
 
+    def _get_boost_value(self):
+        """Resolve boost step, clamped to a sane range."""
+        raw = self.get_mode_conf('boost').get('value', 30)
+        try:
+            value = int(raw)
+        except (TypeError, ValueError):
+            self._warn_throttled(
+                'boost_value',
+                f'[handler] Channel {self.channel} invalid boost.value={raw!r}, using 30',
+            )
+            value = 30
+        return min(200, max(0, value))
+
     async def handler_boost(self, distance, context=None):
         """Boost mode: param > threshold → strength +N, param back to 0 → strength -N."""
-        trigger_bottom = self.mode_config['trigger_range']['bottom']
-        boost_conf = self.get_mode_conf('boost')
-        boost_value = int(boost_conf.get('value', 30))
+        trigger_bottom = self.mode_config.get('trigger_range', {}).get('bottom', 0.0)
+        boost_value = self._get_boost_value()
+
+        if distance > trigger_bottom:
+            if not self.boost_active:
+                self.boost_active = True
+                await self.DG_CONN.broadcast_strength_adjust(self.channel, mode='1', value=boost_value)
+                self.log_trigger(context, value=distance, extra=f"boost +{boost_value}")
+        else:
+            if self.boost_active:
+                self.boost_active = False
+                await self.DG_CONN.broadcast_strength_adjust(self.channel, mode='0', value=boost_value)
+                self.log_trigger(context, value=distance, extra=f"boost -{boost_value} (reverted)")
 
         if distance > trigger_bottom:
             if not self.boost_active:
