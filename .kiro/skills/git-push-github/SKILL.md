@@ -11,6 +11,22 @@ description: 提交代码到 GitHub。当用户说"提交"、"push"、"commit"�
 
 触发词："提交"、"push"、"commit"、"推上去"、"同步到git"、"git push"
 
+## Git 身份
+
+本仓库必须使用以下身份提交：
+
+```
+user.name  = MoLiYue
+user.email = moliyue018@gmail.com
+```
+
+每次 commit 前检查 `git config user.name` 和 `git config user.email`，如果不对则先修正：
+
+```bash
+git config user.name "MoLiYue"
+git config user.email "moliyue018@gmail.com"
+```
+
 ## 推送流程
 
 ```bash
@@ -102,7 +118,8 @@ git push origin v0.x.x
 
 ## 推送前检查
 
-1. Python 编译通过：`python3 -c "import py_compile; py_compile.compile('shocking_vrchat.py', doraise=True)"`
-2. 前端构建通过：`cd frontend && node node_modules/.bin/vue-tsc --noEmit && node node_modules/.bin/vite build`
-3. 如果只改了后端，只需检查 Python 编译
-4. 如果只改了前端，只需检查前端构建
+1. Git 身份正确（见上方 Git 身份章节）
+2. Python 编译通过：`python3 -c "import py_compile; py_compile.compile('shocking_vrchat.py', doraise=True)"`
+3. 前端构建通过：`cd frontend && node node_modules/.bin/vue-tsc --noEmit && node node_modules/.bin/vite build`
+4. 如果只改了后端，只需检查 Python 编译
+5. 如果只改了前端，只需检查前端构建
