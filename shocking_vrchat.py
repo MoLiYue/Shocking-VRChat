@@ -17,6 +17,7 @@ from srv.connector.coyotev3ws import DGWSMessage, DGConnection
 from srv.connector.coyotev4ws import DGV4Connection, DGV4RelayServer
 from srv.handler.shock_handler import ShockHandler
 from srv.command_queue import CommandQueue, CommandPriority
+from srv.sps_depth import is_ogb_address, parse_ogb_address
 
 from pythonosc.osc_server import AsyncIOOSCUDPServer
 from pythonosc.dispatcher import Dispatcher
@@ -162,6 +163,17 @@ SETTINGS = {
         'send_notification': True,  # True = send immediately, False = use keyboard overlay
         'trigger_sfx': False,
         'message_template': 'Shocking VRChat ⚡ A:{strength_a} B:{strength_b}',
+    },
+    'sps': {
+        # SPS2/OGB 深度聚合。关闭后 OGB/* 参数按普通单值处理。
+        'enabled': True,
+        # 周期性向 VRChat 发送 /avatar/parameters/OGB_ENABLED=true，
+        # 告知 avatar 有 OGB 兼容工具在监听。
+        'ogb_enabled_heartbeat': True,
+        'ogb_enabled_interval': 5.0,
+        # VRChat 的 OSC 接收端口（发送方向），与 osc.listen_port 不同
+        'ogb_target_host': '127.0.0.1',
+        'ogb_target_port': 9000,
     },
 }
 DEFAULT_SETTINGS_BASIC = copy.deepcopy(SETTINGS_BASIC)
@@ -1070,6 +1082,71 @@ async def api_v1_logs():
     return {'logs': _log_buffer[-200:]}
 
 # --- Chatbox ---
+@app.get("/api/v1/sps")
+async def api_v1_sps_get():
+    cfg = dict(DEFAULT_SETTINGS.get('sps', {}))
+    cfg.update(SETTINGS.get('sps', {}))
+    # 附带当前已配置的 OGB 参数路径，便于前端提示
+    ogb_params = {}
+    for ch in ('a', 'b'):
+        paths = []
+        for entry in SETTINGS['dglab3'][f'channel_{ch}'].get('avatar_params', []):
+            path = entry.get('path', '')
+            if path.startswith('/avatar/parameters/OGB/'):
+                paths.append({'path': path, 'mode': entry.get('mode'),
+                              'enabled': entry.get('enabled', True)})
+        ogb_params[ch] = paths
+    return {'sps': cfg, 'ogb_params': ogb_params}
+
+
+@app.post("/api/v1/sps")
+async def api_v1_sps_set(request: Request):
+    data = await request.json()
+    sps = SETTINGS.setdefault('sps', {})
+    if 'enabled' in data:
+        sps['enabled'] = bool(data['enabled'])
+    if 'ogb_enabled_heartbeat' in data:
+        sps['ogb_enabled_heartbeat'] = bool(data['ogb_enabled_heartbeat'])
+    if 'ogb_enabled_interval' in data:
+        try:
+            interval = float(data['ogb_enabled_interval'])
+        except (TypeError, ValueError):
+            raise HTTPException(400, 'ogb_enabled_interval must be a number')
+        sps['ogb_enabled_interval'] = min(60.0, max(1.0, interval))
+    if 'ogb_target_host' in data:
+        sps['ogb_target_host'] = str(data['ogb_target_host']).strip() or '127.0.0.1'
+    if 'ogb_target_port' in data:
+        try:
+            port = int(data['ogb_target_port'])
+        except (TypeError, ValueError):
+            raise HTTPException(400, 'ogb_target_port must be an integer')
+        if not 1 <= port <= 65535:
+            raise HTTPException(400, 'ogb_target_port out of range')
+        sps['ogb_target_port'] = port
+    config_save()
+    # 心跳循环每轮都重读 SETTINGS，无需重启引擎
+    return {'success': True, 'sps': sps}
+
+
+@app.get("/api/v1/sps/zones")
+async def api_v1_sps_zones():
+    """列出最近收到过的 OGB 部位，供前端快捷添加参数。"""
+    zones = []
+    for (trigger_type, zone_id), seen_at in sorted(
+            _ogb_seen_zones.items(), key=lambda kv: -kv[1]):
+        zones.append({
+            'trigger_type': trigger_type,
+            'zone_id': zone_id,
+            'kind': 'Orf' if trigger_type == 'sps_socket' else 'Pen',
+            'suggested_path': (
+                f"/avatar/parameters/OGB/"
+                f"{'Orf' if trigger_type == 'sps_socket' else 'Pen'}/{zone_id}/*"
+            ),
+            'last_seen': seen_at,
+        })
+    return {'zones': zones}
+
+
 @app.get("/api/v1/chatbox")
 async def api_v1_chatbox_get():
     return SETTINGS.get('chatbox', {
@@ -1919,9 +1996,29 @@ _playback_state = {
 def _ensure_recordings_dir():
     os.makedirs(RECORDINGS_DIR, exist_ok=True)
 
+#: 最近见到的 OGB 部位 (trigger_type, zone_id) -> 时间戳。
+#: 在全局钩子里采集，所以**尚未配置**的 OGB 参数也能被发现，
+#: 这样前端才能告诉用户该填哪个路径。
+_ogb_seen_zones = {}
+_OGB_SEEN_MAX = 64
+
+
+def _track_ogb_zone(address):
+    parsed = parse_ogb_address(address)
+    if parsed is None:
+        return
+    trigger_type, zone_id, _signal = parsed
+    _ogb_seen_zones[(trigger_type, zone_id)] = time.time()
+    if len(_ogb_seen_zones) > _OGB_SEEN_MAX:
+        for key in sorted(_ogb_seen_zones, key=_ogb_seen_zones.get)[:-_OGB_SEEN_MAX]:
+            _ogb_seen_zones.pop(key, None)
+
+
 def _osc_record_hook(address, *args):
     """Global OSC handler for recording ALL params."""
     _overlimit_osc_hook(address, *args)
+    if is_ogb_address(address):
+        _track_ogb_zone(address)
     if _recording_state['active']:
         elapsed_ms = (time.perf_counter() - _recording_state['start_time']) * 1000.0
         _recording_state['messages'].append({
@@ -2430,8 +2527,13 @@ async def api_v1_wave_preset(channel: str, preset_name: str, duration: int):
 
 
 # --- SPA catch-all routes ---
-_SPA_PATHS = ["/dashboard", "/curve", "/combo", "/params", "/recorder",
-              "/settings", "/strength", "/overlimit-rules", "/wave-test"]
+# 显式列表只用于保留旧的重定向别名（/curve、/combo 等已被前端 redirect 接管）。
+# 真正的兜底靠下面的 catch-all：此前这里是一份手写白名单，每加一个前端路由
+# 都要同步，结果 /chatbox、/logs、/mode/* 全都漏了，用户在这些页面刷新会 404。
+_SPA_PATHS = ["/dashboard", "/curve", "/combo", "/params", "/sps", "/recorder",
+              "/settings", "/strength", "/overlimit-rules", "/wave-test",
+              "/logs", "/chatbox",
+              "/mode/shock", "/mode/distance", "/mode/touch", "/mode/combo"]
 
 for _spa_path in _SPA_PATHS:
     async def _spa_handler(_p=_spa_path):
@@ -2443,6 +2545,24 @@ if os.path.exists(STATIC_DIR):
     assets_dir = os.path.join(STATIC_DIR, 'assets')
     if os.path.exists(assets_dir):
         app.mount("/assets", StaticFiles(directory=assets_dir), name="static_assets")
+
+#: 不交给 SPA 的前缀。API 与 WS 必须保留原本的 404/协议行为，
+#: 否则前端拿到一份 HTML 当 JSON 解析会得到莫名其妙的报错。
+_NON_SPA_PREFIXES = ('api/', 'ws/', 'assets/', 'static/')
+
+
+@app.get("/{full_path:path}", include_in_schema=False)
+async def _spa_fallback(full_path: str):
+    """兜底：未匹配的 GET 一律交给 SPA，使前端路由支持直接访问与刷新。
+
+    注册在所有具体路由之后，FastAPI 按注册顺序匹配，因此不会抢占它们。
+    """
+    if full_path.startswith(_NON_SPA_PREFIXES):
+        raise HTTPException(404, 'Not Found')
+    # 带扩展名的请求是找静态文件，没命中就该是 404，不要回 HTML
+    if '.' in full_path.rsplit('/', 1)[-1]:
+        raise HTTPException(404, 'Not Found')
+    return _serve_spa()
 
 # --- Shared state ---
 command_queue = CommandQueue()
@@ -2531,6 +2651,10 @@ async def ws_dglab_v4(ws: WebSocket, tid: str = None, targetId: str = None):
 _osc_activity = collections.deque(maxlen=50)
 
 def _record_osc_activity(address, value, channel, mode):
+    # default_handler 只在「无匹配」时触发，已配置的 OGB 参数走不到那里，
+    # 所以这条已匹配路径也要采集部位。
+    if is_ogb_address(address):
+        _track_ogb_zone(address)
     event = {
         'time': time.time(),
         'address': address,
@@ -2705,6 +2829,56 @@ def _stop_chatbox_sender():
     _chatbox_task = None
 
 # --- Engine ---
+async def _ogb_enabled_heartbeat(stop_event: asyncio.Event):
+    """周期性向 VRChat 发送 /avatar/parameters/OGB_ENABLED=true。
+
+    告知 avatar 有 OGB 兼容工具在监听，avatar 据此决定是否输出 SPS 深度参数。
+
+    与设备连接、Chatbox 相互独立。退出时**不发 false**：可能还有其他 OGB
+    兼容程序在运行，发 false 会把它们一起关掉。
+
+    注意这是发送方向，目标是 VRChat 的 OSC **接收**端口（默认 9000），
+    与本程序监听的 osc.listen_port（默认 9001）不是一回事。
+    """
+    from pythonosc.udp_client import SimpleUDPClient
+    logger.info('[sps] OGB_ENABLED heartbeat started')
+    client = None
+    last_target = None
+    while not stop_event.is_set():
+        cfg = SETTINGS.get('sps', {})
+        try:
+            interval = float(cfg.get('ogb_enabled_interval', 5.0))
+        except (TypeError, ValueError):
+            interval = 5.0
+        interval = min(60.0, max(1.0, interval))
+
+        if cfg.get('enabled', True) and cfg.get('ogb_enabled_heartbeat', True):
+            host = cfg.get('ogb_target_host', '127.0.0.1')
+            try:
+                port = int(cfg.get('ogb_target_port', 9000))
+            except (TypeError, ValueError):
+                port = 9000
+            if 1 <= port <= 65535:
+                try:
+                    if client is None or last_target != (host, port):
+                        client = SimpleUDPClient(host, port)
+                        last_target = (host, port)
+                        logger.info(f'[sps] OGB_ENABLED -> {host}:{port} every {interval:.0f}s')
+                    client.send_message('/avatar/parameters/OGB_ENABLED', True)
+                except Exception as exc:
+                    logger.warning(f'[sps] OGB_ENABLED send failed, will retry: {exc!r}')
+                    client = None
+                    last_target = None
+            else:
+                logger.warning(f'[sps] invalid ogb_target_port={port}, heartbeat skipped')
+
+        try:
+            await asyncio.wait_for(stop_event.wait(), timeout=interval)
+        except asyncio.TimeoutError:
+            continue
+    logger.info('[sps] OGB_ENABLED heartbeat stopped')
+
+
 class Engine:
     """Data processing engine: OSC listener, WebSocket server, command queue, handlers.
     
@@ -2776,6 +2950,7 @@ class Engine:
             asyncio.create_task(_strength_boost_checker(self._stop_event)),
             asyncio.create_task(_wave_test_loop(self._stop_event)),
             asyncio.create_task(_ws_status_pusher(self._stop_event)),
+            asyncio.create_task(_ogb_enabled_heartbeat(self._stop_event)),
         ]
         for handler in self.handlers:
             self._tasks.extend(handler.start_background_jobs())

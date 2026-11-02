@@ -7,6 +7,9 @@ from ..connector.coyotev3ws import DGConnection
 from ..wave_preset import WavePresetLibrary
 from ..command_queue import CommandQueue, CommandPriority
 from .. import DEFAULT_WAVE
+from ..sps_depth import (
+    SPSDepthCalculator, is_ogb_address, parse_ogb_address,
+)
 
 
 class ShockHandler(BaseHandler):
@@ -71,6 +74,8 @@ class ShockHandler(BaseHandler):
         self._warn_last = {}
         # Background tasks owned by this handler (cancelled on engine restart)
         self._bg_tasks = []
+        # SPS/OGB depth aggregation: (trigger_type, zone_id) -> SPSDepthCalculator
+        self.sps_calculators = {}
     
     def start_background_jobs(self):
         """Start this handler's background loops.
@@ -145,6 +150,13 @@ class ShockHandler(BaseHandler):
 
     def osc_handler(self, address, *args):
         val = self.param_sanitizer(args)
+        sps_signal = None
+        if self.sps_enabled:
+            # OGB/SPS2 的深度由多个参数共同决定（Root/Tip 一对），
+            # 不能把单路原始值直接当强度用，需先聚合成深度。
+            aggregated = self._aggregate_sps(address, val)
+            if aggregated is not None:
+                val, sps_signal = aggregated
         context = {
             'address': address,
             'raw_args': list(args),
@@ -152,6 +164,8 @@ class ShockHandler(BaseHandler):
             'mode': self.shock_mode,
             'channel': self.channel,
         }
+        if sps_signal is not None:
+            context['sps'] = sps_signal
         if ShockHandler.osc_activity_observer:
             try:
                 ShockHandler.osc_activity_observer(address, val, self.channel, self.shock_mode)
@@ -162,6 +176,49 @@ class ShockHandler(BaseHandler):
         else:
             asyncio.ensure_future(self._handler(val, context=context))
         return None
+
+    @property
+    def sps_enabled(self):
+        return bool(self.SETTINGS.get('sps', {}).get('enabled', True))
+
+    def _aggregate_sps(self, address, value):
+        """把一路 OGB signal 聚合成该部位的插入深度。
+
+        返回 ``(depth, 'trigger_type/zone/signal')``；非 OGB 地址返回 ``None``
+        以便走原有的单值逻辑。
+        """
+        if not is_ogb_address(address):
+            return None
+        parsed = parse_ogb_address(address)
+        if parsed is None:
+            self._warn_throttled(
+                f'sps_bad_addr_{address}',
+                f'[handler] Channel {self.channel} unrecognized OGB address: {address}',
+            )
+            return None
+        trigger_type, zone_id, signal = parsed
+        key = (trigger_type, zone_id)
+        calculator = self.sps_calculators.get(key)
+        if calculator is None:
+            calculator = SPSDepthCalculator(trigger_type)
+            self.sps_calculators[key] = calculator
+            logger.info(
+                f'[handler] Channel {self.channel} tracking SPS zone '
+                f'{trigger_type}/{zone_id}'
+            )
+        try:
+            depth = calculator.update(signal, value)
+        except Exception:
+            logger.exception(
+                f'[handler] Channel {self.channel} SPS depth update failed '
+                f'for {address}'
+            )
+            return None
+        return depth, f'{trigger_type}/{zone_id}/{signal}'
+
+    def reset_sps_state(self):
+        for calculator in self.sps_calculators.values():
+            calculator.reset()
 
     async def _enqueue_osc(self, val, context):
         accepted = await self._command_queue.put(
@@ -236,6 +293,8 @@ class ShockHandler(BaseHandler):
                 self.combo_touch_start = 0
                 self.combo_in_touch_mode = False
                 self.combo_shock_fired = False
+                # 否则脱离后深度会残留，下次接触时从旧值起跳
+                self.reset_sps_state()
                 await self.DG_CONN.broadcast_clear_wave(self.channel)
                 logger.debug(f"[handler] Channel {self.channel} cleared after timeout")
     

@@ -19,6 +19,7 @@ interface NavItem {
 const navItems = computed<NavItem[]>(() => [
   { path: '/dashboard', label: t('nav.dashboard'), icon: '⚡' },
   { path: '/params', label: t('nav.params'), icon: '🎛' },
+  { path: '/sps', label: t('nav.sps'), icon: '🔌' },
   { path: '/strength', label: t('nav.strength'), icon: '🔋' },
   { path: '/overlimit-rules', label: t('nav.overlimit'), icon: '⚡' },
   {
